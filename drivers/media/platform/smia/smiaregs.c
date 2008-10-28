@@ -25,6 +25,7 @@
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/i2c.h>
+#include <linux/module.h>
 #include <linux/sort.h>
 #include <linux/v4l2-subdev.h>
 #include <media/smiaregs.h>
