@@ -322,6 +322,14 @@ config VIDEO_KS0127
 	  To compile this driver as a module, choose M here: the
 	  module will be called ks0127.
 
+config VIDEO_ET8EK8
+	tristate "ET8EK8 camera sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	select VIDEO_SMIAREGS
+	---help---
+	  This is a driver for the Toshiba ET8EK8 5 MP camera sensor.
+	  It is used for example in Nokia RX51.
+
 config VIDEO_SAA7110
 	tristate "Philips SAA7110 video decoder"
 	depends on VIDEO_V4L2 && I2C
