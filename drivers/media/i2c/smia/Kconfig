@@ -7,3 +7,11 @@ config VIDEO_SMIAREGS
 
 	  Also a few helper functions are provided to work with binary
 	  register lists.
+
+config VIDEO_ET8EK8
+	tristate "ET8EK8 camera sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	select VIDEO_SMIAREGS
+	---help---
+	  This is a driver for the Toshiba ET8EK8 5 MP camera sensor.
+	  It is used for example in Nokia RX51.
