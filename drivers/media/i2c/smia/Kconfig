@@ -1,0 +1,8 @@
+config VIDEO_SMIAREGS
+	tristate "Generic SMIA I2C register access and register list helper"
+	---help---
+	  This allows writing and reading SMIA image sensors' I2C registers
+	  easily.
+
+	  Also a few helper functions are provided to work with binary
+	  register lists.
