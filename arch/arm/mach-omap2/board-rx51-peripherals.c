@@ -611,6 +611,15 @@ static struct regulator_init_data rx51_vaux3_mmc = {
 	.consumer_supplies	= rx51_vaux3_supply,
 };
 
+static struct regulator_consumer_supply rx51_vaux4_consumers[] = {
+	REGULATOR_SUPPLY("VANA", "3-003e"),	/* Main camera sensor */
+	REGULATOR_SUPPLY("VANA", "3-000c"),	/* Main camera lens */
+	REGULATOR_SUPPLY("VANA", "2-0010"),	/* Secondary camera sensor */
+	{
+		.supply		= "vaux4",
+	},
+};
+
 static struct regulator_init_data rx51_vaux4 = {
 	.constraints = {
 		.name			= "VCAM_ANA_28",
@@ -622,6 +631,8 @@ static struct regulator_init_data rx51_vaux4 = {
 		.valid_ops_mask		= REGULATOR_CHANGE_MODE
 					| REGULATOR_CHANGE_STATUS,
 	},
+	.num_consumer_supplies	= ARRAY_SIZE(rx51_vaux4_consumers),
+	.consumer_supplies	= rx51_vaux4_consumers,
 };
 
 static struct regulator_init_data rx51_vmmc1 = {
