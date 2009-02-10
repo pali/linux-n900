@@ -76,6 +76,7 @@ static struct platform_device leds_gpio = {
 */
 
 extern void __init rx51_peripherals_init(void);
+extern void __init rx51_camera_init(void);
 
 #ifdef CONFIG_OMAP_MUX
 static struct omap_board_mux board_mux[] __initdata = {
@@ -102,6 +103,7 @@ static void __init rx51_init(void)
 	usb_bind_phy("musb-hdrc.0.auto", 0, "twl4030_usb");
 	usb_musb_init(&musb_board_data);
 	rx51_peripherals_init();
+	rx51_camera_init();
 
 	/* Ensure SDRC pins are mux'd for self-refresh */
 	omap_mux_init_signal("sdrc_cke0", OMAP_PIN_OUTPUT);
