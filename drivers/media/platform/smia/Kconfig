@@ -6,3 +6,12 @@ config VIDEO_SMIAREGS
 
 	  Also a few helper functions are provided to work with binary
 	  register lists.
+
+config VIDEO_SMIA_SENSOR
+	tristate "Generic SMIA-compatible camera sensor support"
+	depends on I2C && VIDEO_V4L2 && VIDEO_V4L2_SUBDEV_API
+	select VIDEO_SMIAREGS
+	---help---
+	  This is a generic driver for SMIA-compatible camera sensors.
+	  It works at least with ST VS6555 and Toshiba TCM8330MD
+	  VGA camera sensors.
