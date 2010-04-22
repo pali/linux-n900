@@ -1,0 +1,23 @@
+#
+# HSI controllers configuration
+#
+comment "HSI controllers"
+
+config OMAP_SSI
+	tristate "OMAP SSI hardware driver"
+	depends on ARCH_OMAP && HSI
+	default n
+	---help---
+	  SSI is a legacy version of HSI. It is usually used to connect
+	  an application engine with a cellular modem.
+	  If you say Y here, you will enable the OMAP SSI hardware driver.
+
+	  If unsure, say N.
+
+if OMAP_SSI
+
+config OMAP_SSI_CONFIG
+	boolean
+	default y
+
+endif # OMAP_SSI
