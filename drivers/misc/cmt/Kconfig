@@ -1,0 +1,9 @@
+#
+# CMT
+#
+config CMT
+	tristate "Enable CMT support"
+	---help---
+	  If you say Y here, you will enable CMT support.
+
+	  If unsure, say Y, or else you will not be able to use the CMT.
