@@ -4,6 +4,17 @@
 
 comment "HSI clients"
 
+config SSI_PROTOCOL
+	tristate "SSI protocol"
+	default n
+	depends on HSI && OMAP_SSI && CMT && PHONET
+	---help---
+	  If you say Y here, you will enable the SSI protocol aka McSAAB.
+	  The SSI protocol is a link layer protocol for SSI, which is used
+	  to transport Phonet messages between APE and CMT.
+
+	  If unsure, say N.
+
 config HSI_CHAR
 	tristate "HSI/SSI character driver"
 	depends on HSI
