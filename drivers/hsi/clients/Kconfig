@@ -10,8 +10,6 @@ config SSI_PROTOCOL
 	depends on HSI && OMAP_SSI && CMT && PHONET
 	---help---
 	  If you say Y here, you will enable the SSI protocol aka McSAAB.
-	  The SSI protocol is a link layer protocol for SSI, which is used
-	  to transport Phonet messages between APE and CMT.
 
 	  If unsure, say N.
 
@@ -22,3 +20,13 @@ config HSI_CHAR
 	  If you say Y here, you will enable the HSI/SSI character driver.
 	  This driver provides a simple character device interface for
 	  serial communication with the cellular modem over HSI/SSI bus.
+
+config HSI_CMT_SPEECH
+        tristate "HSI/SSI CMT speech driver"
+        depends on HSI && SSI_PROTOCOL
+        ---help---
+	  If you say Y here, you will enable the HSI CMT speech driver.
+	  This driver implements a character device interface for transferring
+	  speech data frames over HSI. This driver is used in e.g. Nokia N900.
+
+	  If unsure, say Y, or else you will not be able to make voice calls.
