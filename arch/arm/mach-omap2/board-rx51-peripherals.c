@@ -29,11 +29,14 @@
 #include <linux/power/isp1704_charger.h>
 #include <linux/platform_data/spi-omap2-mcspi.h>
 #include <linux/platform_data/mtd-onenand-omap2.h>
+#include <linux/hsi/hsi.h>
+#include <linux/cmt.h>
 
 #include <asm/system_info.h>
 
 #include "common.h"
 #include <linux/omap-dma.h>
+#include <plat/ssi.h>
 
 #include "board-rx51.h"
 
@@ -769,6 +772,66 @@ static __init void rx51_gpio_init(void)
 	gpiod_add_lookup_table(&rx51_fmtx_gpios_table);
 }
 
+static struct cmt_platform_data rx51_cmt_pdata = {
+	.cmt_rst_ind_gpio = 72,
+};
+
+static struct platform_device rx51_cmt_device = {
+	.name = "cmt",
+	.id = -1,
+	.dev =  {
+		.platform_data = &rx51_cmt_pdata,
+	},
+};
+
+static void __init rx51_cmt_init(void)
+{
+	int err;
+
+	err = platform_device_register(&rx51_cmt_device);
+	if (err < 0)
+		pr_err("Could not register CMT device\n");
+}
+
+static struct omap_ssi_board_config __initdata rx51_ssi_config = {
+	.num_ports = 1,
+	.cawake_gpio = { 151 },
+};
+
+static struct hsi_board_info __initdata rx51_ssi_cl[] = {
+	[0] =	{
+		.name = "hsi_char",
+		.hsi_id = 0,
+		.port = 0,
+		},
+	[1] = 	{
+		.name = "ssi_protocol",
+		.hsi_id = 0,
+		.port = 0,
+		.tx_cfg = {
+			.mode = HSI_MODE_FRAME,
+			.channels = 4,
+			.speed = 55000,
+			.arb_mode = HSI_ARB_RR,
+			},
+		.rx_cfg = {
+			.mode = HSI_MODE_FRAME,
+			.channels = 4,
+			},
+		},
+	[2] =	{
+		.name = "cmt_speech",
+		.hsi_id = 0,
+		.port = 0,
+		},
+};
+
+static void __init rx51_ssi_init(void)
+{
+	omap_ssi_config(&rx51_ssi_config);
+	hsi_register_board_info(rx51_ssi_cl, ARRAY_SIZE(rx51_ssi_cl));
+}
+
 static int rx51_twlgpio_setup(struct device *dev, unsigned gpio, unsigned n)
 {
 	/* FIXME this gpio setup is just a placeholder for now */
@@ -1272,6 +1335,8 @@ void __init rx51_peripherals_init(void)
 	rx51_init_wl1251();
 	rx51_init_tsc2005();
 	rx51_init_lirc();
+	rx51_cmt_init();
+	rx51_ssi_init();
 	spi_register_board_info(rx51_peripherals_spi_board_info,
 				ARRAY_SIZE(rx51_peripherals_spi_board_info));
 
