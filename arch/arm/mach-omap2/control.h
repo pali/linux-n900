@@ -316,6 +316,13 @@
 #define OMAP2_MCBSP4_CLKS_MASK		(1 << 2) /* > 242x */
 #define OMAP2_MCBSP3_CLKS_MASK		(1 << 0) /* > 242x */
 
+/* CONTROL_CSIRXFE bits */
+#define OMAP343X_CSIB_RESET		(1 << 13)
+#define OMAP343X_CSIB_PWRDNZ		(1 << 12)
+#define OMAP343X_CSIB_SELFORM		(1 << 10)
+#define OMAP343X_CSIB_RESENABLE		(1 << 8)
+#define OMAP343X_CSIB_INV		(1 << 7)
+
 /* CONTROL_STATUS bits */
 #define OMAP2_DEVICETYPE_MASK		(0x7 << 8)
 #define OMAP2_SYSBOOT_5_MASK		(1 << 5)
