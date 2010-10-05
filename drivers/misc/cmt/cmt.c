@@ -135,6 +135,7 @@ static int __init cmt_probe(struct platform_device *pd)
 	struct cmt_device *cmt;
 	int irq;
 	int err;
+	int pflags;
 
 	if (!pdata) {
 		pr_err("CMT: No platform_data found on cmt device\n");
@@ -157,11 +158,17 @@ static int __init cmt_probe(struct platform_device *pd)
 	gpio_direction_input(cmt->cmt_rst_ind_gpio);
 	tasklet_init(&cmt->cmt_rst_ind_tasklet, do_cmt_rst_ind_tasklet,
 							(unsigned long)cmt);
+	if (pdata->cmt_ver == 1)
+		pflags = IRQF_TRIGGER_FALLING;
+	else
+		pflags = IRQF_TRIGGER_RISING;
+
 	irq = gpio_to_irq(cmt->cmt_rst_ind_gpio);
 	err = request_irq(irq, cmt_rst_ind_isr,
-		IRQF_DISABLED | IRQF_TRIGGER_RISING, "cmt_rst_ind", cmt);
+		IRQF_DISABLED | pflags, "cmt_rst_ind", cmt);
 	if (err < 0) {
-		dev_err(&pd->dev, "Request cmt_rst_ind irq(%d) failed\n", irq);
+		dev_err(&pd->dev, "Request cmt_rst_ind irq(%d) failed (flags %d)\n",
+			irq, pflags);
 		goto rback2;
 	}
 	enable_irq_wake(irq);
