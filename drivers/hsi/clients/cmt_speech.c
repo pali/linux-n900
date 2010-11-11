@@ -1271,38 +1271,45 @@ static int cs_char_mmap(struct file *file, struct vm_area_struct *vma)
 static int cs_char_open(struct inode *unused, struct file *file)
 {
 	int ret = 0;
+	unsigned long p;
 
 	spin_lock_bh(&cs_char_data.lock);
 	if (cs_char_data.opened) {
 		ret = -EBUSY;
 		spin_unlock_bh(&cs_char_data.lock);
-		goto out;
+		goto out1;
 	}
-	cs_char_data.mmap_base = get_zeroed_page(GFP_ATOMIC);
-	if (!cs_char_data.mmap_base) {
-		dev_err(&cs_char_data.cl->device,
-					"Shared memory allocation failed.\n");
-		ret = -ENOMEM;
-		spin_unlock_bh(&cs_char_data.lock);
-		goto out;
-	}
-	cs_char_data.mmap_size = CS_MMAP_SIZE;
-	cs_char_data.dataind_pending = 0;
 	cs_char_data.opened = 1;
-	file->private_data = &cs_char_data;
+	cs_char_data.dataind_pending = 0;
 	spin_unlock_bh(&cs_char_data.lock);
 
-	BUG_ON(cs_char_data.hi);
-
-	ret = cs_hsi_start(&cs_char_data.hi, cs_char_data.cl,
-				cs_char_data.mmap_base, cs_char_data.mmap_size);
-	if (ret) {
-		dev_err(&cs_char_data.cl->device, "Unable to initialize HSI\n");
-		free_page(cs_char_data.mmap_base);
-		goto out;
+	p = get_zeroed_page(GFP_KERNEL);
+	if (!p) {
+		ret = -ENOMEM;
+		goto out2;
 	}
 
-out:
+	ret = cs_hsi_start(&cs_char_data.hi, cs_char_data.cl, p, CS_MMAP_SIZE);
+	if (ret) {
+		dev_err(&cs_char_data.cl->device, "Unable to initialize HSI\n");
+		goto out3;
+	}
+
+	/* these are only used in release so lock not needed */
+	cs_char_data.mmap_base = p;
+	cs_char_data.mmap_size = CS_MMAP_SIZE;
+
+	file->private_data = &cs_char_data;
+
+	return 0;
+
+out3:
+	free_page(p);
+out2:
+	spin_lock_bh(&cs_char_data.lock);
+	cs_char_data.opened = 0;
+	spin_unlock_bh(&cs_char_data.lock);
+out1:
 	return ret;
 }
 
