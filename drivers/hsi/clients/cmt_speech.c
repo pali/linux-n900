@@ -1037,6 +1037,13 @@ static int cs_hsi_start(struct cs_hsi_iface **hi, struct hsi_client *cl,
 		dev_err(&cl->device, "Could not get HSI master client\n");
 		goto leave4;
 	}
+	if (!ssip_slave_running(hsi_if->master)) {
+		err = -ENODEV;
+		dev_err(&cl->device,
+				"HSI port not initialized\n");
+		goto leave4;
+	}
+
 	hsi_if->iface_state = CS_STATE_OPENED;
 	local_bh_disable();
 	cs_hsi_read_on_control(hsi_if);
