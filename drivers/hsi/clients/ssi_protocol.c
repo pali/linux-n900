@@ -384,6 +384,13 @@ int ssip_slave_stop_tx(struct hsi_client *master)
 }
 EXPORT_SYMBOL_GPL(ssip_slave_stop_tx);
 
+int ssip_slave_running(struct hsi_client *master)
+{
+	struct ssi_protocol *ssi = hsi_client_drvdata(master);
+	return netif_running(ssi->netdev);
+}
+EXPORT_SYMBOL_GPL(ssip_slave_running);
+
 static void ssip_reset(struct hsi_client *cl)
 {
 	struct ssi_protocol *ssi = hsi_client_drvdata(cl);
