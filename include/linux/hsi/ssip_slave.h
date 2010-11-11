@@ -35,4 +35,6 @@ struct hsi_client *ssip_slave_get_master(struct hsi_client *slave);
 int ssip_slave_start_tx(struct hsi_client *master);
 int ssip_slave_stop_tx(struct hsi_client *master);
 
+int ssip_slave_running(struct hsi_client *master);
+
 #endif /* __LINUX_SSIP_SLAVE_H__ */
