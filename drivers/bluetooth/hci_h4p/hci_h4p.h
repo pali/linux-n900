@@ -193,6 +193,11 @@ struct hci_fw_event {
 	u8 status;
 } __attribute__ ((packed));
 
+struct hci_bc4_set_bdaddr {
+	u8 type;
+	struct hci_command_hdr cmd_hdr;
+} __attribute__ ((packed));
+
 int hci_h4p_send_alive_packet(struct hci_h4p_info *info);
 
 void hci_h4p_bcm_parse_fw_event(struct hci_h4p_info *info,
@@ -213,6 +218,9 @@ int hci_h4p_ti1273_send_fw(struct hci_h4p_info *info,
 int hci_h4p_read_fw(struct hci_h4p_info *info, struct sk_buff_head *fw_queue);
 int hci_h4p_send_fw(struct hci_h4p_info *info, struct sk_buff_head *fw_queue);
 void hci_h4p_parse_fw_event(struct hci_h4p_info *info, struct sk_buff *skb);
+
+int hci_h4p_sysfs_create_files(struct device *dev);
+void hci_h4p_sysfs_remove_files(struct device *dev);
 
 void hci_h4p_outb(struct hci_h4p_info *info, unsigned int offset, u8 val);
 u8 hci_h4p_inb(struct hci_h4p_info *info, unsigned int offset);

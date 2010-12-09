@@ -24,6 +24,7 @@
 #include <linux/skbuff.h>
 #include <linux/delay.h>
 #include <linux/serial_reg.h>
+#include <linux/bluetooth/hci_h4p.h>
 
 #include "hci_h4p.h"
 
@@ -32,6 +33,13 @@ static struct sk_buff_head *fw_q;
 static int inject_bdaddr(struct hci_h4p_info *info, struct sk_buff *skb)
 {
 	unsigned int offset;
+	int i;
+	struct hci_h4p_platform_data *config;
+
+	config = info->dev->platform_data;
+
+	if (!config)
+		return -ENODEV;
 
 	if (skb->len < 10) {
 		dev_info(info->dev, "Valid bluetooth address not found.\n");
@@ -39,12 +47,22 @@ static int inject_bdaddr(struct hci_h4p_info *info, struct sk_buff *skb)
 	}
 
 	offset = 4;
-	skb->data[offset + 5] = 0x00;
-	skb->data[offset + 4] = 0x11;
-	skb->data[offset + 3] = 0x22;
-	skb->data[offset + 2] = 0x33;
-	skb->data[offset + 1] = 0x44;
-	skb->data[offset + 0] = 0x55;
+	skb->data[offset + 5] = config->bd_addr[0];
+	skb->data[offset + 4] = config->bd_addr[1];
+	skb->data[offset + 3] = config->bd_addr[2];
+	skb->data[offset + 2] = config->bd_addr[3];
+	skb->data[offset + 1] = config->bd_addr[4];
+	skb->data[offset + 0] = config->bd_addr[5];
+
+	for (i = 0; i < 6; i++) {
+		if (config->bd_addr[i] != 0x00)
+			break;
+	}
+
+	if (i > 5) {
+		dev_info(info->dev, "Valid bluetooth address not found.\n");
+		return -ENODEV;
+	}
 
 	return 0;
 }
