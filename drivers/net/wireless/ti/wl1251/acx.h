@@ -558,7 +558,8 @@ struct acx_bt_wlan_coex {
 #define PTA_ANTI_STARVE_PERIOD_DEF	  (500)
 #define PTA_ANTI_STARVE_NUM_CYCLE_DEF	  (4)
 #define PTA_ALLOW_PA_SD_DEF		  (1)
-#define PTA_TIME_BEFORE_BEACON_DEF	  (6300)
+#define PTA_TIME_BEFORE_BEACON_DEF	  (500)
+#define PTA_TIME_BEFORE_BEACON_MONO_AUDIO (6300)
 #define PTA_HPDM_MAX_TIME_DEF		  (1600)
 #define PTA_TIME_OUT_NEXT_WLAN_DEF	  (2550)
 #define PTA_AUTO_MODE_NO_CTS_DEF	  (0)
@@ -1470,8 +1471,9 @@ int wl1251_acx_rts_threshold(struct wl1251 *wl, u16 rts_threshold);
 int wl1251_acx_beacon_filter_opt(struct wl1251 *wl, bool enable_filter);
 int wl1251_acx_beacon_filter_table(struct wl1251 *wl);
 int wl1251_acx_conn_monit_params(struct wl1251 *wl);
-int wl1251_acx_sg_enable(struct wl1251 *wl);
-int wl1251_acx_sg_cfg(struct wl1251 *wl);
+int wl1251_acx_sg_enable(struct wl1251 *wl, u8 mode);
+int wl1251_acx_sg_cfg(struct wl1251 *wl, u16 wake_up_beacon);
+int wl1251_acx_sg_configure(struct wl1251 *wl, bool force);
 int wl1251_acx_cca_threshold(struct wl1251 *wl);
 int wl1251_acx_bcn_dtim_options(struct wl1251 *wl);
 int wl1251_acx_aid(struct wl1251 *wl, u16 aid);
