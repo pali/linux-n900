@@ -258,6 +258,12 @@ struct wl1251_debugfs {
 	struct dentry *excessive_retries;
 };
 
+enum wl1251_bt_coex_mode {
+	WL1251_BT_COEX_OFF,
+	WL1251_BT_COEX_ENABLE,
+	WL1251_BT_COEX_MONOAUDIO
+};
+
 struct wl1251_if_operations {
 	void (*read)(struct wl1251 *wl, int addr, void *buf, size_t len);
 	void (*write)(struct wl1251 *wl, int addr, void *buf, size_t len);
@@ -393,6 +399,8 @@ struct wl1251 {
 	struct wl1251_rx_descriptor *rx_descriptor;
 
 	struct ieee80211_vif *vif;
+
+	enum wl1251_bt_coex_mode bt_coex_mode;
 
 	u32 chip_id;
 	char fw_ver[21];
