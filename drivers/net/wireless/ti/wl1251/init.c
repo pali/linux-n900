@@ -162,11 +162,7 @@ int wl1251_hw_init_pta(struct wl1251 *wl)
 {
 	int ret;
 
-	ret = wl1251_acx_sg_enable(wl);
-	if (ret < 0)
-		return ret;
-
-	ret = wl1251_acx_sg_cfg(wl);
+	ret = wl1251_acx_sg_configure(wl, true);
 	if (ret < 0)
 		return ret;
 
