@@ -28,6 +28,7 @@
 #include "tx.h"
 #include "ps.h"
 #include "io.h"
+#include "event.h"
 
 static bool wl1251_tx_double_buffer_busy(struct wl1251 *wl, u32 data_out_count)
 {
@@ -295,6 +296,22 @@ static int wl1251_tx_frame(struct wl1251 *wl, struct sk_buff *skb)
 			ret = wl1251_acx_default_key(wl, idx);
 			if (ret < 0)
 				return ret;
+		}
+	}
+
+	/* Enable tx path in monitor mode for packet injection */
+	if ((wl->vif == NULL) && !wl->joined) {
+		ret = wl1251_cmd_join(wl, BSS_TYPE_STA_BSS, wl->channel,
+				      wl->beacon_int, wl->dtim_period);
+		if (ret < 0)
+			wl1251_warning("join failed");
+		else {
+			ret = wl1251_event_wait(wl, JOIN_EVENT_COMPLETE_ID,
+						100);
+			if (ret < 0)
+				wl1251_warning("join timeout");
+			else
+				wl->joined = true;
 		}
 	}
 
