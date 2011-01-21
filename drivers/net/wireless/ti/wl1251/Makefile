@@ -1,5 +1,5 @@
 wl1251-objs		= main.o event.o tx.o rx.o ps.o cmd.o \
-			  acx.o boot.o init.o debugfs.o io.o
+			  acx.o boot.o init.o debugfs.o io.o netlink.o
 wl1251_spi-objs		+= spi.o
 wl1251_sdio-objs	+= sdio.o
 
