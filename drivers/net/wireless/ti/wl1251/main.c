@@ -43,6 +43,7 @@
 #include "init.h"
 #include "debugfs.h"
 #include "boot.h"
+#include "netlink.h"
 
 void wl1251_enable_interrupts(struct wl1251 *wl)
 {
@@ -1587,6 +1588,10 @@ int wl1251_init_ieee80211(struct wl1251 *wl)
 	if (ret)
 		goto out;
 
+	ret = wl1251_nl_register();
+	if (ret)
+		goto out;
+
 	/* Register platform device */
 	ret = platform_device_register(&wl1251_device);
 	if (ret) {
@@ -1695,6 +1700,8 @@ EXPORT_SYMBOL_GPL(wl1251_alloc_hw);
 
 int wl1251_free_hw(struct wl1251 *wl)
 {
+	wl1251_nl_unregister();
+
 	ieee80211_unregister_hw(wl->hw);
 
 	wl1251_debugfs_exit(wl);
