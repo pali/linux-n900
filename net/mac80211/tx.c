@@ -1648,6 +1648,9 @@ netdev_tx_t ieee80211_monitor_start_xmit(struct sk_buff *skb,
 	if (unlikely(skb->len < len_rthdr))
 		goto fail; /* skb too short for claimed rt header extent */
 
+	dev->stats.tx_packets++;
+	dev->stats.tx_bytes += skb->len;
+
 	/*
 	 * fix up the pointers accounting for the radiotap
 	 * header still being in there.  We are being given
