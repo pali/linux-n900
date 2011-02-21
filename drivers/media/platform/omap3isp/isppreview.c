@@ -27,9 +27,9 @@
 /* Default values in Office Fluorescent Light for RGBtoRGB Blending */
 static struct omap3isp_prev_rgbtorgb flr_rgb2rgb = {
 	{	/* RGB-RGB Matrix */
-		{0x01E2, 0x0F30, 0x0FEE},
-		{0x0F9B, 0x01AC, 0x0FB9},
-		{0x0FE0, 0x0EC0, 0x0260}
+		{0x0100, 0x0000, 0x0000},
+		{0x0000, 0x0100, 0x0000},
+		{0x0000, 0x0000, 0x0100}
 	},	/* RGB Offset */
 	{0x0000, 0x0000, 0x0000}
 };
@@ -37,9 +37,9 @@ static struct omap3isp_prev_rgbtorgb flr_rgb2rgb = {
 /* Default values in Office Fluorescent Light for RGB to YUV Conversion*/
 static struct omap3isp_prev_csc flr_prev_csc = {
 	{	/* CSC Coef Matrix */
-		{66, 129, 25},
-		{-38, -75, 112},
-		{112, -94 , -18}
+		{76, 152, 28},
+		{-44, -84, 128},
+		{128, -98 , -20}
 	},	/* CSC Offset */
 	{0x0, 0x0, 0x0}
 };
