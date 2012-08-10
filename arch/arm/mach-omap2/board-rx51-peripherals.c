@@ -37,6 +37,7 @@
 #include <plat/onenand.h>
 #include <plat/gpmc-smc91x.h>
 #include <plat/ssi.h>
+#include <plat/omap-pm.h>
 
 #include <mach/board-rx51.h>
 
@@ -48,6 +49,10 @@
 
 #include <../drivers/staging/iio/light/tsl2563.h>
 #include <linux/lis3lv02d.h>
+
+#if defined(CONFIG_IR_RX51) || defined(CONFIG_IR_RX51_MODULE)
+#include <media/ir-rx51.h>
+#endif
 
 #include "mux.h"
 #include "hsmmc.h"
@@ -1284,6 +1289,30 @@ static void __init rx51_init_tsc2005(void)
 				gpio_to_irq(RX51_TSC2005_IRQ_GPIO);
 }
 
+#if defined(CONFIG_IR_RX51) || defined(CONFIG_IR_RX51_MODULE)
+static struct lirc_rx51_platform_data rx51_lirc_data = {
+	.set_max_mpu_wakeup_lat = omap_pm_set_max_mpu_wakeup_lat,
+	.pwm_timer = 9, /* Use GPT 9 for CIR */
+};
+
+static struct platform_device rx51_lirc_device = {
+	.name           = "lirc_rx51",
+	.id             = -1,
+	.dev            = {
+		.platform_data = &rx51_lirc_data,
+	},
+};
+
+static void __init rx51_init_lirc(void)
+{
+	platform_device_register(&rx51_lirc_device);
+}
+#else
+static void __init rx51_init_lirc(void)
+{
+}
+#endif
+
 void __init rx51_peripherals_init(void)
 {
 	rx51_i2c_init();
@@ -1296,6 +1325,7 @@ void __init rx51_peripherals_init(void)
 	rx51_init_si4713();
 	rx51_cmt_init();
 	rx51_ssi_init();
+	rx51_init_lirc();
 	spi_register_board_info(rx51_peripherals_spi_board_info,
 				ARRAY_SIZE(rx51_peripherals_spi_board_info));
 
