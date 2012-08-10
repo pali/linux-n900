@@ -37,7 +37,6 @@
 #include <plat/onenand.h>
 #include <plat/gpmc-smc91x.h>
 #include <plat/ssi.h>
-#include <plat/omap-pm.h>
 
 #include <mach/board-rx51.h>
 
@@ -1291,7 +1290,6 @@ static void __init rx51_init_tsc2005(void)
 
 #if defined(CONFIG_IR_RX51) || defined(CONFIG_IR_RX51_MODULE)
 static struct lirc_rx51_platform_data rx51_lirc_data = {
-	.set_max_mpu_wakeup_lat = omap_pm_set_max_mpu_wakeup_lat,
 	.pwm_timer = 9, /* Use GPT 9 for CIR */
 };
 
