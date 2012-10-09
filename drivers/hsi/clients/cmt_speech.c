@@ -34,7 +34,7 @@
 #include <linux/sched.h>
 #include <linux/ioctl.h>
 #include <linux/uaccess.h>
-#include <linux/pm_qos_params.h>
+#include <linux/pm_qos.h>
 #include <linux/hsi/hsi.h>
 #include <linux/hsi/ssip_slave.h>
 #include <linux/cs-protocol.h>
@@ -126,7 +126,7 @@ struct cs_hsi_iface {
 	struct hsi_msg			*data_tx_msg;
 	wait_queue_head_t		datawait;
 
-	struct pm_qos_request_list      pm_qos_req;
+	struct pm_qos_request		pm_qos_req;
 
 	spinlock_t			lock;
 };
