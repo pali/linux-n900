@@ -44,7 +44,8 @@
 #include <linux/timer.h>
 #include <linux/hsi/hsi.h>
 #include <linux/hsi/ssip_slave.h>
-#include <linux/hsi/omap_ssi_hack.h>
+
+void ssi_waketest(struct hsi_client *cl, unsigned int enable);
 
 #define SSIP_TXQUEUE_LEN	100
 #define SSIP_MAX_MTU		65535
@@ -190,7 +191,7 @@ static void ssip_skb_to_msg(struct sk_buff *skb, struct hsi_msg *msg)
 		sg = sg_next(sg);
 		BUG_ON(!sg);
 		frag = &skb_shinfo(skb)->frags[i];
-		sg_set_page(sg, frag->page, frag->size, frag->page_offset);
+		sg_set_page(sg, frag->page.p, frag->size, frag->page_offset);
 	}
 }
 
@@ -876,6 +877,20 @@ out:
 	ssip_free_data(msg);
 }
 
+void ssip_port_event(struct hsi_client *cl, unsigned long event)
+{
+	switch (event) {
+	case HSI_EVENT_START_RX:
+		ssip_start_rx(cl);
+		break;
+	case HSI_EVENT_STOP_RX:
+		ssip_stop_rx(cl);
+		break;
+	default:
+		return;
+	}
+}
+
 static int ssip_pn_open(struct net_device *dev)
 {
 	struct hsi_client *cl = to_hsi_client(dev->dev.parent);
@@ -886,6 +901,11 @@ static int ssip_pn_open(struct net_device *dev)
 	err = hsi_claim_port(cl, 1);
 	if (err < 0) {
 		dev_err(&cl->device, "SSI port already claimed\n");
+		return err;
+	}
+	err = hsi_register_port_event(cl, ssip_port_event);
+	if (err < 0) {
+		dev_err(&cl->device, "Register HSI port event failed (%d)\n", err);
 		return err;
 	}
 	dev_dbg(&cl->device, "Configuring SSI port\n");
@@ -915,6 +935,7 @@ static int ssip_pn_stop(struct net_device *dev)
 	struct hsi_client *cl = to_hsi_client(dev->dev.parent);
 
 	ssip_reset(cl);
+	hsi_unregister_port_event(cl);
 	hsi_release_port(cl);
 
 	return 0;
@@ -1094,8 +1115,6 @@ static int __init ssi_protocol_probe(struct device *dev)
 		dev_err(dev, "Register CMT notifier failed (%d)\n", err);
 		goto out3;
 	}
-	cl->hsi_start_rx = ssip_start_rx;
-	cl->hsi_stop_rx = ssip_stop_rx;
 	list_add(&ssi->link, &ssip_list);
 
 	return 0;
@@ -1117,8 +1136,6 @@ static int __exit ssi_protocol_remove(struct device *dev)
 	struct ssi_protocol *ssi = hsi_client_drvdata(cl);
 
 	list_del(&ssi->link);
-	cl->hsi_start_rx = NULL;
-	cl->hsi_stop_rx = NULL;
 	cmt_notifier_unregister(ssi->cmt, &ssi->nb);
 	cmt_put(ssi->cmt);
 	unregister_netdev(ssi->netdev);
