@@ -45,6 +45,7 @@
 #define SSI_MAX_GDD_LCH		8
 #define SSI_BYTES_TO_FRAMES(x) ((((x) - 1) >> 2) + 1)
 
+#define RX51_CAWAKE_GPIO 151
 /**
  * struct ssi_clk_res - Device resource data for the SSI clocks
  * @clk: Pointer to the clock
@@ -126,6 +127,7 @@ struct omap_ssi_port {
 	int			wake_irq;
 	struct tasklet_struct	pio_tasklet;
 	struct tasklet_struct	wake_tasklet;
+	unsigned int		wktest:1; /* FIXME: HACK to be removed */
 	unsigned int		wkin_cken:1; /* Workaround */
 	int			wk_refcount;
 	/* OMAP SSI port context */
@@ -182,9 +184,9 @@ struct omap_ssi_controller {
 
 static inline unsigned int ssi_wakein(struct hsi_port *port)
 {
-	struct omap_ssi_port *omap_port = hsi_port_drvdata(port);
+/*	struct omap_ssi_port *omap_port = hsi_port_drvdata(port); */
 
-	return gpio_get_value(irq_to_gpio(omap_port->wake_irq));
+	return gpio_get_value(RX51_CAWAKE_GPIO);
 }
 
 static int ssi_for_each_port(struct hsi_controller *ssi, void *data,
@@ -768,6 +770,30 @@ static u32 ssi_calculate_div(struct hsi_controller *ssi)
 
 	return tx_fckrate / omap_ssi->max_speed;
 }
+
+/*
+ * FIXME: Horrible HACK needed until we remove the useless wakeline test
+ * in the CMT. To be removed !!!!
+ */
+void ssi_waketest(struct hsi_client *cl, unsigned int enable)
+{
+	struct hsi_port *port = hsi_get_port(cl);
+	struct omap_ssi_port *omap_port = hsi_port_drvdata(port);
+	struct hsi_controller *ssi = to_hsi_controller(port->device.parent);
+	struct omap_ssi_controller *omap_ssi = hsi_controller_drvdata(ssi);
+
+	omap_port->wktest = !!enable;
+	if (omap_port->wktest) {
+		ssi_clk_enable(ssi);
+		__raw_writel(SSI_WAKE(0),
+				omap_ssi->sys + SSI_SET_WAKE_REG(port->num));
+	} else {
+		__raw_writel(SSI_WAKE(0),
+				omap_ssi->sys +	SSI_CLEAR_WAKE_REG(port->num));
+		ssi_clk_disable(ssi);
+	}
+}
+EXPORT_SYMBOL_GPL(ssi_waketest);
 
 static void ssi_error(struct hsi_port *port)
 {
@@ -1435,6 +1461,7 @@ static void ssi_wake_tasklet(unsigned long ssi_port)
 	struct hsi_port *port = (struct hsi_port *)ssi_port;
 	struct hsi_controller *ssi = to_hsi_controller(port->device.parent);
 	struct omap_ssi_port *omap_port = hsi_port_drvdata(port);
+	struct omap_ssi_controller *omap_ssi = hsi_controller_drvdata(ssi);
 
 	if (ssi_wakein(port)) {
 		/**
@@ -1451,9 +1478,17 @@ static void ssi_wake_tasklet(unsigned long ssi_port)
 		}
 		spin_unlock(&omap_port->lock);
 		dev_dbg(&ssi->device, "Wake in high\n");
+		if (omap_port->wktest) { /* FIXME: HACK ! To be removed */
+			__raw_writel(SSI_WAKE(0),
+				omap_ssi->sys + SSI_SET_WAKE_REG(port->num));
+		}
 		hsi_event(port, HSI_EVENT_START_RX);
 	} else {
 		dev_dbg(&ssi->device, "Wake in low\n");
+		if (omap_port->wktest) { /* FIXME: HACK ! To be removed */
+			__raw_writel(SSI_WAKE(0),
+				omap_ssi->sys + SSI_CLEAR_WAKE_REG(port->num));
+		}
 		hsi_event(port, HSI_EVENT_STOP_RX);
 		spin_lock(&omap_port->lock);
 		if (omap_port->wkin_cken) {
@@ -1588,7 +1623,7 @@ static int __init ssi_ports_init(struct hsi_controller *ssi,
 		return -ENOMEM;
 
 	for (i = 0; i < ssi->num_ports; i++) {
-		port = &ssi->port[i];
+		port = ssi->port[i];
 		omap_port = devm_kzalloc(&pd->dev, sizeof(*omap_port),
 								GFP_KERNEL);
 		if (!omap_port)
@@ -1632,7 +1667,7 @@ static void ssi_ports_exit(struct hsi_controller *ssi)
 	unsigned int i;
 
 	for (i = 0; i < ssi->num_ports; i++) {
-		omap_port = hsi_port_drvdata(&ssi->port[i]);
+		omap_port = hsi_port_drvdata(ssi->port[i]);
 		tasklet_kill(&omap_port->wake_tasklet);
 		tasklet_kill(&omap_port->pio_tasklet);
 	}
@@ -1806,7 +1841,6 @@ out2:
 	ssi_remove_controller(ssi);
 out1:
 	platform_set_drvdata(pd, NULL);
-	hsi_free_controller(ssi);
 
 	return err;
 }
@@ -1820,7 +1854,6 @@ static int __exit ssi_remove(struct platform_device *pd)
 #endif
 	ssi_remove_controller(ssi);
 	platform_set_drvdata(pd, NULL);
-	hsi_free_controller(ssi);
 
 	return 0;
 }
