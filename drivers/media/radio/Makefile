@@ -23,6 +23,7 @@ obj-$(CONFIG_RADIO_MIROPCM20) += radio-miropcm20.o
 obj-$(CONFIG_USB_DSBR) += dsbr100.o
 obj-$(CONFIG_RADIO_SI470X) += si470x/
 obj-$(CONFIG_USB_MR800) += radio-mr800.o
+obj-$(CONFIG_I2C_BCM2048) += radio-bcm2048.o
 obj-$(CONFIG_USB_KEENE) += radio-keene.o
 obj-$(CONFIG_RADIO_TEA5764) += radio-tea5764.o
 obj-$(CONFIG_RADIO_SAA7706H) += saa7706h.o
