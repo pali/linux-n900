@@ -30,6 +30,16 @@ config USB_MR800
 	  To compile this driver as a module, choose M here: the
 	  module will be called radio-mr800.
 
+config I2C_BCM2048
+	tristate "Broadcom BCM2048 FM Radio Receiver support"
+	depends on I2C && VIDEO_V4L2
+	---help---
+	  Say Y here if you want support to BCM2048 FM Radio Receiver.
+	  This device driver supports only i2c bus.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called radio-bcm2048.
+
 config USB_DSBR
 	tristate "D-Link/GemTek USB FM radio support"
 	depends on USB && VIDEO_V4L2
