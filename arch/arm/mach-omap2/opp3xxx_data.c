@@ -88,13 +88,13 @@ struct omap_volt_data omap36xx_vddcore_volt_data[] = {
 
 static struct omap_opp_def __initdata omap34xx_opp_def_list[] = {
 	/* MPU OPP1 */
-	OPP_INITIALIZER("mpu", true, 125000000, OMAP3430_VDD_MPU_OPP1_UV),
+	OPP_INITIALIZER("mpu", false, 125000000, OMAP3430_VDD_MPU_OPP1_UV),
 	/* MPU OPP2 */
-	OPP_INITIALIZER("mpu", true, 250000000, OMAP3430_VDD_MPU_OPP2_UV),
+	OPP_INITIALIZER("mpu", true, 249600000, OMAP3430_VDD_MPU_OPP2_UV),
 	/* MPU OPP3 */
 	OPP_INITIALIZER("mpu", true, 500000000, OMAP3430_VDD_MPU_OPP3_UV),
 	/* MPU OPP4 */
-	OPP_INITIALIZER("mpu", true, 550000000, OMAP3430_VDD_MPU_OPP4_UV),
+	OPP_INITIALIZER("mpu", false, 550000000, OMAP3430_VDD_MPU_OPP4_UV),
 	/* MPU OPP5 */
 	OPP_INITIALIZER("mpu", true, 600000000, OMAP3430_VDD_MPU_OPP5_UV),
 
