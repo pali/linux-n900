@@ -43,6 +43,7 @@
 #include <sound/tpa6130a2-plat.h>
 #include <media/radio-si4713.h>
 #include <media/si4713.h>
+#include <media/radio-bcm2048.h>
 #include <linux/leds-lp5523.h>
 
 #include <../drivers/staging/iio/light/tsl2563.h>
@@ -66,6 +67,8 @@
 #define RX51_WL1251_IRQ_GPIO		42
 #define RX51_FMTX_RESET_GPIO		163
 #define RX51_FMTX_IRQ			53
+#define RX51_FMRX_IRQ			43
+
 #define RX51_LP5523_CHIP_EN_GPIO	41
 
 #define RX51_USB_TRANSCEIVER_RST_GPIO	67
@@ -779,6 +782,25 @@ static __init void rx51_init_si4713(void)
 	platform_device_register(&rx51_si4713_dev);
 }
 
+static struct platform_device rx51_bcm2048_dev = {
+	.name	= "radio-bcm2048",
+	.id	= -1,
+};
+
+static __init void rx51_init_bcm2048(void)
+{
+	int err;
+
+	err = gpio_request(RX51_FMRX_IRQ, "BCM2048");
+	if (err) {
+		printk(KERN_ERR "Failed to request gpio for FMRX IRQ %d\n", err);
+		return;
+	}
+
+	gpio_direction_input(RX51_FMRX_IRQ);
+	platform_device_register(&rx51_bcm2048_dev);
+}
+
 static struct cmt_platform_data rx51_cmt_pdata = {
 	.cmt_rst_ind_gpio = 72,
 	.cmt_ver = 1,
@@ -1104,6 +1126,10 @@ static struct i2c_board_info __initdata rx51_peripherals_i2c_board_info_3[] = {
 		.platform_data = &rx51_lis3lv02d_data,
 	},
 #endif
+	{
+		I2C_BOARD_INFO(BCM2048_NAME, BCM2048_I2C_ADDR),
+	}
+
 };
 
 static int __init rx51_i2c_init(void)
@@ -1131,6 +1157,7 @@ static int __init rx51_i2c_init(void)
 	rx51_lis3lv02d_data.irq2 = gpio_to_irq(LIS302_IRQ2_GPIO);
 	rx51_peripherals_i2c_board_info_3[0].irq = gpio_to_irq(LIS302_IRQ1_GPIO);
 #endif
+rx51_peripherals_i2c_board_info_3[1].irq = gpio_to_irq(RX51_FMRX_IRQ);
 	omap_register_i2c_bus(3, 400, rx51_peripherals_i2c_board_info_3,
 			      ARRAY_SIZE(rx51_peripherals_i2c_board_info_3));
 	return 0;
@@ -1328,6 +1355,7 @@ void __init rx51_peripherals_init(void)
 	rx51_init_tsc2005();
 	rx51_init_si4713();
 	rx51_init_lirc();
+	rx51_init_bcm2048();
 	rx51_cmt_init();
 	rx51_ssi_init();
 	spi_register_board_info(rx51_peripherals_spi_board_info,
