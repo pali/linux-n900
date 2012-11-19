@@ -94,6 +94,18 @@ static void isp1704_charger_set_power(struct isp1704_charger *isp, bool on)
 }
 
 /*
+ * Set charger type from isp1704 if a function for it
+ * has been provided with platform data.
+ */
+static void isp1704_charger_set_type(struct isp1704_charger *isp, int type)
+{
+	struct isp1704_charger_data	*board = isp->dev->platform_data;
+
+	if (board && board->set_type)
+		board->set_type(type);
+}
+
+/*
  * Determine is the charging port DCP (dedicated charger) or CDP (Host/HUB
  * chargers).
  *
@@ -263,6 +275,7 @@ static void isp1704_charger_work(struct work_struct *data)
 		switch (isp->psy.type) {
 		case POWER_SUPPLY_TYPE_USB_DCP:
 			isp->current_max = 1800;
+			isp1704_charger_set_type(isp, 2);
 			break;
 		case POWER_SUPPLY_TYPE_USB_CDP:
 			/*
@@ -270,6 +283,7 @@ static void isp1704_charger_work(struct work_struct *data)
 			 * handshaking may break
 			 */
 			isp->current_max = 500;
+			isp1704_charger_set_type(isp, 1);
 			/* FALLTHROUGH */
 		case POWER_SUPPLY_TYPE_USB:
 		default:
@@ -297,6 +311,7 @@ static void isp1704_charger_work(struct work_struct *data)
 			usb_gadget_disconnect(isp->phy->otg->gadget);
 
 		isp1704_charger_set_power(isp, 0);
+		isp1704_charger_set_type(isp, 0);
 		break;
 	case USB_EVENT_ENUMERATED:
 		if (isp->present)
