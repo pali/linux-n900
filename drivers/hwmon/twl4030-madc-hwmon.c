@@ -36,6 +36,8 @@
 #include <linux/sysfs.h>
 #include <linux/err.h>
 #include <linux/types.h>
+#include <linux/miscdevice.h>
+#include <linux/uaccess.h>
 
 /*
  * sysfs hook function
@@ -96,6 +98,66 @@ static const struct attribute_group twl4030_madc_group = {
 	.attrs = twl4030_madc_attributes,
 };
 
+#define TWL4030_MADC_IOC_MAGIC '`'
+#define TWL4030_MADC_IOCX_ADC_RAW_READ	  _IO(TWL4030_MADC_IOC_MAGIC, 0)
+
+static long twl4030_madc_ioctl(struct file *filp, unsigned int cmd,
+				unsigned long arg)
+{
+	struct twl4030_madc_user_parms par;
+	int val, ret;
+
+	ret = copy_from_user(&par, (void __user *) arg, sizeof(par));
+	if (ret) {
+		return -EACCES;
+	}
+
+	switch (cmd) {
+	case TWL4030_MADC_IOCX_ADC_RAW_READ: {
+		struct twl4030_madc_request req;
+		if (par.channel >= TWL4030_MADC_MAX_CHANNELS)
+			return -EINVAL;
+
+		req.channels	= (1 << par.channel);
+		req.do_avg	= par.average;
+		req.method	= TWL4030_MADC_SW1;
+		req.func_cb	= NULL;
+		req.type	= TWL4030_MADC_WAIT;
+
+		val = twl4030_madc_conversion(&req);
+		if (likely(val > 0)) {
+			par.status = 0;
+			par.result = (u16)req.rbuf[par.channel];
+		} else if (val == 0) {
+			par.status = -ENODATA;
+		} else {
+			par.status = val;
+		}
+		break;
+		}
+	default:
+		return -EINVAL;
+	}
+
+	ret = copy_to_user((void __user *) arg, &par, sizeof(par));
+	if (ret) {
+		return -EACCES;
+	}
+
+	return 0;
+}
+
+static struct file_operations twl4030_madc_fileops = {
+	.owner = THIS_MODULE,
+	.unlocked_ioctl = twl4030_madc_ioctl
+};
+
+static struct miscdevice twl4030_madc_device = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "twl4030-adc",
+	.fops = &twl4030_madc_fileops
+};
+
 static int twl4030_madc_hwmon_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -110,9 +172,16 @@ static int twl4030_madc_hwmon_probe(struct platform_device *pdev)
 		ret = PTR_ERR(hwmon);
 		goto err_reg;
 	}
+	ret = misc_register(&twl4030_madc_device);
+	if (ret) {
+		dev_err(&pdev->dev, "could not register misc_device\n");
+		goto err_misc;
+	}
 
 	return 0;
 
+err_misc:
+	hwmon_device_unregister(&pdev->dev);
 err_reg:
 	sysfs_remove_group(&pdev->dev.kobj, &twl4030_madc_group);
 err_sysfs:
@@ -122,6 +191,7 @@ err_sysfs:
 
 static int twl4030_madc_hwmon_remove(struct platform_device *pdev)
 {
+	misc_deregister(&twl4030_madc_device);
 	hwmon_device_unregister(&pdev->dev);
 	sysfs_remove_group(&pdev->dev.kobj, &twl4030_madc_group);
 
