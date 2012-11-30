@@ -29,6 +29,7 @@ struct lp5523_led_config {
 	u8		chan_nr;
 	u8		led_current; /* mA x10, 0 if led is not connected */
 	u8		max_current;
+	const char *name;
 };
 
 #define LP5523_CLOCK_AUTO	0

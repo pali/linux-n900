@@ -166,30 +166,39 @@ static struct tsl2563_platform_data rx51_tsl2563_platform_data = {
 #if defined(CONFIG_LEDS_LP5523) || defined(CONFIG_LEDS_LP5523_MODULE)
 static struct lp5523_led_config rx51_lp5523_led_config[] = {
 	{
+		.name		= "kb1",
 		.chan_nr	= 0,
 		.led_current	= 50,
 	}, {
+		.name		= "kb2",
 		.chan_nr	= 1,
 		.led_current	= 50,
 	}, {
+		.name		= "kb3",
 		.chan_nr	= 2,
 		.led_current	= 50,
 	}, {
+		.name		= "kb4",
 		.chan_nr	= 3,
 		.led_current	= 50,
 	}, {
+		.name		= "b",
 		.chan_nr	= 4,
 		.led_current	= 50,
 	}, {
+		.name		= "g",
 		.chan_nr	= 5,
 		.led_current	= 50,
 	}, {
+		.name		= "r",
 		.chan_nr	= 6,
 		.led_current	= 50,
 	}, {
+		.name		= "kb5",
 		.chan_nr	= 7,
 		.led_current	= 50,
 	}, {
+		.name		= "kb6",
 		.chan_nr	= 8,
 		.led_current	= 50,
 	}

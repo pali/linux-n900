@@ -846,6 +846,10 @@ static int __devinit lp5523_init_led(struct lp5523_led *led, struct device *dev,
 			return -EINVAL;
 		}
 
+		if (pdata->led_config[chan].name)
+			snprintf(name, 32, "lp5523:%s",
+				 pdata->led_config[chan].name);
+		else
 		snprintf(name, sizeof(name), "%s:channel%d",
 			pdata->label ?: "lp5523", chan);
 
