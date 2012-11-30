@@ -58,6 +58,11 @@
 #define RX51_CAMERA_PRIMARY	(RX51_CAMERA_STINGRAY | RX51_CAMERA_LENS)
 #define RX51_CAMERA_SECONDARY	RX51_CAMERA_ACMELITE
 
+#define IO_OFFSET		0x90000000
+#define __IO_ADDRESS(pa)	((pa) + IO_OFFSET)/* Works for L3 and L4 */
+#define IO_ADDRESS(pa)           IOMEM(__IO_ADDRESS(pa))
+#define omap_writel(v,a) __raw_writel(v, IO_ADDRESS(a))
+
 static DEFINE_MUTEX(rx51_camera_mutex);
 static unsigned int rx51_camera_xshutdown;
 
@@ -191,32 +196,6 @@ static int __init rx51_camera_hw_init(void)
 
 #define STINGRAY_XCLK		ISP_XCLK_A
 
-static unsigned int rx51_calc_pixelclk(struct smia_mode *mode)
-{
-	static const int S = 8;
-	unsigned int pixelclk;
-
-	/* Calculate average pixel clock per line. Assume buffers can spread
-	 * the data over horizontal blanking time. Rounding upwards. */
-	pixelclk = mode->window_width
-		 * (((mode->pixel_clock + (1 << S) - 1) >> S) + mode->width - 1)
-		 / mode->width;
-	pixelclk <<= S;
-
-	return pixelclk;
-}
-
-static int rx51_stingray_configure_interface(struct v4l2_subdev *subdev,
-					     struct smia_mode *mode)
-{
-	struct isp_device *isp = v4l2_dev_to_isp_device(subdev->v4l2_dev);
-	unsigned int pixelclk;
-
-	pixelclk = rx51_calc_pixelclk(mode);
-	isp->platform_cb.set_pixel_clock(isp, pixelclk);
-	return 0;
-}
-
 static int rx51_stingray_set_xclk(struct v4l2_subdev *subdev, int hz)
 {
 	struct isp_device *isp = v4l2_dev_to_isp_device(subdev->v4l2_dev);
@@ -244,7 +223,6 @@ static int rx51_stingray_set_xshutdown(struct v4l2_subdev *subdev, int set)
 }
 
 static struct et8ek8_platform_data rx51_et8ek8_platform_data = {
-	.configure_interface	= rx51_stingray_configure_interface,
 	.set_xclk		= rx51_stingray_set_xclk,
 	.set_xshutdown		= rx51_stingray_set_xshutdown,
 };
@@ -301,16 +279,6 @@ static struct adp1653_platform_data rx51_adp1653_platform_data = {
 
 #define ACMELITE_XCLK		ISP_XCLK_A
 
-static void rx51_acmelite_configure_interface(struct v4l2_subdev *subdev,
-					      struct smia_mode *mode)
-{
-	struct isp_device *isp = v4l2_dev_to_isp_device(subdev->v4l2_dev);
-	unsigned int pixelclk;
-
-	pixelclk = rx51_calc_pixelclk(mode);
-	isp->platform_cb.set_pixel_clock(isp, pixelclk);
-}
-
 static int rx51_acmelite_set_xclk(struct v4l2_subdev *subdev, int hz)
 {
 	struct isp_device *isp = v4l2_dev_to_isp_device(subdev->v4l2_dev);
@@ -337,7 +305,6 @@ static int rx51_acmelite_set_xshutdown(struct v4l2_subdev *subdev, int set)
 }
 
 static struct smia_sensor_platform_data rx51_smia_sensor_platform_data = {
-	.configure_interface	= rx51_acmelite_configure_interface,
 	.set_xclk		= rx51_acmelite_set_xclk,
 	.set_xshutdown		= rx51_acmelite_set_xshutdown,
 };
