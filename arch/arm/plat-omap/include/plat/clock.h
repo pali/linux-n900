@@ -14,10 +14,45 @@
 #define __ARCH_ARM_OMAP_CLOCK_H
 
 #include <linux/list.h>
+#include <linux/notifier.h>
 
 struct module;
 struct clk;
 struct clockdomain;
+
+/**
+ * struct clk_notifier - associate a clk with a notifier
+ * @clk: struct clk * to associate the notifier with
+ * @notifier_head: a blocking_notifier_head for this clk
+ * @node: linked list pointers
+ *
+ * A list of struct clk_notifier is maintained by the notifier code.
+ * An entry is created whenever code registers the first notifier on a
+ * particular @clk.  Future notifiers on that @clk are added to the
+ * @notifier_head.
+ */
+struct clk_notifier {
+	struct clk			*clk;
+	struct blocking_notifier_head	notifier_head;
+	struct list_head		node;
+};
+
+/**
+ * struct clk_notifier_data - rate data to pass to the notifier callback
+ * @clk: struct clk * being changed
+ * @old_rate: previous rate of this clock
+ * @new_rate: new rate of this clock
+ *
+ * For a pre-notifier, old_rate is the clock's rate before this rate
+ * change, and new_rate is what the rate will be in the future.  For a
+ * post-notifier, old_rate and new_rate are both set to the clock's
+ * current rate (this was done to optimize the implementation).
+ */
+struct clk_notifier_data {
+	struct clk		*clk;
+	unsigned long		old_rate;
+	unsigned long		new_rate;
+};
 
 /**
  * struct clkops - some clock function pointers
@@ -247,11 +282,13 @@ struct clk {
 	struct list_head	children;
 	struct list_head	sibling;	/* node for children */
 	unsigned long		rate;
+	unsigned long		temp_rate;
 	void __iomem		*enable_reg;
 	unsigned long		(*recalc)(struct clk *);
 	int			(*set_rate)(struct clk *, unsigned long);
 	long			(*round_rate)(struct clk *, unsigned long);
 	void			(*init)(struct clk *);
+	u16			notifier_count;
 	u8			enable_bit;
 	s8			usecount;
 	u8			fixed_div;
@@ -294,7 +331,8 @@ extern void propagate_rate(struct clk *clk);
 extern void recalculate_root_clocks(void);
 extern unsigned long followparent_recalc(struct clk *clk);
 extern void clk_enable_init_clocks(void);
-unsigned long omap_fixed_divisor_recalc(struct clk *clk);
+extern int clk_notifier_register(struct clk *clk, struct notifier_block *nb);
+extern int clk_notifier_unregister(struct clk *clk, struct notifier_block *nb);unsigned long omap_fixed_divisor_recalc(struct clk *clk);
 extern struct clk *omap_clk_get_by_name(const char *name);
 extern int omap_clk_enable_autoidle_all(void);
 extern int omap_clk_disable_autoidle_all(void);
@@ -302,5 +340,32 @@ extern int omap_clk_disable_autoidle_all(void);
 extern const struct clkops clkops_null;
 
 extern struct clk dummy_ck;
+
+/*
+ * Clk notifier callback types
+ *
+ * Since the notifier is called with interrupts disabled, any actions
+ * taken by callbacks must be extremely fast and lightweight.
+ *
+ * CLK_PRE_RATE_CHANGE - called after all callbacks have approved the
+ *     rate change, immediately before the clock rate is changed, to
+ *     indicate that the rate change will proceed.  Drivers must
+ *     immediately terminate any operations that will be affected by
+ *     the rate change.  Callbacks must always return NOTIFY_DONE.
+ *
+ * CLK_ABORT_RATE_CHANGE: called if the rate change failed for some
+ *     reason after CLK_PRE_RATE_CHANGE.  In this case, all registered
+ *     notifiers on the clock will be called with
+ *     CLK_ABORT_RATE_CHANGE. Callbacks must always return
+ *     NOTIFY_DONE.
+ *
+ * CLK_POST_RATE_CHANGE - called after the clock rate change has
+ *     successfully completed.  Callbacks must always return
+ *     NOTIFY_DONE.
+ *
+ */
+#define CLK_PRE_RATE_CHANGE		1
+#define CLK_ABORT_RATE_CHANGE		2
+#define CLK_POST_RATE_CHANGE		3
 
 #endif
