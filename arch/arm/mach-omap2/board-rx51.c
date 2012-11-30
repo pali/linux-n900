@@ -44,6 +44,10 @@ static struct gpio_led gpio_leds[] = {
 		.name	= "sleep_ind",
 		.gpio	= RX51_GPIO_SLEEP_IND,
 	},
+	{
+		.name	= "slide",
+		.gpio	= 71,
+	},
 };
 
 static struct gpio_led_platform_data gpio_led_info = {

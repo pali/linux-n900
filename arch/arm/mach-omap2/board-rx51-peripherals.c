@@ -365,7 +365,7 @@ static struct platform_device rx51_gpio_keys_device = {
 
 static void __init rx51_add_gpio_keys(void)
 {
-	platform_device_register(&rx51_gpio_keys_device);
+//	platform_device_register(&rx51_gpio_keys_device);
 }
 #else
 static void __init rx51_add_gpio_keys(void)
