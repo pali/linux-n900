@@ -38,4 +38,5 @@ struct hci_h4p_platform_data {
 	void (*bt_wu)(bool);
 	void (*reset)(bool);
 	unsigned int host_wu_gpio;
+	u8	bd_addr[6];
 };

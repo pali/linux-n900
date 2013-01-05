@@ -1407,6 +1407,50 @@ static struct platform_device rx51_bt_device = {
 	}
 };
 
+static ssize_t hci_h4p_store_bdaddr(struct device *dev,
+				    struct device_attribute *attr,
+				    const char *buf, size_t count)
+{
+	struct hci_h4p_platform_data *bt_config =
+		rx51_bt_device.dev.platform_data;
+	unsigned int bdaddr[6];
+	int ret, i;
+
+	ret = sscanf(buf, "%2x:%2x:%2x:%2x:%2x:%2x\n",
+			&bdaddr[0], &bdaddr[1], &bdaddr[2],
+			&bdaddr[3], &bdaddr[4], &bdaddr[5]);
+
+	if (ret != 6)
+		return -EINVAL;
+
+	for (i = 0; i < 6; i++)
+		bt_config->bd_addr[i] = bdaddr[i] & 0xff;
+
+	return count;
+}
+
+static ssize_t hci_h4p_show_bdaddr(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct hci_h4p_platform_data *bt_config =
+		rx51_bt_device.dev.platform_data;
+
+	return sprintf(buf, "%.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n",
+		       bt_config->bd_addr[0],
+		       bt_config->bd_addr[1],
+		       bt_config->bd_addr[2],
+		       bt_config->bd_addr[3],
+		       bt_config->bd_addr[4],
+		       bt_config->bd_addr[5]);
+}
+
+static DEVICE_ATTR(bdaddr, S_IRUGO | S_IWUSR, hci_h4p_show_bdaddr,
+		   hci_h4p_store_bdaddr);
+int hci_h4p_sysfs_create_files(struct device *dev)
+{
+	return device_create_file(dev, &dev_attr_bdaddr);
+}
+
 void __init rx51_bt_init(void)
 {
 	int err;
@@ -1430,8 +1474,12 @@ void __init rx51_bt_init(void)
 	bt_plat_data.uart_base = ioremap(OMAP3_UART2_BASE, SZ_2K);
 
 	err = platform_device_register(&rx51_bt_device);
-	if (!err)
-		return;
+	if (!err) {
+		err = hci_h4p_sysfs_create_files(&rx51_bt_device.dev);
+		if(!err)
+			return;
+		platform_device_unregister(&rx51_bt_device);
+	}
 
 	gpio_free(RX51_HCI_H4P_HOSTWU_GPIO);
 fail2:
