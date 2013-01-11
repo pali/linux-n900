@@ -28,9 +28,10 @@
 #include <linux/clk.h>
 #include <linux/err.h>
 #include <linux/hardirq.h>
-#include <plat/omap-pm.h>
 #include <linux/bug.h>
-#include <plat/clock.h>
+
+#include "../../../arch/arm/mach-omap2/omap-pm.h"
+#include "../../../arch/arm/mach-omap2/clock.h"
 
 #include "sgxdefs.h"
 #include "services_headers.h"
@@ -141,15 +142,15 @@ static int vdd2_pre_post_func(struct notifier_block *n, unsigned long event,
 	PVR_TRACE("vdd2_pre_post_func: old clock rate = %lu", cnd->old_rate);
 	PVR_TRACE("vdd2_pre_post_func: new clock rate = %lu", cnd->new_rate);
 
-	if (CLK_PRE_RATE_CHANGE == event) {
+	if (PRE_RATE_CHANGE == event) {
 		PVRSRVDvfsLock();
 		PVR_TRACE("vdd2_pre_post_func: CLK_PRE_RATE_CHANGE event");
 		vdd2_pre_func(n, event, ptr);
-	} else if (CLK_POST_RATE_CHANGE == event) {
+	} else if (POST_RATE_CHANGE == event) {
 		PVR_TRACE("vdd2_pre_post_func: CLK_POST_RATE_CHANGE event");
 		vdd2_post_func(n, event, ptr);
 		PVRSRVDvfsUnlock();
-	} else if (CLK_ABORT_RATE_CHANGE == event) {
+	} else if (ABORT_RATE_CHANGE == event) {
 		PVR_TRACE("vdd2_pre_post_func: CLK_ABORT_RATE_CHANGE event");
 		PVRSRVDvfsUnlock();
 	} else {
