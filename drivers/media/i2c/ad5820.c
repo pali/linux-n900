@@ -36,9 +36,6 @@
 #include <linux/kernel.h>
 #include <linux/regulator/consumer.h>
 
-#include <mach/io.h>
-#include <mach/gpio.h>
-
 #include <media/ad5820.h>
 #include <media/v4l2-device.h>
 
