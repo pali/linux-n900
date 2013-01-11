@@ -31,10 +31,10 @@
 
 #include <asm/gpio.h>
 
-#include "../../../drivers/media/video/omap3isp/isp.h"
-#include "../../../drivers/media/video/omap3isp/ispreg.h"
-#include "../../../drivers/media/video/et8ek8.h"
-#include "../../../drivers/media/video/smia-sensor.h"
+#include "../../../drivers/media/platform/omap3isp/isp.h"
+#include "../../../drivers/media/platform/omap3isp/ispreg.h"
+#include "../../../drivers/media/platform/smia/et8ek8.h"
+#include "../../../drivers/media/platform/smia/smia-sensor.h"
 
 #include <media/ad5820.h>
 #include <media/adp1653.h>
@@ -42,6 +42,7 @@
 
 #include "control.h"
 #include "devices.h"
+#include "omap34xx.h"
 
 #define ADP1653_GPIO_ENABLE	88	/* Used for resetting ADP1653 */
 #define ADP1653_GPIO_INT	167	/* Fault interrupt */
