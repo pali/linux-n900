@@ -593,6 +593,8 @@ config VIDEO_S5K5BAF
 	  This is a V4L2 sensor-level driver for Samsung S5K5BAF 2M
 	  camera sensor with an embedded SoC image signal processor.
 
+source "drivers/media/i2c/smia/Kconfig"
+
 source "drivers/media/i2c/smiapp/Kconfig"
 
 config VIDEO_S5C73M3
