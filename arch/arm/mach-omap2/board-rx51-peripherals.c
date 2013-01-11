@@ -37,9 +37,9 @@
 #include <linux/omap-dma.h>
 #include "gpmc-smc91x.h"
 #include <plat/ssi.h>
-#include <plat/serial.h>
 
 #include "board-rx51.h"
+#include "serial.h"
 
 #include <sound/tlv320aic3x.h>
 #include <sound/tpa6130a2-plat.h>
@@ -1394,6 +1394,8 @@ static bool rx51_hci_h4p_get_host_wu(void)
 {
 	return gpio_get_value(RX51_HCI_H4P_HOSTWU_GPIO);
 }
+
+#define INT_24XX_UART2_IRQ	73
 
 struct hci_h4p_platform_data bt_plat_data = {
 	.uart_irq	= INT_24XX_UART2_IRQ,
