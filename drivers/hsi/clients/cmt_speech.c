@@ -1268,7 +1268,7 @@ static int cs_char_mmap(struct file *file, struct vm_area_struct *vma)
 	if (((vma->vm_end - vma->vm_start) >> PAGE_SHIFT) != 1)
 		return -EINVAL;
 
-	vma->vm_flags |= VM_RESERVED;
+	vma->vm_flags |= VM_IO | VM_DONTDUMP | VM_DONTEXPAND;
 	vma->vm_ops = &cs_char_vm_ops;
 	vma->vm_private_data = file->private_data;
 
@@ -1369,7 +1369,7 @@ static struct miscdevice cs_char_miscdev = {
 	.fops	= &cs_char_fops
 };
 
-static int __init cs_hsi_client_probe(struct device *dev)
+static int cs_hsi_client_probe(struct device *dev)
 {
 	int err = 0;
 	struct hsi_client *cl = to_hsi_client(dev);
@@ -1390,7 +1390,7 @@ static int __init cs_hsi_client_probe(struct device *dev)
 	return err;
 }
 
-static int __exit cs_hsi_client_remove(struct device *dev)
+static int cs_hsi_client_remove(struct device *dev)
 {
 	struct cs_hsi_iface *hi;
 
