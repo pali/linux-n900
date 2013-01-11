@@ -33,8 +33,8 @@
 
 #include "../../../drivers/media/platform/omap3isp/isp.h"
 #include "../../../drivers/media/platform/omap3isp/ispreg.h"
-#include "../../../drivers/media/platform/smia/et8ek8.h"
-#include "../../../drivers/media/platform/smia/smia-sensor.h"
+#include "../../../drivers/media/i2c/smia/et8ek8.h"
+#include "../../../drivers/media/i2c/smia/smia-sensor.h"
 
 #include <media/ad5820.h>
 #include <media/adp1653.h>
