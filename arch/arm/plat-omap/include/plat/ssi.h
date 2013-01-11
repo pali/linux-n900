@@ -179,7 +179,7 @@
  */
 struct omap_ssi_platform_data {
 	unsigned int	num_ports;
-	u32 (*get_dev_context_loss_count)(struct device *dev);
+	int (*get_dev_context_loss_count)(struct device *dev);
 };
 
 /**
