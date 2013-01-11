@@ -1268,7 +1268,7 @@ static int cs_char_mmap(struct file *file, struct vm_area_struct *vma)
 	if (((vma->vm_end - vma->vm_start) >> PAGE_SHIFT) != 1)
 		return -EINVAL;
 
-	vma->vm_flags |= VM_RESERVED;
+	vma->vm_flags |= VM_IO | VM_DONTDUMP | VM_DONTEXPAND;
 	vma->vm_ops = &cs_char_vm_ops;
 	vma->vm_private_data = file->private_data;
 
