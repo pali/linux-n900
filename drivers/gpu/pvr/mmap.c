@@ -433,7 +433,7 @@ int PVRMMap(struct file *pFile, struct vm_area_struct *ps_vma)
 		goto pvrmmap_exit;
 	}
 
-	ps_vma->vm_flags |= VM_RESERVED;
+	ps_vma->vm_flags |= VM_DONTDUMP;
 	ps_vma->vm_flags |= VM_IO;
 
 	ps_vma->vm_flags |= VM_DONTEXPAND;
