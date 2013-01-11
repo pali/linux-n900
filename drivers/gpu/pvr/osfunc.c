@@ -1321,8 +1321,8 @@ enum PVRSRV_ERROR OSReleasePhysPageAddr(void *hOSWrapMem, IMG_BOOL bUseLock)
 					"region returned by find_vma",
 				       psInfo->ulBeyondEndAddr);
 
-			if ((psVMArea->vm_flags & (VM_IO | VM_RESERVED)) !=
-			    (VM_IO | VM_RESERVED))
+			if ((psVMArea->vm_flags & (VM_IO | VM_DONTDUMP)) !=
+			    (VM_IO | VM_DONTDUMP))
 				printk(KERN_WARNING ": OSCpuVToPageListRelease:"
 					" Memory region does not represent "
 					"memory mapped I/O (VMA flags: 0x%lx)",
@@ -1522,8 +1522,8 @@ enum PVRSRV_ERROR OSAcquirePhysPageAddr(void *pvCPUVAddr,
 		goto error_release_mmap_sem;
 	}
 
-	if ((psVMArea->vm_flags & (VM_IO | VM_RESERVED)) !=
-	    (VM_IO | VM_RESERVED)) {
+	if ((psVMArea->vm_flags & (VM_IO | VM_DONTDUMP)) !=
+	    (VM_IO | VM_DONTDUMP)) {
 		printk(KERN_WARNING ": OSCpuVToPageList: "
 				"Memory region does not represent "
 				"memory mapped I/O (VMA flags: 0x%lx)\n",
