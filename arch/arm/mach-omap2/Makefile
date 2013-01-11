@@ -240,6 +240,7 @@ obj-$(CONFIG_MACH_NOKIA_RX51)		+= board-rx51.o sdram-nokia.o
 obj-$(CONFIG_MACH_NOKIA_RX51)		+= board-rx51-peripherals.o
 obj-$(CONFIG_MACH_NOKIA_RX51)		+= board-rx51-video.o
 obj-$(CONFIG_MACH_NOKIA_RX51)		+= board-rx51-camera.o
+obj-$(CONFIG_MACH_NOKIA_RX51)		+= board-rx51-compat.o
 
 # Platform specific device init code
 
