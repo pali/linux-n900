@@ -37,8 +37,7 @@
 #include <linux/spinlock.h>
 #include <linux/hsi/hsi.h>
 #include <linux/debugfs.h>
-#include <plat/omap-pm.h>
-#include <plat/clock.h>
+
 #include <plat/ssi.h>
 
 #define SSI_MAX_CHANNELS	8
@@ -170,12 +169,12 @@ struct omap_ssi_controller {
 	spinlock_t		lock;
 	spinlock_t		ck_lock;
 	unsigned long		fck_rate;
-	u32			loss_count;
+	int			loss_count;
 	u32			max_speed;
 	/* OMAP SSI Controller context */
 	u32			sysconfig;
 	u32			gdd_gcr;
-	u32			(*get_loss)(struct device *dev);
+	int			(*get_loss)(struct device *dev);
 	struct omap_ssi_port	**port;
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *dir;
