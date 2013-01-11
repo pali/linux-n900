@@ -25,8 +25,9 @@
 #include <linux/err.h>
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
-#include <plat/omap-pm.h>
 #include <plat/ssi.h>
+
+#include "omap-pm.h"
 
 static struct omap_ssi_platform_data ssi_pdata = {
 	.num_ports			= SSI_NUM_PORTS,
