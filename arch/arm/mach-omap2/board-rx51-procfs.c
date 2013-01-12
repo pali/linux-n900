@@ -88,7 +88,6 @@ static int component_version_read_proc(char *page, char **start, off_t off,
 	for (i = 0; i< version_configs_n; i++) {
 		ver = &version_configs[i];
 		p += sprintf(p, "%-12s%s\n", ver->component, ver->version);
-		i++;
 	}
 
 	len = (p - page) - off;
