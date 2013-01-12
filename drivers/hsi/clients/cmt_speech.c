@@ -1369,7 +1369,7 @@ static struct miscdevice cs_char_miscdev = {
 	.fops	= &cs_char_fops
 };
 
-static int __init cs_hsi_client_probe(struct device *dev)
+static int cs_hsi_client_probe(struct device *dev)
 {
 	int err = 0;
 	struct hsi_client *cl = to_hsi_client(dev);
@@ -1390,7 +1390,7 @@ static int __init cs_hsi_client_probe(struct device *dev)
 	return err;
 }
 
-static int __exit cs_hsi_client_remove(struct device *dev)
+static int cs_hsi_client_remove(struct device *dev)
 {
 	struct cs_hsi_iface *hi;
 
