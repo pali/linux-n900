@@ -294,7 +294,6 @@ static void isp1704_charger_work(struct work_struct *data)
 		break;
 	case USB_EVENT_NONE:
 		isp->online = false;
-		isp->current_max = 0;
 		isp->present = 0;
 		isp->current_max = 0;
 		isp->psy.type = POWER_SUPPLY_TYPE_USB;
@@ -314,10 +313,18 @@ static void isp1704_charger_work(struct work_struct *data)
 		isp1704_charger_set_type(isp, 0);
 		break;
 	case USB_EVENT_ENUMERATED:
-		if (isp->present)
+		if (isp->present) {
 			isp->current_max = 1800;
-		else
+			isp1704_charger_set_type(isp, 2);
+		} else {
 			isp->current_max = power;
+			if (power < 500)
+				isp1704_charger_set_type(isp, 0);
+			else if (power < 1200)
+				isp1704_charger_set_type(isp, 1);
+			else
+				isp1704_charger_set_type(isp, 2);
+		}
 		break;
 	default:
 		goto out;
