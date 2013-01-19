@@ -1297,6 +1297,16 @@ error:
 	 */
 }
 
+static struct platform_device rx51_audio_device = {
+	.name	= "rx51-audio",
+	.id	= -1,
+};
+
+static void __init rx51_init_audio(void)
+{
+	platform_device_register(&rx51_audio_device);
+}
+
 static struct tsc2005_platform_data tsc2005_pdata = {
 	.ts_pressure_max	= 2048,
 	.ts_pressure_fudge	= 2,
@@ -1395,6 +1405,7 @@ void __init rx51_peripherals_init(void)
 	regulator_has_full_constraints();
 	gpmc_onenand_init(board_onenand_data);
 	rx51_add_gpio_keys();
+	rx51_init_audio();
 	rx51_init_wl1251();
 	rx51_init_tsc2005();
 	rx51_init_lirc();
