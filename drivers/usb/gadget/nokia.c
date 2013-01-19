@@ -38,6 +38,7 @@
  * a "gcc --combine ... part1.c part2.c part3.c ... " build would.
  */
 #define USBF_OBEX_INCLUDED
+#include "f_mass_storage.c"
 #include "f_ecm.c"
 //#include "f_obex.c"
 #include "f_phonet.c"
@@ -96,6 +97,18 @@ MODULE_AUTHOR("Felipe Balbi");
 MODULE_LICENSE("GPL");
 
 /*-------------------------------------------------------------------------*/
+
+static struct fsg_module_parameters fsg_mod_data = {
+	.stall = 0,
+	.luns = 2,
+	.removable_count = 2,
+	.removable = { 1, 1, },
+};
+
+FSG_MODULE_PARAMETERS(/* no prefix */, fsg_mod_data);
+
+static struct fsg_common fsg_common;
+
 static struct usb_function *f_acm_cfg1;
 static struct usb_function *f_acm_cfg2;
 static u8 hostaddr[ETH_ALEN];
@@ -164,6 +177,11 @@ static int __init nokia_bind_config(struct usb_configuration *c)
 	else
 		f_acm_cfg2 = f_acm;
 
+	status = fsg_bind_config(c->cdev, c, &fsg_common);
+	if (status)
+		printk(KERN_DEBUG "could not bind fsg config\n");
+	fsg_common_put(&fsg_common);
+
 	return status;
 err_ecm:
 	usb_remove_function(c, f_acm);
@@ -177,6 +195,8 @@ static int __init nokia_bind(struct usb_composite_dev *cdev)
 	struct usb_gadget	*gadget = cdev->gadget;
 	int			status;
 	int			cur_line;
+	void			*retp;
+	struct fsg_config	fsg_cfg;
 
 	status = gphonet_setup(cdev->gadget);
 	if (status < 0)
@@ -192,6 +212,15 @@ static int __init nokia_bind(struct usb_composite_dev *cdev)
 	if (IS_ERR(the_dev)) {
 		status = PTR_ERR(the_dev);
 		goto err_ether;
+	}
+
+	fsg_config_from_params(&fsg_cfg, &fsg_mod_data);
+	fsg_cfg.vendor_name = "Nokia";
+	fsg_cfg.product_name = "N900";
+	retp = fsg_common_init(&fsg_common, cdev, &fsg_cfg);
+	if (IS_ERR(retp)) {
+		status = PTR_ERR(retp);
+		goto err_fsg;
 	}
 
 	status = usb_string_ids_tab(cdev, strings_dev);
@@ -231,6 +260,8 @@ err_put_cfg1:
 err_acm_inst:
 	usb_put_function_instance(fi_acm);
 err_usb:
+	fsg_common_put(&fsg_common);
+err_fsg:
 	gether_cleanup(the_dev);
 err_ether:
 	cur_line--;
