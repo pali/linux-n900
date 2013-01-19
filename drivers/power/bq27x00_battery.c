@@ -690,6 +690,90 @@ static void bq27x00_external_power_changed(struct power_supply *psy)
 	schedule_delayed_work(&di->work, 0);
 }
 
+/* code for register device access via sysfs */
+
+static ssize_t bq27x00_battery_sysfs_print_reg(struct bq27x00_device_info *di,
+					u8 reg, bool single, char *buf)
+{
+	int ret = bq27x00_read(di, reg, single);
+	if (ret < 0)
+		return sprintf(buf, "%#.2x=error %d\n", reg, ret);
+	else
+		return sprintf(buf, "%#.2x=%#.2x\n", reg, ret);
+}
+
+static ssize_t bq27x00_battery_sysfs_show_registers(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct power_supply *psy = dev_get_drvdata(dev);
+	struct bq27x00_device_info *di = container_of(psy,
+						struct bq27x00_device_info,
+						bat);
+	u8 reg;
+	ssize_t ret = 0;
+
+	switch (di->chip) {
+
+	case BQ27000:
+		for (reg=0x00; reg<=0x01; reg+=1)
+			ret += bq27x00_battery_sysfs_print_reg(di, reg, true, buf+ret);
+		for (reg=0x02; reg<=0x08; reg+=2)
+			ret += bq27x00_battery_sysfs_print_reg(di, reg, false, buf+ret);
+		for (reg=0x0A; reg<=0x0B; reg+=1)
+			ret += bq27x00_battery_sysfs_print_reg(di, reg, true, buf+ret);
+		for (reg=0x0C; reg<=0x2A; reg+=2)
+			ret += bq27x00_battery_sysfs_print_reg(di, reg, false, buf+ret);
+		for (reg=0x2C; reg<=0x7F; reg+=1)
+			ret += bq27x00_battery_sysfs_print_reg(di, reg, true, buf+ret);
+		break;
+
+	case BQ27500:
+		for (reg=0x00; reg<=0x2C; reg+=2)
+			ret += bq27x00_battery_sysfs_print_reg(di, reg, false, buf+ret);
+		for (reg=0x2E; reg<=0x3B; reg+=1)
+			ret += bq27x00_battery_sysfs_print_reg(di, reg, true, buf+ret);
+		for (reg=0x3C; reg<=0x3C; reg+=2)
+			ret += bq27x00_battery_sysfs_print_reg(di, reg, false, buf+ret);
+		for (reg=0x3E; reg<=0x7F; reg+=1)
+			ret += bq27x00_battery_sysfs_print_reg(di, reg, true, buf+ret);
+		break;
+
+	case BQ27425:
+		for (reg=0x00; reg<=0x3C; reg+=2)
+			ret += bq27x00_battery_sysfs_print_reg(di, reg, false, buf+ret);
+		for (reg=0x3E; reg<=0x7F; reg+=1)
+			ret += bq27x00_battery_sysfs_print_reg(di, reg, true, buf+ret);
+		break;
+
+	}
+
+	return ret;
+}
+
+static DEVICE_ATTR(registers, S_IRUGO,
+		bq27x00_battery_sysfs_show_registers, NULL);
+
+static struct attribute *bq27x00_battery_sysfs_attributes[] = {
+	&dev_attr_registers.attr,
+	NULL,
+};
+
+static const struct attribute_group bq27x00_battery_sysfs_attr_group = {
+	.attrs = bq27x00_battery_sysfs_attributes,
+};
+
+static int bq27x00_battery_sysfs_init(struct bq27x00_device_info *di)
+{
+	return sysfs_create_group(&di->bat.dev->kobj,
+			&bq27x00_battery_sysfs_attr_group);
+}
+
+static void bq27x00_battery_sysfs_exit(struct bq27x00_device_info *di)
+{
+	sysfs_remove_group(&di->bat.dev->kobj,
+			&bq27x00_battery_sysfs_attr_group);
+}
+
 static int bq27x00_powersupply_init(struct bq27x00_device_info *di)
 {
 	int ret;
@@ -711,6 +795,15 @@ static int bq27x00_powersupply_init(struct bq27x00_device_info *di)
 	ret = power_supply_register(di->dev, &di->bat);
 	if (ret) {
 		dev_err(di->dev, "failed to register battery: %d\n", ret);
+		mutex_destroy(&di->lock);
+		return ret;
+	}
+
+	ret = bq27x00_battery_sysfs_init(di);
+	if (ret) {
+		dev_err(di->dev, "failed to register battery: %d\n", ret);
+		power_supply_unregister(&di->bat);
+		mutex_destroy(&di->lock);
 		return ret;
 	}
 
@@ -733,6 +826,7 @@ static void bq27x00_powersupply_unregister(struct bq27x00_device_info *di)
 
 	cancel_delayed_work_sync(&di->work);
 
+	bq27x00_battery_sysfs_exit(di);
 	power_supply_unregister(&di->bat);
 
 	mutex_destroy(&di->lock);
