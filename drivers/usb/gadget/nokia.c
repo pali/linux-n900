@@ -30,6 +30,16 @@
 #define NOKIA_VERSION_NUM		0x0211
 #define NOKIA_LONG_NAME			"N900 (PC-Suite Mode)"
 
+/*
+ * Kbuild is not very cooperative with respect to linking separately
+ * compiled library objects into one module.  So for now we won't use
+ * separate compilation ... ensuring init/exit sections work to shrink
+ * the runtime footprint, and giving us at least some parts of what
+ * a "gcc --combine ... part1.c part2.c part3.c ... " build would.
+ */
+
+#include "f_mass_storage.c"
+
 USB_GADGET_COMPOSITE_OPTIONS();
 
 USB_ETHERNET_MODULE_PARAMETERS();
@@ -84,6 +94,18 @@ MODULE_AUTHOR("Felipe Balbi");
 MODULE_LICENSE("GPL");
 
 /*-------------------------------------------------------------------------*/
+
+static struct fsg_module_parameters fsg_mod_data = {
+	.stall = 0,
+	.luns = 2,
+	.removable_count = 2,
+	.removable = { 1, 1, },
+};
+
+FSG_MODULE_PARAMETERS(/* no prefix */, fsg_mod_data);
+
+static struct fsg_common fsg_common;
+
 static struct usb_function *f_acm_cfg1;
 static struct usb_function *f_acm_cfg2;
 static struct usb_function *f_ecm_cfg1;
@@ -201,6 +223,11 @@ static int __init nokia_bind_config(struct usb_configuration *c)
 		f_obex2_cfg2 = f_obex2;
 	}
 
+	status = fsg_bind_config(c->cdev, c, &fsg_common);
+	if (status)
+		printk(KERN_DEBUG "could not bind fsg config\n");
+	fsg_common_put(&fsg_common);
+
 	return status;
 err_ecm:
 	usb_remove_function(c, f_acm);
@@ -227,7 +254,18 @@ err_get_acm:
 static int __init nokia_bind(struct usb_composite_dev *cdev)
 {
 	struct usb_gadget	*gadget = cdev->gadget;
+	struct fsg_config	fsg_cfg;
+	void			*retp;
 	int			status;
+
+	fsg_config_from_params(&fsg_cfg, &fsg_mod_data);
+	fsg_cfg.vendor_name = "Nokia";
+	fsg_cfg.product_name = "N900";
+	retp = fsg_common_init(&fsg_common, cdev, &fsg_cfg);
+	if (IS_ERR(retp)) {
+		status = PTR_ERR(retp);
+		goto err_fsg;
+	}
 
 	status = usb_string_ids_tab(cdev, strings_dev);
 	if (status < 0)
@@ -304,6 +342,8 @@ err_obex2_inst:
 	if (!IS_ERR(fi_phonet))
 		usb_put_function_instance(fi_phonet);
 err_usb:
+	fsg_common_put(&fsg_common);
+err_fsg:
 	return status;
 }
 
