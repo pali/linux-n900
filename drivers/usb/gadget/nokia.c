@@ -38,6 +38,7 @@
  * a "gcc --combine ... part1.c part2.c part3.c ... " build would.
  */
 #include "u_serial.c"
+#include "f_mass_storage.c"
 #include "f_acm.c"
 #include "f_ecm.c"
 #include "f_obex.c"
@@ -99,6 +100,17 @@ MODULE_LICENSE("GPL");
 
 /*-------------------------------------------------------------------------*/
 
+static struct fsg_module_parameters fsg_mod_data = {
+	.stall = 0,
+	.luns = 2,
+	.removable_count = 2,
+	.removable = { 1, 1, },
+};
+
+FSG_MODULE_PARAMETERS(/* no prefix */, fsg_mod_data);
+
+static struct fsg_common fsg_common;
+
 static u8 hostaddr[ETH_ALEN];
 
 static int __init nokia_bind_config(struct usb_configuration *c)
@@ -125,6 +137,11 @@ static int __init nokia_bind_config(struct usb_configuration *c)
 	if (status)
 		printk(KERN_DEBUG "could not bind ecm config\n");
 
+	status = fsg_bind_config(c->cdev, c, &fsg_common);
+	if (status)
+		printk(KERN_DEBUG "could not bind fsg config\n");
+	fsg_common_put(&fsg_common);
+
 	return status;
 }
 
@@ -148,6 +165,8 @@ static int __init nokia_bind(struct usb_composite_dev *cdev)
 {
 	struct usb_gadget	*gadget = cdev->gadget;
 	int			status;
+	void			*retp;
+	struct fsg_config	fsg_cfg;
 
 	status = gphonet_setup(cdev->gadget);
 	if (status < 0)
@@ -160,6 +179,15 @@ static int __init nokia_bind(struct usb_composite_dev *cdev)
 	status = gether_setup(cdev->gadget, hostaddr);
 	if (status < 0)
 		goto err_ether;
+
+	fsg_config_from_params(&fsg_cfg, &fsg_mod_data);
+	fsg_cfg.vendor_name = "Nokia";
+	fsg_cfg.product_name = "N900";
+	retp = fsg_common_init(&fsg_common, cdev, &fsg_cfg);
+	if (IS_ERR(retp)) {
+		status = PTR_ERR(retp);
+		goto err_fsg;
+	}
 
 	status = usb_string_ids_tab(cdev, strings_dev);
 	if (status < 0)
@@ -190,6 +218,8 @@ static int __init nokia_bind(struct usb_composite_dev *cdev)
 	return 0;
 
 err_usb:
+	fsg_common_put(&fsg_common);
+err_fsg:
 	gether_cleanup();
 err_ether:
 	gserial_cleanup();
