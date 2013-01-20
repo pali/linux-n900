@@ -65,10 +65,6 @@ struct isp1704_charger {
 	unsigned		present:1;
 	unsigned		online:1;
 	unsigned		current_max;
-
-	/* temp storage variables */
-	unsigned long		event;
-	unsigned		max_power;
 };
 
 static inline int isp1704_read(struct isp1704_charger *isp, u32 reg)
@@ -245,32 +241,23 @@ static inline int isp1704_charger_detect(struct isp1704_charger *isp)
 
 static void isp1704_charger_work(struct work_struct *data)
 {
-	int			detect;
-	unsigned long		event;
-	unsigned		power;
 	struct isp1704_charger	*isp =
 		container_of(data, struct isp1704_charger, work);
 	static DEFINE_MUTEX(lock);
 
-	event = isp->event;
-	power = isp->max_power;
-
 	mutex_lock(&lock);
 
-	if (event != USB_EVENT_NONE)
-		isp1704_charger_set_power(isp, 1);
-
-	switch (event) {
+	switch (isp->phy->last_event) {
 	case USB_EVENT_VBUS:
 		isp->online = true;
+		isp->present = 1;
+		isp1704_charger_set_power(isp, 1);
 
-		/* detect charger */
-		detect = isp1704_charger_detect(isp);
-
-		if (detect) {
-			isp->present = detect;
+		/* detect wall charger */
+		if (isp1704_charger_detect(isp))
 			isp->psy.type = isp1704_charger_type(isp);
-		}
+		else
+			isp->psy.type = POWER_SUPPLY_TYPE_USB_CDP;
 
 		switch (isp->psy.type) {
 		case POWER_SUPPLY_TYPE_USB_DCP:
@@ -284,12 +271,12 @@ static void isp1704_charger_work(struct work_struct *data)
 			 */
 			isp->current_max = 500;
 			isp1704_charger_set_type(isp, 1);
-			/* FALLTHROUGH */
-		case POWER_SUPPLY_TYPE_USB:
-		default:
 			/* enable data pullups */
 			if (isp->phy->otg->gadget)
 				usb_gadget_connect(isp->phy->otg->gadget);
+			break;
+		default:
+			break;
 		}
 		break;
 	case USB_EVENT_NONE:
@@ -312,20 +299,6 @@ static void isp1704_charger_work(struct work_struct *data)
 		isp1704_charger_set_power(isp, 0);
 		isp1704_charger_set_type(isp, 0);
 		break;
-	case USB_EVENT_ENUMERATED:
-		if (isp->present) {
-			isp->current_max = 1800;
-			isp1704_charger_set_type(isp, 2);
-		} else {
-			isp->current_max = power;
-			if (power < 500)
-				isp1704_charger_set_type(isp, 0);
-			else if (power < 1200)
-				isp1704_charger_set_type(isp, 1);
-			else
-				isp1704_charger_set_type(isp, 2);
-		}
-		break;
 	default:
 		goto out;
 	}
@@ -336,15 +309,10 @@ out:
 }
 
 static int isp1704_notifier_call(struct notifier_block *nb,
-		unsigned long event, void *power)
+		unsigned long val, void *v)
 {
 	struct isp1704_charger *isp =
 		container_of(nb, struct isp1704_charger, nb);
-
-	isp->event = event;
-
-	if (power)
-		isp->max_power = *((unsigned *)power);
 
 	schedule_work(&isp->work);
 
@@ -484,13 +452,13 @@ static int isp1704_charger_probe(struct platform_device *pdev)
 	if (isp->phy->otg->gadget)
 		usb_gadget_disconnect(isp->phy->otg->gadget);
 
+	if (isp->phy->last_event == USB_EVENT_NONE)
+		isp1704_charger_set_power(isp, 0);
+
 	/* Detect charger if VBUS is valid (the cable was already plugged). */
-	ret = isp1704_read(isp, ULPI_USB_INT_STS);
-	isp1704_charger_set_power(isp, 0);
-	if ((ret & ULPI_INT_VBUS_VALID) && !isp->phy->otg->default_a) {
-		isp->event = USB_EVENT_VBUS;
+	if (isp->phy->last_event == USB_EVENT_VBUS &&
+			!isp->phy->otg->default_a)
 		schedule_work(&isp->work);
-	}
 
 	return 0;
 fail2:
