@@ -27,6 +27,7 @@
  *
  */
 
+#include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/firmware.h>
 #include <linux/i2c.h>
@@ -719,19 +720,6 @@ out_regulator_release:
 	return rval;
 }
 
-static int
-smia_set_config(struct v4l2_subdev *subdev, int irq, void *platform_data)
-{
-	struct smia_sensor *sensor = to_smia_sensor(subdev);
-
-	if (platform_data == NULL)
-		return -ENODEV;
-
-	sensor->platform_data = platform_data;
-
-	return smia_dev_init(subdev);
-}
-
 static int smia_query_ctrl(struct v4l2_subdev *subdev, struct v4l2_queryctrl *a)
 {
 	struct smia_sensor *sensor = to_smia_sensor(subdev);
@@ -855,7 +843,6 @@ static const struct v4l2_subdev_video_ops smia_video_ops = {
 };
 
 static const struct v4l2_subdev_core_ops smia_core_ops = {
-	.s_config = smia_set_config,
 	.queryctrl = smia_query_ctrl,
 	.g_ctrl = smia_get_ctrl,
 	.s_ctrl = smia_set_ctrl,
@@ -949,9 +936,11 @@ static int smia_probe(struct i2c_client *client,
 		return -ENOMEM;
 
 	v4l2_i2c_subdev_init(&sensor->subdev, client, &smia_ops);
+	sensor->platform_data = client->dev.platform_data;
+	smia_dev_init(&sensor->subdev);
 	sensor->subdev.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
-	sensor->pad.flags = MEDIA_PAD_FL_OUTPUT;
+	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
 	ret = media_entity_init(&sensor->subdev.entity, 1, &sensor->pad, 0);
 	if (ret < 0)
 		kfree(sensor);
