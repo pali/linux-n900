@@ -873,6 +873,8 @@ static int hci_h4p_register_hdev(struct hci_h4p_info *info)
 	hdev->ioctl = hci_h4p_hci_ioctl;
 	set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);
 
+	SET_HCIDEV_DEV(hdev, info->dev);
+
 	if (hci_register_dev(hdev) < 0) {
 		dev_err(info->dev, "hci_register failed %s.\n", hdev->name);
 		return -ENODEV;
