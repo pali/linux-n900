@@ -1470,10 +1470,8 @@ static bool rx51_hci_h4p_get_host_wu(void)
 	return gpio_get_value(RX51_HCI_H4P_HOSTWU_GPIO);
 }
 
-#define INT_24XX_UART2_IRQ	73
-
 struct hci_h4p_platform_data bt_plat_data = {
-	.uart_irq	= INT_24XX_UART2_IRQ,
+	.uart_irq	= 73 + OMAP_INTC_START,
 	.host_wu	= rx51_hci_h4p_get_host_wu,
 	.bt_wu		= rx51_hci_h4p_set_bt_wu,
 	.reset		= rx51_hci_h4p_set_power,
