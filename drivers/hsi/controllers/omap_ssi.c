@@ -286,12 +286,12 @@ static int ssi_clk_enable(struct hsi_controller *ssi)
 	spin_lock_bh(&omap_ssi->ck_lock);
 	if (omap_ssi->ck_refcount++)
 		goto out;
-	err = clk_enable(omap_ssi->fck);
+	err = clk_prepare_enable(omap_ssi->fck);
 	if (unlikely(err < 0))
 		goto out;
-	err = clk_enable(omap_ssi->ick);
+	err = clk_prepare_enable(omap_ssi->ick);
 	if (unlikely(err < 0)) {
-		clk_disable(omap_ssi->fck);
+		clk_disable_unprepare(omap_ssi->fck);
 		goto out;
 	}
 	if ((omap_ssi->get_loss) && (omap_ssi->loss_count ==
@@ -327,8 +327,8 @@ static void ssi_clk_disable(struct hsi_controller *ssi)
 				(*omap_ssi->get_loss)(ssi->device.parent);
 
 	ssi_for_each_port(ssi, NULL, ssi_save_port_ctx);
-	clk_disable(omap_ssi->ick);
-	clk_disable(omap_ssi->fck);
+	clk_disable_unprepare(omap_ssi->ick);
+	clk_disable_unprepare(omap_ssi->fck);
 out:
 	spin_unlock_bh(&omap_ssi->ck_lock);
 }
