@@ -59,11 +59,6 @@
 #define RX51_CAMERA_PRIMARY	(RX51_CAMERA_STINGRAY | RX51_CAMERA_LENS)
 #define RX51_CAMERA_SECONDARY	RX51_CAMERA_ACMELITE
 
-#define IO_OFFSET		0x90000000
-#define __IO_ADDRESS(pa)	((pa) + IO_OFFSET)/* Works for L3 and L4 */
-#define IO_ADDRESS(pa)           IOMEM(__IO_ADDRESS(pa))
-#define omap_writel(v,a) __raw_writel(v, IO_ADDRESS(a))
-
 static DEFINE_MUTEX(rx51_camera_mutex);
 static unsigned int rx51_camera_xshutdown;
 
@@ -201,6 +196,9 @@ static int rx51_stingray_set_xclk(struct v4l2_subdev *subdev, int hz)
 {
 	struct isp_device *isp = v4l2_dev_to_isp_device(subdev->v4l2_dev);
 
+	if (!isp)
+		return 1;
+
 	isp->platform_cb.set_xclk(isp, hz, STINGRAY_XCLK);
 
 	return 0;
@@ -215,9 +213,9 @@ static int rx51_stingray_set_xshutdown(struct v4l2_subdev *subdev, int set)
 		/* CONTROL_CSIRXFE
 		 * Data/strobe, enable transceiver, disable reset
 		 */
-		omap_writel(OMAP343X_CSIB_RESET | OMAP343X_CSIB_PWRDNZ |
+		omap_ctrl_writel(OMAP343X_CSIB_RESET | OMAP343X_CSIB_PWRDNZ |
 			    OMAP343X_CSIB_SELFORM,
-			    OMAP343X_CTRL_BASE + OMAP343X_CONTROL_CSIRXFE);
+			    OMAP343X_CONTROL_CSIRXFE);
 	}
 
 	return ret;
@@ -284,6 +282,9 @@ static int rx51_acmelite_set_xclk(struct v4l2_subdev *subdev, int hz)
 {
 	struct isp_device *isp = v4l2_dev_to_isp_device(subdev->v4l2_dev);
 
+	if (!isp)
+		return 1;
+
 	isp->platform_cb.set_xclk(isp, hz, ACMELITE_XCLK);
 
 	return 0;
@@ -298,8 +299,8 @@ static int rx51_acmelite_set_xshutdown(struct v4l2_subdev *subdev, int set)
 		/* CONTROL_CSIRXFE
 		 * Data/clock, enable transceiver, disable reset
 		 */
-		omap_writel(OMAP343X_CSIB_RESET | OMAP343X_CSIB_PWRDNZ,
-			    OMAP343X_CTRL_BASE + OMAP343X_CONTROL_CSIRXFE);
+		omap_ctrl_writel(OMAP343X_CSIB_RESET | OMAP343X_CSIB_PWRDNZ,
+			    OMAP343X_CONTROL_CSIRXFE);
 	}
 
 	return ret;
