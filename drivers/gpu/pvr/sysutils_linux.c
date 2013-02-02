@@ -350,19 +350,19 @@ enum PVRSRV_ERROR EnableSGXClocks(struct SYS_DATA *psSysData)
 	PVR_TRACE("CPU Clock is %dMhz", HZ_TO_MHZ(rate));
 #endif
 
-	res = clk_enable(psSysSpecData->psSGX_FCK);
+	res = clk_prepare_enable(psSysSpecData->psSGX_FCK);
 	if (res < 0) {
 		PVR_DPF(PVR_DBG_ERROR, "EnableSGXClocks: "
 			"Couldn't enable SGX functional clock (%d)", res);
 		return PVRSRV_ERROR_GENERIC;
 	}
 
-	res = clk_enable(psSysSpecData->psSGX_ICK);
+	res = clk_prepare_enable(psSysSpecData->psSGX_ICK);
 	if (res < 0) {
 		PVR_DPF(PVR_DBG_ERROR, "EnableSGXClocks: "
 			"Couldn't enable SGX interface clock (%d)", res);
 
-		clk_disable(psSysSpecData->psSGX_FCK);
+		clk_disable_unprepare(psSysSpecData->psSGX_FCK);
 		return PVRSRV_ERROR_GENERIC;
 	}
 
@@ -382,10 +382,10 @@ void DisableSGXClocks(struct SYS_DATA *psSysData)
 	PVR_TRACE("DisableSGXClocks: Disabling SGX Clocks");
 
 	if (psSysSpecData->psSGX_ICK)
-		clk_disable(psSysSpecData->psSGX_ICK);
+		clk_disable_unprepare(psSysSpecData->psSGX_ICK);
 
 	if (psSysSpecData->psSGX_FCK)
-		clk_disable(psSysSpecData->psSGX_FCK);
+		clk_disable_unprepare(psSysSpecData->psSGX_FCK);
 
 	psSysSpecData->bSGXClocksEnabled = IMG_FALSE;
 	sgx_need_perf(psSysData, 0);
@@ -506,8 +506,8 @@ static enum PVRSRV_ERROR InitDebugClocks(struct SYS_DATA *psSysData)
 	if (!psSysSpecData->gpt_base)
 		goto err3;
 
-	clk_enable(psSysSpecData->psGPT11_ICK);
-	clk_enable(psSysSpecData->psGPT11_FCK);
+	clk_prepare_enable(psSysSpecData->psGPT11_ICK);
+	clk_prepare_enable(psSysSpecData->psGPT11_FCK);
 
 	rate = gpt_read_reg(psSysData, SYS_OMAP3430_GPTIMER_TSICR);
 	if (!(rate & 4)) {
@@ -516,8 +516,8 @@ static enum PVRSRV_ERROR InitDebugClocks(struct SYS_DATA *psSysData)
 		gpt_write_reg(psSysData, SYS_OMAP3430_GPTIMER_TSICR, rate | 4);
 	}
 
-	clk_disable(psSysSpecData->psGPT11_FCK);
-	clk_disable(psSysSpecData->psGPT11_ICK);
+	clk_disable_unprepare(psSysSpecData->psGPT11_FCK);
+	clk_disable_unprepare(psSysSpecData->psGPT11_ICK);
 
 	return PVRSRV_OK;
 
@@ -562,10 +562,10 @@ static enum PVRSRV_ERROR EnableDebugClocks(struct SYS_DATA *psSysData)
 {
 	struct SYS_SPECIFIC_DATA *psSysSpecData = psSysData->pvSysSpecificData;
 
-	if (clk_enable(psSysSpecData->psGPT11_FCK) < 0)
+	if (clk_prepare_enable(psSysSpecData->psGPT11_FCK) < 0)
 		goto err0;
 
-	if (clk_enable(psSysSpecData->psGPT11_ICK) < 0)
+	if (clk_prepare_enable(psSysSpecData->psGPT11_ICK) < 0)
 		goto err1;
 
 	gpt_write_reg(psSysData, SYS_OMAP3430_GPTIMER_ENABLE, 3);
@@ -573,7 +573,7 @@ static enum PVRSRV_ERROR EnableDebugClocks(struct SYS_DATA *psSysData)
 	return PVRSRV_OK;
 
 err1:
-	clk_disable(psSysSpecData->psGPT11_FCK);
+	clk_disable_unprepare(psSysSpecData->psGPT11_FCK);
 err0:
 	PVR_DPF(PVR_DBG_ERROR, "%s: can't enable clocks", __func__);
 
@@ -586,8 +586,8 @@ static inline void DisableDebugClocks(struct SYS_DATA *psSysData)
 
 	gpt_write_reg(psSysData, SYS_OMAP3430_GPTIMER_ENABLE, 0);
 
-	clk_disable(psSysSpecData->psGPT11_ICK);
-	clk_disable(psSysSpecData->psGPT11_FCK);
+	clk_disable_unprepare(psSysSpecData->psGPT11_ICK);
+	clk_disable_unprepare(psSysSpecData->psGPT11_FCK);
 }
 
 #else
