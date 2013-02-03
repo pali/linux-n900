@@ -31,6 +31,7 @@
 #include "gpmc.h"
 #include "pm.h"
 #include "sdram-nokia.h"
+#include "board-rx51-secure.h"
 
 #define RX51_GPIO_SLEEP_IND 162
 
@@ -102,6 +103,12 @@ static void __init rx51_init(void)
 	usb_musb_init(&musb_board_data);
 	rx51_peripherals_init();
 	rx51_camera_init();
+
+#ifdef CONFIG_ARM_ERRATA_430973
+	printk(KERN_INFO "Enabling ARM errata 430973 workaround.\n");
+	/* set IBE to 1 */
+	rx51_secure_update_aux_cr(1 << 6, 0);
+#endif
 
 	/* Ensure SDRC pins are mux'd for self-refresh */
 	omap_mux_init_signal("sdrc_cke0", OMAP_PIN_OUTPUT);
