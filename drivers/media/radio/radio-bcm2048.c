@@ -1763,7 +1763,7 @@ static void bcm2048_rds_fifo_receive(struct bcm2048_device *bdev)
 static int bcm2048_get_rds_data(struct bcm2048_device *bdev, char *data)
 {
 	int err = 0, i, p = 0;
-	char data_buffer[BCM2048_MAX_RDS_RADIO_TEXT*5];
+	char *data_buffer;
 
 	mutex_lock(&bdev->mutex);
 
@@ -1772,7 +1772,11 @@ static int bcm2048_get_rds_data(struct bcm2048_device *bdev, char *data)
 		goto unlock;
 	}
 
-	memset(data_buffer, 0, sizeof(data_buffer));
+	data_buffer = kzalloc(BCM2048_MAX_RDS_RADIO_TEXT*5, GFP_KERNEL);
+	if (!data_buffer) {
+		err = -ENOMEM;
+		goto unlock;
+	}
 
 	for (i = 0; i < bdev->rds_info.text_len; i++) {
 		p += sprintf(data_buffer+p, "%x ",
@@ -1780,6 +1784,7 @@ static int bcm2048_get_rds_data(struct bcm2048_device *bdev, char *data)
 	}
 
 	memcpy(data, data_buffer, p);
+	kfree(data_buffer);
 
 unlock:
 	mutex_unlock(&bdev->mutex);
@@ -2294,7 +2299,7 @@ static int bcm2048_vidioc_g_audio(struct file *file, void *priv,
 }
 
 static int bcm2048_vidioc_s_audio(struct file *file, void *priv,
-		struct v4l2_audio *audio)
+		const struct v4l2_audio *audio)
 {
 	if (audio->index != 0)
 		return -EINVAL;
@@ -2411,7 +2416,7 @@ static int bcm2048_vidioc_s_frequency(struct file *file, void *priv,
 }
 
 static int bcm2048_vidioc_s_hw_freq_seek(struct file *file, void *priv,
-						struct v4l2_hw_freq_seek *seek)
+						const struct v4l2_hw_freq_seek *seek)
 {
 	struct bcm2048_device *bdev = video_get_drvdata(video_devdata(file));
 	int err;
