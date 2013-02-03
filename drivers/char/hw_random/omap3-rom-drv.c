@@ -4,6 +4,8 @@
  * Copyright (C) 2009 Nokia Corporation
  * Author: Juha Yrjola <juha.yrjola@solidboot.com>
  *
+ * Copyright (C) 2013 Pali Rohár <pali.rohar@gmail.com>
+ *
  * This file is licensed under  the terms of the GNU General Public
  * License version 2. This program is licensed "as is" without any
  * warranty of any kind, whether express or implied.
@@ -16,8 +18,9 @@
 #include <linux/timer.h>
 #include <linux/clk.h>
 #include <linux/err.h>
+#include <linux/platform_device.h>
 
-#include <mach/cpu.h>
+#include "../../../arch/arm/mach-omap2/soc.h"
 
 #define SEC_HAL_RNG_GENERATE		29
 #define RNG_RESET			0x01
@@ -62,7 +65,7 @@ static void omap3_rom_idle_rng(unsigned long data)
 		       omap3_rom_rng_name, r);
 		return;
 	}
-	clk_disable(rng_clk);
+	clk_disable_unprepare(rng_clk);
 	rng_idle = 1;
 }
 
@@ -73,11 +76,11 @@ static int omap3_rom_get_random(void *buf, unsigned int count)
 
 	del_timer_sync(&idle_timer);
 	if (rng_idle) {
-		clk_enable(rng_clk);
+		clk_prepare_enable(rng_clk);
 		r = call_sec_rom(SEC_HAL_RNG_GENERATE, 0, 0, 3, NULL, 0,
 				 RNG_GEN_PRNG_HW_INIT);
 		if (r != 0) {
-			clk_disable(rng_clk);
+			clk_disable_unprepare(rng_clk);
 			printk(KERN_ERR "%s: HW init failed: %d\n",
 			       omap3_rom_rng_name, r);
 			return -EIO;
@@ -115,7 +118,7 @@ static struct hwrng omap3_rom_rng_ops = {
 	.data_read	= omap3_rom_rng_data_read,
 };
 
-static int __init omap3_rom_rng_init(void)
+static int omap3_rom_rng_probe(struct platform_device *pdev)
 {
 	printk(KERN_INFO "%s: initializing\n", omap3_rom_rng_name);
 	if (!cpu_is_omap34xx()) {
@@ -138,19 +141,30 @@ static int __init omap3_rom_rng_init(void)
 	}
 
 	/* Leave the RNG in reset state. */
-	clk_enable(rng_clk);
+	clk_prepare_enable(rng_clk);
 	omap3_rom_idle_rng(0);
 
 	return hwrng_register(&omap3_rom_rng_ops);
 }
 
-static void __exit omap3_rom_rng_exit(void)
+static int omap3_rom_rng_remove(struct platform_device *pdev)
 {
 	hwrng_unregister(&omap3_rom_rng_ops);
+	return 0;
 }
 
-module_init(omap3_rom_rng_init);
-module_exit(omap3_rom_rng_exit);
+static struct platform_driver omap3_rom_rng_driver = {
+	.driver = {
+		.name		= "omap3-rom-rng",
+		.owner		= THIS_MODULE,
+	},
+	.probe		= omap3_rom_rng_probe,
+	.remove		= omap3_rom_rng_remove,
+};
 
+module_platform_driver(omap3_rom_rng_driver);
+
+MODULE_ALIAS("platform:omap3-rom-rng");
 MODULE_AUTHOR("Juha Yrjola");
+MODULE_AUTHOR("Pali Rohár <pali.rohar@gmail.com>");
 MODULE_LICENSE("GPL");
