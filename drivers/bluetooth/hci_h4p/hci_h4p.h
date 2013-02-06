@@ -200,6 +200,8 @@ struct hci_bc4_set_bdaddr {
 
 int hci_h4p_send_alive_packet(struct hci_h4p_info *info);
 
+int hci_h4p_bcm_sysfs_create_files(struct hci_h4p_info *info);
+void hci_h4p_bcm_sysfs_remove_files(struct hci_h4p_info *info);
 void hci_h4p_bcm_parse_fw_event(struct hci_h4p_info *info,
 				struct sk_buff *skb);
 int hci_h4p_bcm_send_fw(struct hci_h4p_info *info,

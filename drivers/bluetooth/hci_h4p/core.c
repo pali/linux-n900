@@ -739,6 +739,9 @@ static int hci_h4p_hci_open(struct hci_dev *hdev)
 	skb_dequeue(&fw_queue);
 	skb_dequeue(&fw_queue);
 
+	if (info->man_id == BT_CHIP_BCM)
+		hci_h4p_bcm_sysfs_create_files(info);
+
 	err = hci_h4p_send_fw(info, &fw_queue);
 	if (err < 0) {
 		dev_err(info->dev, "Sending firmware failed.\n");
@@ -988,6 +991,9 @@ static int hci_h4p_remove(struct platform_device *pdev)
 	struct hci_h4p_info *info;
 
 	info = platform_get_drvdata(pdev);
+
+	if (info->man_id == BT_CHIP_BCM)
+		hci_h4p_bcm_sysfs_remove_files(info);
 
 	hci_h4p_hci_close(info->hdev);
 	free_irq(gpio_to_irq(info->host_wakeup_gpio), info);
