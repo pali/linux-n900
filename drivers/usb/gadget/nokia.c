@@ -40,7 +40,7 @@
 #define USB_FACM_INCLUDED
 #include "f_acm.c"
 #include "f_ecm.c"
-#include "f_obex.c"
+//#include "f_obex.c"
 #include "f_serial.c"
 #include "f_phonet.c"
 #include "u_ether.c"
@@ -118,6 +118,7 @@ static int __init nokia_bind_config(struct usb_configuration *c)
 	if (status)
 		printk(KERN_DEBUG "could not bind phonet config\n");
 
+/*
 	status = obex_bind_config(c, tty_lines[TTY_PORT_OBEX0]);
 	if (status)
 		printk(KERN_DEBUG "could not bind obex config %d\n", 0);
@@ -125,6 +126,7 @@ static int __init nokia_bind_config(struct usb_configuration *c)
 	status = obex_bind_config(c, tty_lines[TTY_PORT_OBEX1]);
 	if (status)
 		printk(KERN_DEBUG "could not bind obex config %d\n", 0);
+*/
 
 	status = acm_bind_config(c, tty_lines[TTY_PORT_ACM]);
 	if (status)
