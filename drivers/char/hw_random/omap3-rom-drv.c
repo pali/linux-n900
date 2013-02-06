@@ -133,7 +133,7 @@ static int omap3_rom_rng_probe(struct platform_device *pdev)
 	}
 
 	setup_timer(&idle_timer, omap3_rom_idle_rng, 0);
-	rng_clk = clk_get(NULL, "rng_ick");
+	rng_clk = clk_get_sys("omap_rng", "ick");
 	if (IS_ERR(rng_clk)) {
 		printk(KERN_ERR "%s: unable to get RNG clock\n",
 		       omap3_rom_rng_name);
