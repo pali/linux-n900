@@ -550,6 +550,13 @@ static int twl4030_set_suspend(struct usb_phy *x, int suspend)
 	return 0;
 }
 
+static int twl4030_set_power(struct usb_phy *x, unsigned mA)
+{
+	atomic_notifier_call_chain(&x->notifier,
+			USB_EVENT_ENUMERATED, &mA);
+	return 0;
+}
+
 static int twl4030_set_peripheral(struct usb_otg *otg,
 					struct usb_gadget *gadget)
 {
@@ -611,6 +618,7 @@ static int twl4030_usb_probe(struct platform_device *pdev)
 	twl->phy.label		= "twl4030";
 	twl->phy.otg		= otg;
 	twl->phy.set_suspend	= twl4030_set_suspend;
+	twl->phy.set_power	= twl4030_set_power;
 
 	otg->phy		= &twl->phy;
 	otg->set_host		= twl4030_set_host;
