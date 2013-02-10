@@ -90,15 +90,15 @@ static void isp1704_charger_set_power(struct isp1704_charger *isp, bool on)
 }
 
 /*
- * Set charger type from isp1704 if a function for it
+ * Set charger current from isp1704 if a function for it
  * has been provided with platform data.
  */
-static void isp1704_charger_set_type(struct isp1704_charger *isp, int type)
+static void isp1704_charger_set_current(struct isp1704_charger *isp, int mA)
 {
 	struct isp1704_charger_data	*board = isp->dev->platform_data;
 
-	if (board && board->set_type)
-		board->set_type(type);
+	if (board && board->set_current)
+		board->set_current(mA);
 }
 
 /*
@@ -239,6 +239,15 @@ static inline int isp1704_charger_detect(struct isp1704_charger *isp)
 	return ret;
 }
 
+static inline int isp1704_charger_detect_dcp(struct isp1704_charger *isp)
+{
+	if (isp1704_charger_detect(isp) &&
+		isp1704_charger_type(isp) == POWER_SUPPLY_TYPE_USB_DCP)
+		return true;
+	else
+		return false;
+}
+
 static void isp1704_charger_work(struct work_struct *data)
 {
 	struct isp1704_charger	*isp =
@@ -249,36 +258,42 @@ static void isp1704_charger_work(struct work_struct *data)
 
 	switch (isp->phy->last_event) {
 	case USB_EVENT_VBUS:
-		isp->online = true;
-		isp->present = 1;
-		isp1704_charger_set_power(isp, 1);
+		/* do not call wall charger detection more times */
+		if (!isp->present) {
+			isp->online = true;
+			isp->present = 1;
+			isp1704_charger_set_power(isp, 1);
 
-		/* detect wall charger */
-		if (isp1704_charger_detect(isp))
-			isp->psy.type = isp1704_charger_type(isp);
-		else
-			isp->psy.type = POWER_SUPPLY_TYPE_USB_CDP;
+			/* detect wall charger */
+			if (isp1704_charger_detect_dcp(isp)) {
+				isp->psy.type = POWER_SUPPLY_TYPE_USB_DCP;
+				isp->current_max = 1800;
+				isp1704_charger_set_current(isp, 1800);
+			} else {
+				isp->psy.type = POWER_SUPPLY_TYPE_USB;
+				isp->current_max = 100;
+			}
 
-		switch (isp->psy.type) {
-		case POWER_SUPPLY_TYPE_USB_DCP:
-			isp->current_max = 1800;
-			isp1704_charger_set_type(isp, 2);
-			break;
-		case POWER_SUPPLY_TYPE_USB_CDP:
+			/* enable data pullups */
+			if (isp->phy->otg->gadget)
+				usb_gadget_connect(isp->phy->otg->gadget);
+		}
+
+		if (isp->psy.type != POWER_SUPPLY_TYPE_USB_DCP) {
 			/*
 			 * Only 500mA here or high speed chirp
 			 * handshaking may break
 			 */
-			isp->current_max = 500;
-			isp1704_charger_set_type(isp, 1);
-			/* enable data pullups */
-			if (isp->phy->otg->gadget)
-				usb_gadget_connect(isp->phy->otg->gadget);
-			break;
-		default:
-			break;
+			if (isp->current_max > 500)
+				isp->current_max = 500;
+
+			if (isp->current_max > 100)
+				isp->psy.type = POWER_SUPPLY_TYPE_USB_CDP;
+
+			isp1704_charger_set_current(isp, isp->current_max);
 		}
 		break;
+
 	case USB_EVENT_NONE:
 		isp->online = false;
 		isp->present = 0;
@@ -297,7 +312,7 @@ static void isp1704_charger_work(struct work_struct *data)
 			usb_gadget_disconnect(isp->phy->otg->gadget);
 
 		isp1704_charger_set_power(isp, 0);
-		isp1704_charger_set_type(isp, 0);
+		isp1704_charger_set_current(isp, 0);
 		break;
 	default:
 		goto out;
@@ -313,6 +328,13 @@ static int isp1704_notifier_call(struct notifier_block *nb,
 {
 	struct isp1704_charger *isp =
 		container_of(nb, struct isp1704_charger, nb);
+
+	if (val == USB_EVENT_ENUMERATED) {
+		if (v)
+			isp->current_max = *((unsigned *)v);
+		else
+			isp->current_max = 0;
+	}
 
 	schedule_work(&isp->work);
 
