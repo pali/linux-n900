@@ -284,7 +284,7 @@ static struct platform_device rx51_battery_device = {
 };
 
 #if defined(CONFIG_CHARGER_BQ2415X) || defined(CONFIG_CHARGER_BQ2415X_MODULE)
-static enum bq2415x_mode rx51_charger_mode = BQ2415X_MODE_NONE;
+static enum bq2415x_mode rx51_charger_mode = BQ2415X_MODE_OFF;
 static void *rx51_charger_hook_data;
 static void (*rx51_charger_hook)(enum bq2415x_mode mode, void *data);
 
@@ -298,23 +298,20 @@ static int rx51_charger_set_hook(
 	return 1;
 }
 
-static void rx51_charger_set_type(int type)
+static void rx51_charger_set_current(int mA)
 {
 	enum bq2415x_mode mode;
 
-	switch (type) {
-	case 0:
+	printk("Charger current limit is %d mA\n", mA);
+
+	if (mA == 0)
+		mode = BQ2415X_MODE_OFF;
+	else if (mA < 500)
 		mode = BQ2415X_MODE_NONE;
-		break;
-	case 1:
+	else if (mA < 1800)
 		mode = BQ2415X_MODE_HOST_CHARGER;
-		break;
-	case 2:
+	else
 		mode = BQ2415X_MODE_DEDICATED_CHARGER;
-		break;
-	default:
-		return;
-	}
 
 	if (rx51_charger_mode == mode)
 		return;
@@ -334,7 +331,7 @@ static void rx51_charger_set_power(bool on)
 static struct isp1704_charger_data rx51_charger_data = {
 	.set_power	= rx51_charger_set_power,
 #if defined(CONFIG_CHARGER_BQ2415X) || defined(CONFIG_CHARGER_BQ2415X_MODULE)
-	.set_type	= rx51_charger_set_type,
+	.set_current	= rx51_charger_set_current,
 #endif
 };
 
