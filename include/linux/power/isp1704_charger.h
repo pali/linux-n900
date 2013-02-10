@@ -24,8 +24,7 @@
 
 struct isp1704_charger_data {
 	void		(*set_power)(bool on);
-	/* type: 0-N/A 1-Host/HUB 2-Dedicated */
-	void		(*set_type)(int type);
+	void		(*set_current)(int mA);
 };
 
 #endif
