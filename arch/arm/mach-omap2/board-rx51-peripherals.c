@@ -1195,6 +1195,10 @@ static struct twl4030_power_data rx51_t2scripts_data __initdata = {
 	.resource_config = twl4030_rconfig,
 };
 
+static struct twl4030_power_data rx51_power_data __initdata = {
+	.use_poweroff	= true,
+};
+
 static struct twl4030_vibra_data rx51_vibra_data __initdata = {
 	.coexist	= 0,
 };
@@ -1208,7 +1212,7 @@ static struct twl4030_platform_data rx51_twldata __initdata = {
 	/* platform_data for children goes here */
 	.gpio			= &rx51_gpio_data,
 	.keypad			= &rx51_kp_data,
-	.power			= &rx51_t2scripts_data,
+	.power			= &rx51_power_data,
 	.audio			= &rx51_audio_data,
 
 	.vaux1			= &rx51_vaux1,
