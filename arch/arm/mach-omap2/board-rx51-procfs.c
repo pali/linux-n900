@@ -30,6 +30,7 @@
 
 #include <linux/proc_fs.h>
 #include <linux/errno.h>
+#include <asm/system_info.h>
 
 static char boot_reason[16] = "pwr_key";
 
@@ -102,6 +103,9 @@ static int component_version_read_proc(char *page, char **start, off_t off,
 
 static int __init component_version_init(void)
 {
+	if (system_rev != 0)
+		snprintf(version_configs[1].version, 12, "%04x", system_rev);
+
 	if (!create_proc_read_entry("component_version", S_IRUGO, NULL,
 				    component_version_read_proc, NULL))
 		return -ENOMEM;
