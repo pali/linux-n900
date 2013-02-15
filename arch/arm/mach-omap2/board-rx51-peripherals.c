@@ -56,6 +56,8 @@
 #include <media/ir-rx51.h>
 #endif
 
+#include <plat/gpio-switch.h>
+
 #include "mux.h"
 #include "omap-pm.h"
 #include "hsmmc.h"
@@ -305,16 +307,139 @@ static void __init rx51_charger_init(void)
 	platform_device_register(&rx51_charger_device);
 }
 
-#if defined(CONFIG_KEYBOARD_GPIO) || defined(CONFIG_KEYBOARD_GPIO_MODULE)
-
-#define RX51_GPIO_CAMERA_LENS_COVER	110
 #define RX51_GPIO_CAMERA_FOCUS		68
 #define RX51_GPIO_CAMERA_CAPTURE	69
-#define RX51_GPIO_KEYPAD_SLIDE		71
+#define RX51_GPIO_CAMERA_LENS_COVER	110
+#define RX51_GPIO_CMT_APESLPX		70
+#define RX51_GPIO_CMT_BSI		157
+#define RX51_GPIO_CMT_EN		74
+#define RX51_GPIO_CMT_RST		75
+#define RX51_GPIO_CMT_RST_RQ		73
+#define RX51_GPIO_CMT_WDDIS		13
+#define RX51_GPIO_HEADPHONE		177
 #define RX51_GPIO_LOCK_BUTTON		113
 #define RX51_GPIO_PROXIMITY		89
+#define RX51_GPIO_SLEEP_IND		162
+#define RX51_GPIO_KEYPAD_SLIDE		71
 
 #define RX51_GPIO_DEBOUNCE_TIMEOUT	10
+
+#if defined(CONFIG_OMAP_GPIO_SWITCH) || defined(CONFIG_OMAP_GPIO_SWITCH_MODULE)
+
+static struct omap_gpio_switch rx51_gpio_switches[] __initdata = {
+	{
+		.name			= "cam_focus",
+		.gpio			= RX51_GPIO_CAMERA_FOCUS,
+		.flags			= OMAP_GPIO_SWITCH_FLAG_INVERTED,
+		.type			= OMAP_GPIO_SWITCH_TYPE_ACTIVITY,
+		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+	}, {
+		.name			= "cam_launch",
+		.gpio			= RX51_GPIO_CAMERA_CAPTURE,
+		.flags			= OMAP_GPIO_SWITCH_FLAG_INVERTED,
+		.type			= OMAP_GPIO_SWITCH_TYPE_ACTIVITY,
+		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+	}, {
+		.name			= "cam_shutter",
+		.gpio			= RX51_GPIO_CAMERA_LENS_COVER,
+		.flags			= OMAP_GPIO_SWITCH_FLAG_INVERTED,
+		.type			= OMAP_GPIO_SWITCH_TYPE_COVER,
+		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+	}, {
+		.name			= "cmt_apeslpx",
+		.gpio			= RX51_GPIO_CMT_APESLPX,
+		.flags			= OMAP_GPIO_SWITCH_FLAG_OUTPUT,
+		.type			= OMAP_GPIO_SWITCH_TYPE_ACTIVITY,
+		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+	}, {
+		.name			= "cmt_bsi",
+		.gpio			= RX51_GPIO_CMT_BSI,
+		.flags			= OMAP_GPIO_SWITCH_FLAG_OUTPUT,
+		.type			= OMAP_GPIO_SWITCH_TYPE_ACTIVITY,
+		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+	}, {
+		.name			= "cmt_en",
+		.gpio			= RX51_GPIO_CMT_EN,
+		.flags			= OMAP_GPIO_SWITCH_FLAG_OUTPUT,
+		.type			= OMAP_GPIO_SWITCH_TYPE_ACTIVITY,
+		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+	}, {
+		.name			= "cmt_rst",
+		.gpio			= RX51_GPIO_CMT_RST,
+		.flags			= OMAP_GPIO_SWITCH_FLAG_OUTPUT | OMAP_GPIO_SWITCH_FLAG_OUTPUT_INIT_ACTIVE,
+		.type			= OMAP_GPIO_SWITCH_TYPE_ACTIVITY,
+		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+	}, {
+		.name			= "cmt_rst_rq",
+		.gpio			= RX51_GPIO_CMT_RST_RQ,
+		.flags			= OMAP_GPIO_SWITCH_FLAG_OUTPUT | OMAP_GPIO_SWITCH_FLAG_OUTPUT_INIT_ACTIVE,
+		.type			= OMAP_GPIO_SWITCH_TYPE_ACTIVITY,
+		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+	}, {
+		.name			= "cmt_wddis",
+		.gpio			= RX51_GPIO_CMT_WDDIS,
+		.flags			= OMAP_GPIO_SWITCH_FLAG_OUTPUT,
+		.type			= OMAP_GPIO_SWITCH_TYPE_ACTIVITY,
+		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+	}, {
+		.name			= "headphone",
+		.gpio			= RX51_GPIO_HEADPHONE,
+		.flags			= OMAP_GPIO_SWITCH_FLAG_INVERTED,
+		.type			= OMAP_GPIO_SWITCH_TYPE_CONNECTION,
+		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+	}, {
+		.name			= "kb_lock",
+		.gpio			= RX51_GPIO_LOCK_BUTTON,
+		.flags			= OMAP_GPIO_SWITCH_FLAG_INVERTED,
+		.type			= OMAP_GPIO_SWITCH_TYPE_COVER,
+		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+	}, {
+		.name			= "proximity",
+		.gpio			= RX51_GPIO_PROXIMITY,
+		.flags			= 0,
+		.type			= OMAP_GPIO_SWITCH_TYPE_COVER,
+		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+	}, {
+		.name			= "sleep_ind",
+		.gpio			= RX51_GPIO_SLEEP_IND,
+		.flags			= OMAP_GPIO_SWITCH_FLAG_OUTPUT,
+		.type			= OMAP_GPIO_SWITCH_TYPE_ACTIVITY,
+		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+	}, {
+		.name			= "slide",
+		.gpio			= RX51_GPIO_KEYPAD_SLIDE,
+		.flags			= 0,
+		.type			= OMAP_GPIO_SWITCH_TYPE_COVER,
+		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+	}
+};
+
+static void __init rx51_add_gpio_switches(void)
+{
+	omap_register_gpio_switches(rx51_gpio_switches,
+			ARRAY_SIZE(rx51_gpio_switches));
+}
+#else
+static void __init rx51_add_gpio_switches(void)
+{
+}
+#endif /* CONFIG_OMAP_GPIO_SWITCH || CONFIG_OMAP_GPIO_SWITCH_MODULE */
+
+#if defined(CONFIG_KEYBOARD_GPIO) || defined(CONFIG_KEYBOARD_GPIO_MODULE)
 
 static struct gpio_keys_button rx51_gpio_keys[] = {
 	{
@@ -1420,6 +1545,7 @@ void __init rx51_peripherals_init(void)
 	regulator_has_full_constraints();
 	gpmc_onenand_init(board_onenand_data);
 	rx51_add_gpio_keys();
+	rx51_add_gpio_switches();
 	rx51_init_audio();
 	rx51_init_wl1251();
 	rx51_init_tsc2005();
