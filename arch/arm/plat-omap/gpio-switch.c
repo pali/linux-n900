@@ -20,11 +20,8 @@
 #include <linux/timer.h>
 #include <linux/err.h>
 #include <linux/gpio.h>
-#include <mach/hardware.h>
-#include <mach/irqs.h>
-#include <mach/mux.h>
-#include <mach/board.h>
-#include <mach/gpio-switch.h>
+#include <linux/slab.h>
+#include <plat/gpio-switch.h>
 
 struct gpio_switch {
 	char		name[14];
@@ -231,9 +228,9 @@ static irqreturn_t gpio_sw_irq_handler(int irq, void *arg)
 
 	if (!sw->both_edges) {
 		if (gpio_get_value(sw->gpio))
-			set_irq_type(gpio_to_irq(sw->gpio), IRQ_TYPE_EDGE_FALLING);
+			irq_set_irq_type(gpio_to_irq(sw->gpio), IRQ_TYPE_EDGE_FALLING);
 		else
-			set_irq_type(gpio_to_irq(sw->gpio), IRQ_TYPE_EDGE_RISING);
+			irq_set_irq_type(gpio_to_irq(sw->gpio), IRQ_TYPE_EDGE_RISING);
 	}
 
 	state = gpio_sw_get_state(sw);
@@ -275,16 +272,6 @@ static void gpio_sw_handler(struct work_struct *work)
 	print_sw_state(sw, state);
 }
 
-static int __init can_do_both_edges(struct gpio_switch *sw)
-{
-	if (!cpu_class_is_omap1())
-		return 1;
-	if (OMAP_GPIO_IS_MPUIO(sw->gpio))
-		return 0;
-	else
-		return 1;
-}
-
 static void gpio_sw_release(struct device *dev)
 {
 }
@@ -320,6 +307,8 @@ static int __init new_switch(struct gpio_switch *sw)
 
 	r = gpio_request(sw->gpio, sw->name);
 	if (r < 0) {
+		printk(KERN_ERR "gpio-switch: gpio_reguest failed for %s %d\n",
+				sw->name, sw->gpio);
 		platform_device_unregister(&sw->pdev);
 		return r;
 	}
@@ -351,15 +340,9 @@ static int __init new_switch(struct gpio_switch *sw)
 	if (!direction)
 		return 0;
 
-	if (can_do_both_edges(sw)) {
-		trigger = IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING;
-		sw->both_edges = 1;
-	} else {
-		if (gpio_get_value(sw->gpio))
-			trigger = IRQF_TRIGGER_FALLING;
-		else
-			trigger = IRQF_TRIGGER_RISING;
-	}
+	trigger = IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING;
+	sw->both_edges = 1;
+
 	r = request_irq(gpio_to_irq(sw->gpio), gpio_sw_irq_handler,
 			IRQF_SHARED | trigger, sw->name, sw);
 	if (r < 0) {
@@ -378,36 +361,6 @@ static int __init new_switch(struct gpio_switch *sw)
 
 	list_add(&sw->node, &gpio_switches);
 
-	return 0;
-}
-
-static int __init add_atag_switches(void)
-{
-	const struct omap_gpio_switch_config *cfg;
-	struct gpio_switch *sw;
-	int i, r;
-
-	for (i = 0; ; i++) {
-		cfg = omap_get_nr_config(OMAP_TAG_GPIO_SWITCH,
-					 struct omap_gpio_switch_config, i);
-		if (cfg == NULL)
-			break;
-		sw = kzalloc(sizeof(*sw), GFP_KERNEL);
-		if (sw == NULL) {
-			printk(KERN_ERR "gpio-switch: kmalloc failed\n");
-			return -ENOMEM;
-		}
-		strncpy(sw->name, cfg->name, sizeof(cfg->name));
-		sw->gpio = cfg->gpio;
-		sw->flags = cfg->flags;
-		sw->type = cfg->type;
-		sw->debounce_rising = OMAP_GPIO_SW_DEFAULT_DEBOUNCE;
-		sw->debounce_falling = OMAP_GPIO_SW_DEFAULT_DEBOUNCE;
-		if ((r = new_switch(sw)) < 0) {
-			kfree(sw);
-			return r;
-		}
-	}
 	return 0;
 }
 
@@ -479,7 +432,6 @@ static int __init add_board_switches(void)
 		sw->notify_data = cfg->notify_data;
 		if ((r = new_switch(sw)) < 0) {
 			kfree(sw);
-			return r;
 		}
 	}
 	return 0;
@@ -564,10 +516,6 @@ static int __init gpio_sw_init(void)
 		r = PTR_ERR(gpio_sw_platform_dev);
 		goto err1;
 	}
-
-	r = add_atag_switches();
-	if (r < 0)
-		goto err2;
 
 	r = add_board_switches();
 	if (r < 0)
