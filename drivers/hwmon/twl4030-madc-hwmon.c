@@ -123,6 +123,7 @@ static long twl4030_madc_ioctl(struct file *filp, unsigned int cmd,
 		req.method	= TWL4030_MADC_SW1;
 		req.func_cb	= NULL;
 		req.type	= TWL4030_MADC_WAIT;
+		req.raw		= true;
 
 		val = twl4030_madc_conversion(&req);
 		if (likely(val > 0)) {
