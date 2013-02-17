@@ -41,7 +41,7 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-subdev.h>
 
-#include "et8ek8.h"
+#include <media/et8ek8.h>
 
 #define ET8EK8_XCLK_HZ		9600000
 
