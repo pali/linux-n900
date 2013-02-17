@@ -44,6 +44,8 @@ struct gpio_switch {
 	struct platform_device	pdev;
 
 	struct list_head	node;
+
+	bool		failed;
 };
 
 static LIST_HEAD(gpio_switches);
@@ -103,9 +105,11 @@ static void print_sw_state(struct gpio_switch *sw, int state)
 
 static int gpio_sw_get_state(struct gpio_switch *sw)
 {
-	int state;
+	int state = 0;
 
-	state = gpio_get_value(sw->gpio);
+	if (!sw->failed)
+		state = gpio_get_value(sw->gpio);
+
 	if (sw->flags & OMAP_GPIO_SWITCH_FLAG_INVERTED)
 		state = !state;
 
@@ -138,7 +142,9 @@ static ssize_t gpio_sw_state_store(struct device *dev,
 
 	if (sw->flags & OMAP_GPIO_SWITCH_FLAG_INVERTED)
 		enable = !enable;
-	gpio_set_value(sw->gpio, enable);
+
+	if (!sw->failed)
+		gpio_set_value(sw->gpio, enable);
 
 	return count;
 }
@@ -198,6 +204,9 @@ static ssize_t gpio_sw_disable_store(struct device *dev,
 		goto out;
 	sw->disabled = !!res;
 
+	if (sw->failed)
+		goto out;
+
 	if (res) {
 		disable_irq(gpio_to_irq(sw->gpio));
 	} else {
@@ -226,7 +235,7 @@ static irqreturn_t gpio_sw_irq_handler(int irq, void *arg)
 	unsigned long timeout;
 	int state;
 
-	if (!sw->both_edges) {
+	if (!sw->both_edges && !sw->failed) {
 		if (gpio_get_value(sw->gpio))
 			irq_set_irq_type(gpio_to_irq(sw->gpio), IRQ_TYPE_EDGE_FALLING);
 		else
@@ -309,22 +318,23 @@ static int __init new_switch(struct gpio_switch *sw)
 	if (r < 0) {
 		printk(KERN_ERR "gpio-switch: gpio_reguest failed for %s %d\n",
 				sw->name, sw->gpio);
-		platform_device_unregister(&sw->pdev);
-		return r;
+		sw->failed = true;
 	}
 
 	/* input: 1, output: 0 */
 	direction = !(sw->flags & OMAP_GPIO_SWITCH_FLAG_OUTPUT);
-	if (direction) {
-		gpio_direction_input(sw->gpio);
-		sw->state = gpio_sw_get_state(sw);
-	} else {
-		int state = sw->state = !!(sw->flags &
-			OMAP_GPIO_SWITCH_FLAG_OUTPUT_INIT_ACTIVE);
+	if (!sw->failed) {
+		if (direction) {
+			gpio_direction_input(sw->gpio);
+			sw->state = gpio_sw_get_state(sw);
+		} else {
+			int state = sw->state = !!(sw->flags &
+				OMAP_GPIO_SWITCH_FLAG_OUTPUT_INIT_ACTIVE);
 
-		if (sw->flags & OMAP_GPIO_SWITCH_FLAG_INVERTED)
-			state = !state;
-		gpio_direction_output(sw->gpio, state);
+			if (sw->flags & OMAP_GPIO_SWITCH_FLAG_INVERTED)
+				state = !state;
+			gpio_direction_output(sw->gpio, state);
+		}
 	}
 
 	r = 0;
@@ -343,21 +353,24 @@ static int __init new_switch(struct gpio_switch *sw)
 	trigger = IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING;
 	sw->both_edges = 1;
 
-	r = request_irq(gpio_to_irq(sw->gpio), gpio_sw_irq_handler,
-			IRQF_SHARED | trigger, sw->name, sw);
-	if (r < 0) {
-		printk(KERN_ERR "gpio-switch: request_irq() failed "
-		       "for GPIO %d\n", sw->gpio);
-		platform_device_unregister(&sw->pdev);
-		gpio_free(sw->gpio);
-		return r;
+	if (!sw->failed) {
+		r = request_irq(gpio_to_irq(sw->gpio), gpio_sw_irq_handler,
+				IRQF_SHARED | trigger, sw->name, sw);
+		if (r < 0) {
+			printk(KERN_ERR "gpio-switch: request_irq() failed "
+			       "for GPIO %d\n", sw->gpio);
+			sw->failed = true;
+			gpio_free(sw->gpio);
+		}
 	}
 
-	INIT_WORK(&sw->work, gpio_sw_handler);
-	init_timer(&sw->timer);
+	if (!sw->failed) {
+		INIT_WORK(&sw->work, gpio_sw_handler);
+		init_timer(&sw->timer);
 
-	sw->timer.function = gpio_sw_timer;
-	sw->timer.data = (unsigned long)sw;
+		sw->timer.function = gpio_sw_timer;
+		sw->timer.data = (unsigned long)sw;
+	}
 
 	list_add(&sw->node, &gpio_switches);
 
@@ -447,7 +460,8 @@ static void gpio_sw_cleanup(void)
 		flush_scheduled_work();
 		del_timer_sync(&sw->timer);
 
-		free_irq(gpio_to_irq(sw->gpio), sw);
+		if (!sw->failed)
+			free_irq(gpio_to_irq(sw->gpio), sw);
 
 		device_remove_file(&sw->pdev.dev, &dev_attr_state);
 		device_remove_file(&sw->pdev.dev, &dev_attr_type);
@@ -457,7 +471,8 @@ static void gpio_sw_cleanup(void)
 			device_remove_file(&sw->pdev.dev, &dev_attr_disable);
 
 		platform_device_unregister(&sw->pdev);
-		gpio_free(sw->gpio);
+		if (!sw->failed)
+			gpio_free(sw->gpio);
 		old = sw;
 	}
 	kfree(old);
@@ -468,9 +483,10 @@ static void __init report_initial_state(void)
 	struct gpio_switch *sw;
 
 	list_for_each_entry(sw, &gpio_switches, node) {
-		int state;
+		int state = 0;
 
-		state = gpio_get_value(sw->gpio);
+		if (!sw->failed)
+			state = gpio_get_value(sw->gpio);
 		if (sw->flags & OMAP_GPIO_SWITCH_FLAG_INVERTED)
 			state = !state;
 		if (sw->notify != NULL)
