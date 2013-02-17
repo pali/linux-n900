@@ -33,12 +33,11 @@
 
 #include "../../../drivers/media/platform/omap3isp/isp.h"
 #include "../../../drivers/media/platform/omap3isp/ispreg.h"
-#include "../../../drivers/media/i2c/smia/et8ek8.h"
-#include <media/smiapp.h>
 
+#include <media/et8ek8.h>
+#include <media/smiapp.h>
 #include <media/ad5820.h>
 #include <media/adp1653.h>
-#include <media/smiaregs.h>
 
 #include "control.h"
 #include "devices.h"
