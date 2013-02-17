@@ -33,12 +33,11 @@
 
 #include "../../../drivers/media/platform/omap3isp/isp.h"
 #include "../../../drivers/media/platform/omap3isp/ispreg.h"
-#include "../../../drivers/media/i2c/smia/et8ek8.h"
-#include "../../../drivers/media/i2c/smia/smia-sensor.h"
 
+#include <media/et8ek8.h>
+#include <media/smiapp.h>
 #include <media/ad5820.h>
 #include <media/adp1653.h>
-#include <media/smiaregs.h>
 
 #include "control.h"
 #include "devices.h"
@@ -123,6 +122,8 @@ static void __init rx51_acmelite_init(void)
 	/* XSHUTDOWN off, reset  */
 	gpio_direction_output(ACMELITE_RESET_GPIO, 0);
 	gpio_set_value(ACMELITE_RESET_GPIO, 0);
+
+	gpio_free(ACMELITE_RESET_GPIO);
 }
 
 static int __init rx51_adp1653_init(void)
@@ -290,25 +291,14 @@ static int rx51_acmelite_set_xclk(struct v4l2_subdev *subdev, int hz)
 	return 0;
 }
 
-static int rx51_acmelite_set_xshutdown(struct v4l2_subdev *subdev, int set)
-{
-	int ret;
-
-	ret = rx51_camera_set_xshutdown(RX51_CAMERA_ACMELITE, set);
-	if (ret == 0 && set) {
-		/* CONTROL_CSIRXFE
-		 * Data/clock, enable transceiver, disable reset
-		 */
-		omap_ctrl_writel(OMAP343X_CSIB_RESET | OMAP343X_CSIB_PWRDNZ,
-			    OMAP343X_CONTROL_CSIRXFE);
-	}
-
-	return ret;
-}
-
-static struct smia_sensor_platform_data rx51_smia_sensor_platform_data = {
+static struct smiapp_platform_data rx51_smiapp_sensor_platform_data = {
+	.ext_clk		= 9.6 * 1000 * 1000,
+	.lanes			= 1,
+	/* bit rate / ddr */
+	.op_sys_clock		= (s64 []){ 12000000 * 10 / 2, 0 },
+	.csi_signalling_mode	= SMIAPP_CSI_SIGNALLING_MODE_CCP2_DATA_CLOCK,
 	.set_xclk		= rx51_acmelite_set_xclk,
-	.set_xshutdown		= rx51_acmelite_set_xshutdown,
+	.xshutdown		= ACMELITE_RESET_GPIO,
 };
 
 /*
@@ -320,7 +310,7 @@ static struct smia_sensor_platform_data rx51_smia_sensor_platform_data = {
 #define ET8EK8_I2C_BUS_NUM		3
 #define AD5820_I2C_BUS_NUM		3
 #define ADP1653_I2C_BUS_NUM		2
-#define SMIA_SENSOR_I2C_BUS_NUM		2
+#define SMIAPP_I2C_BUS_NUM		2
 
 static struct i2c_board_info rx51_camera_i2c_devices[] = {
 	{
@@ -336,8 +326,8 @@ static struct i2c_board_info rx51_camera_i2c_devices[] = {
 		.platform_data = &rx51_adp1653_platform_data,
 	},
 	{
-		I2C_BOARD_INFO(SMIA_SENSOR_NAME, SMIA_SENSOR_I2C_ADDR),
-		.platform_data = &rx51_smia_sensor_platform_data,
+		I2C_BOARD_INFO(SMIAPP_NAME, SMIAPP_DFL_I2C_ADDR),
+		.platform_data = &rx51_smiapp_sensor_platform_data,
 	},
 };
 
@@ -360,7 +350,7 @@ static struct isp_subdev_i2c_board_info rx51_camera_primary_subdevs[] = {
 static struct isp_subdev_i2c_board_info rx51_camera_secondary_subdevs[] = {
 	{
 		.board_info = &rx51_camera_i2c_devices[3],
-		.i2c_adapter_id = SMIA_SENSOR_I2C_BUS_NUM,
+		.i2c_adapter_id = SMIAPP_I2C_BUS_NUM,
 	},
 	{ NULL, 0, },
 };
