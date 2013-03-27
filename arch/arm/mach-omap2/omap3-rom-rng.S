@@ -11,7 +11,7 @@
 #include <linux/linkage.h>
 #include <asm/assembler.h>
 
-ENTRY(omap3_rng_call_rom_asm)
+ENTRY(omap3_rom_rng_call)
 	.arch_extension sec
 	stmfd	sp!, {r4-r12, lr}
 	stmfd	sp!, {r0-r3}

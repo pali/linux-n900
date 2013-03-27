@@ -20,8 +20,6 @@
 #include <linux/err.h>
 #include <linux/platform_device.h>
 
-#include "../../../arch/arm/mach-omap2/soc.h"
-
 #define SEC_HAL_RNG_GENERATE		29
 #define RNG_RESET			0x01
 #define RNG_GEN_PRNG_HW_INIT		0x02
@@ -29,7 +27,7 @@
 
 static const char *omap3_rom_rng_name = "OMAP3 ROM RNG";
 
-extern u32 omap3_rng_call_rom_asm(u32 id, u32 proc, u32 flags, u32 va_ptr);
+static u32 (*omap3_rom_rng_call)(u32, u32, u32, u32);
 
 static int call_sec_rom(u32 appl_id, u32 proc_id, u32 flag, ...)
 {
@@ -41,8 +39,8 @@ static int call_sec_rom(u32 appl_id, u32 proc_id, u32 flag, ...)
 	val = *(u32 *) &ap;
 	local_irq_disable();
 	local_fiq_disable();
-	ret = omap3_rng_call_rom_asm(appl_id, proc_id, flag,
-				     (u32) virt_to_phys((void *) val));
+	ret = omap3_rom_rng_call(appl_id, proc_id, flag,
+				 (u32) virt_to_phys((void *) val));
 	local_fiq_enable();
 	local_irq_enable();
 	va_end(ap);
@@ -121,15 +119,12 @@ static struct hwrng omap3_rom_rng_ops = {
 static int omap3_rom_rng_probe(struct platform_device *pdev)
 {
 	printk(KERN_INFO "%s: initializing\n", omap3_rom_rng_name);
-	if (!cpu_is_omap34xx()) {
-		printk(KERN_ERR "%s: currently supports only OMAP34xx CPUs\n",
+
+	omap3_rom_rng_call = pdev->dev.platform_data;
+	if (!omap3_rom_rng_call) {
+		printk(KERN_ERR "%s: omap3_rom_rng_call is NULL\n",
 		       omap3_rom_rng_name);
-		return -ENODEV;
-	}
-	if (omap_type() == OMAP2_DEVICE_TYPE_GP) {
-		printk(KERN_ERR "%s: GP OMAPs not supported\n",
-		       omap3_rom_rng_name);
-		return -ENODEV;
+		return -EINVAL;
 	}
 
 	setup_timer(&idle_timer, omap3_rom_idle_rng, 0);

@@ -486,9 +486,14 @@ static void omap_init_mcspi(void)
 static inline void omap_init_mcspi(void) {}
 #endif
 
+extern u32 *omap3_rom_rng_call(u32 id, u32 proc, u32 flags, u32 va_ptr);
+
 static struct platform_device omap3_rom_rng_device = {
 	.name		= "omap3-rom-rng",
 	.id		= -1,
+	.dev	= {
+		.platform_data	= omap3_rom_rng_call,
+	},
 };
 
 static void omap_init_rom_rng(void)
