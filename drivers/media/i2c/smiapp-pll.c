@@ -21,6 +21,8 @@
 #include <linux/lcm.h>
 #include <linux/module.h>
 
+#define DEBUG
+
 #include "smiapp-pll.h"
 
 /* Return an even number or one. */

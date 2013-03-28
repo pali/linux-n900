@@ -16,6 +16,8 @@
  * General Public License for more details.
  */
 
+#define DEBUG
+
 #include <linux/delay.h>
 #include <linux/i2c.h>
 
