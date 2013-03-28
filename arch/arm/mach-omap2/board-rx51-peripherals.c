@@ -35,7 +35,7 @@
 #include "common.h"
 #include <linux/omap-dma.h>
 #include "gpmc-smc91x.h"
-#include <plat/ssi.h>
+#include <linux/platform_data/ssi.h>
 
 #include "board-rx51.h"
 
