@@ -25,7 +25,7 @@
 #include <linux/err.h>
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
-#include <plat/ssi.h>
+#include <linux/platform_data/ssi.h>
 
 #include "omap-pm.h"
 
