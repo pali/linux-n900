@@ -37,8 +37,7 @@
 #include <linux/spinlock.h>
 #include <linux/hsi/hsi.h>
 #include <linux/debugfs.h>
-
-#include <plat/ssi.h>
+#include <linux/platform_data/ssi.h>
 
 #define SSI_MAX_CHANNELS	8
 #define SSI_MAX_GDD_LCH		8
