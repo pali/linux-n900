@@ -433,11 +433,11 @@ static unsigned int sysfs_poll(struct file *filp, poll_table *wait)
 	if (buffer->event != atomic_read(&od->event))
 		goto trigger;
 
-	return DEFAULT_POLLMASK;
+	return 0;
 
  trigger:
 	buffer->needs_read_fill = 1;
-	return DEFAULT_POLLMASK|POLLERR|POLLPRI;
+	return POLLERR|POLLPRI;
 }
 
 void sysfs_notify_dirent(struct sysfs_dirent *sd)
