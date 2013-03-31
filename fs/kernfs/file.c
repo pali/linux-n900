@@ -777,10 +777,10 @@ static unsigned int kernfs_fop_poll(struct file *filp, poll_table *wait)
 	if (of->event != atomic_read(&on->event))
 		goto trigger;
 
-	return DEFAULT_POLLMASK;
+	return 0;
 
  trigger:
-	return DEFAULT_POLLMASK|POLLERR|POLLPRI;
+	return POLLERR|POLLPRI;
 }
 
 /**
