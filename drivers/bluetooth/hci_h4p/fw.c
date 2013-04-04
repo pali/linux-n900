@@ -41,13 +41,13 @@ static int hci_h4p_open_firmware(struct hci_h4p_info *info,
 	NBT_DBG_FW("Opening %d/%d firmware\n", info->man_id, info->ver_id);
 	switch (info->man_id) {
 	case BT_CHIP_TI:
-		err = request_firmware(fw_entry, "ti1273.bin", info->dev);
+		err = request_firmware(fw_entry, FW_NAME_TI, info->dev);
 		break;
 	case BT_CHIP_CSR:
-		err = request_firmware(fw_entry, "bc4fw.bin", info->dev);
+		err = request_firmware(fw_entry, FW_NAME_CSR, info->dev);
 		break;
 	case BT_CHIP_BCM:
-		err = request_firmware(fw_entry, "bcmfw.bin", info->dev);
+		err = request_firmware(fw_entry, FW_NAME_BCM, info->dev);
 		break;
 	default:
 		dev_err(info->dev, "Invalid chip type %d\n", info->man_id);
