@@ -899,6 +899,8 @@ typedef void (*omap_dispc_isr_t) (void *arg, u32 mask);
 int omap_dispc_register_isr(omap_dispc_isr_t isr, void *arg, u32 mask);
 int omap_dispc_unregister_isr(omap_dispc_isr_t isr, void *arg, u32 mask);
 
+void omap_dispc_set_plane_ba0(enum omap_channel, enum omap_plane plane, u32 paddr);
+
 u32 dispc_read_irqstatus(void);
 void dispc_clear_irqstatus(u32 mask);
 u32 dispc_read_irqenable(void);
