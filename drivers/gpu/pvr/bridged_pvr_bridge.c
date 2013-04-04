@@ -44,6 +44,7 @@
 
 #include "mmap.h"
 
+#include <linux/sched.h>
 #include <linux/pagemap.h>	/* for cache flush */
 
 
@@ -758,7 +759,7 @@ static int FlushCacheDRI(int dir, struct BM_BUF *buf)
 
 		/* Adjust for the last page */
 		chunk = min_t(ssize_t, e - s, chunk);
-		dma_cache_maint(kaddr, chunk, dir);
+		dma_unmap_page(NULL, dma_map_page(NULL, page, s & ~PAGE_MASK, chunk, DMA_FROM_DEVICE), chunk, DMA_FROM_DEVICE);
 
 		s += chunk;
 
