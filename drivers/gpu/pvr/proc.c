@@ -107,7 +107,6 @@ int CreateProcEntry(const char *name, read_proc_t rhandler,
 	file = create_proc_entry(name, mode, dir);
 
 	if (file) {
-		file->owner = THIS_MODULE;
 		file->read_proc = rhandler;
 		file->write_proc = whandler;
 		file->data = data;
@@ -141,8 +140,6 @@ int CreateProcReadEntry(const char *name,
 				   (void *)handler);
 
 	if (file) {
-		file->owner = THIS_MODULE;
-
 		return 0;
 	}
 

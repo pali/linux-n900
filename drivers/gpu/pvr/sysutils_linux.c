@@ -28,9 +28,9 @@
 #include <linux/clk.h>
 #include <linux/err.h>
 #include <linux/hardirq.h>
-#include <mach/omap-pm.h>
+#include <plat/omap-pm.h>
 #include <linux/bug.h>
-#include <mach/clock.h>
+#include <plat/clock.h>
 
 #include "sgxdefs.h"
 #include "services_headers.h"
@@ -272,8 +272,8 @@ static void sgx_lock_perf(struct work_struct *work)
 		high = 0;
 	}
 	if (high != bHigh) {
-		omap_pm_set_min_bus_tput(&sgx_dev, OCP_INITIATOR_AGENT, vdd2);
-		omap_pm_set_min_mpu_freq(&sgx_dev, vdd1);
+		//omap_pm_set_min_bus_tput(&sgx_dev, OCP_INITIATOR_AGENT, vdd2);
+		//omap_pm_set_min_mpu_freq(&sgx_dev, vdd1);
 		bHigh = high;
 	}
 	if (sgx_clock_enabled || load)
