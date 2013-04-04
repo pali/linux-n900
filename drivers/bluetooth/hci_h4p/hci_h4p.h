@@ -32,6 +32,10 @@
 #define BT_CHIP_TI		0x30
 #define BT_CHIP_BCM		0x04
 
+#define FW_NAME_CSR		"bc4fw.bin"
+#define FW_NAME_TI		"ti1273.bin"
+#define FW_NAME_BCM		"bcmfw.bin"
+
 #define UART_SYSC_OMAP_RESET	0x03
 #define UART_SYSS_RESETDONE	0x01
 #define UART_OMAP_SCR_EMPTY_THR	0x08
