@@ -1,0 +1,23 @@
+menuconfig PVR
+	tristate "PowerVR Services"
+	depends on OMAP2_DSS
+
+if PVR
+
+choice
+	prompt "Build type"
+	default PVR_RELEASE
+config PVR_RELEASE
+	bool "Release"
+config PVR_DEBUG
+	bool "Debug"
+config PVR_TIMING
+	bool "Timing"
+endchoice
+
+config PVR_EXAMPLES
+	tristate "Example code"
+	default n
+
+endif
+
