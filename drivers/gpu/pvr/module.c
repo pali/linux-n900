@@ -122,7 +122,7 @@ static int PVRSRVDriverProbe(LDM_DEV *pDevice)
 
 	PVR_TRACE("PVRSRVDriverProbe(pDevice=%p)", pDevice);
 
-	pDevice->dev.driver_data = NULL;
+	dev_set_drvdata(&pDevice->dev, NULL);
 
 
 	if (SysAcquireData(&psSysData) != PVRSRV_OK) {
