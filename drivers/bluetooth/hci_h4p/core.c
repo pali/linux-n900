@@ -1024,6 +1024,10 @@ static void __exit hci_h4p_exit(void)
 module_init(hci_h4p_init);
 module_exit(hci_h4p_exit);
 
-MODULE_DESCRIPTION("h4 driver with nokia extensions");
+MODULE_ALIAS("platform:hci_h4p");
+MODULE_DESCRIPTION("Bluetooth h4 driver with nokia extensions");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Ville Tervo");
+MODULE_FIRMWARE(FW_NAME_CSR);
+MODULE_FIRMWARE(FW_NAME_TI);
+MODULE_FIRMWARE(FW_NAME_BCM);
