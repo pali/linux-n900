@@ -27,24 +27,29 @@
 
 #include "hci_h4p.h"
 
-static struct sk_buff_head *fw_q;
-
-static int inject_bdaddr(struct hci_h4p_info *info, struct sk_buff *skb)
+static int hci_h4p_bcm_set_bdaddr(struct hci_h4p_info *info, struct sk_buff *skb)
 {
-	unsigned int offset;
+	static const u8 nokia_oui[3] = {0x00, 0x1f, 0xdf};
+	int not_valid;
+	int i;
 
-	if (skb->len < 10) {
-		dev_info(info->dev, "Valid bluetooth address not found.\n");
-		return -ENODATA;
+	not_valid = 1;
+	for (i = 0; i < 6; i++) {
+		if (info->bd_addr[i] != 0x00) {
+			not_valid = 0;
+			break;
+		}
 	}
 
-	offset = 4;
-	skb->data[offset + 5] = 0x00;
-	skb->data[offset + 4] = 0x11;
-	skb->data[offset + 3] = 0x22;
-	skb->data[offset + 2] = 0x33;
-	skb->data[offset + 1] = 0x44;
-	skb->data[offset + 0] = 0x55;
+	if (not_valid) {
+		dev_info(info->dev, "Valid bluetooth address not found, setting some random\n");
+		/* When address is not valid, use some random but Nokia MAC */
+		memcpy(info->bd_addr, nokia_oui, 3);
+		get_random_bytes(info->bd_addr + 3, 3);
+	}
+
+	for (i = 0; i < 6; i++)
+		skb->data[9 - i] = info->bd_addr[i];
 
 	return 0;
 }
@@ -63,15 +68,15 @@ void hci_h4p_bcm_parse_fw_event(struct hci_h4p_info *info, struct sk_buff *skb)
 
 	kfree_skb(skb);
 
-	fw_skb = skb_dequeue(fw_q);
+	fw_skb = skb_dequeue(info->fw_q);
 	if (fw_skb == NULL || info->fw_error) {
 		complete(&info->fw_completion);
 		return;
 	}
 
-	if (fw_skb->data[1] == 0x01 && fw_skb->data[2] == 0xfc) {
-		NBT_DBG_FW("Injecting bluetooth address\n");
-		err = inject_bdaddr(info, fw_skb);
+	if (fw_skb->data[1] == 0x01 && fw_skb->data[2] == 0xfc && fw_skb->len >= 10) {
+		NBT_DBG_FW("Setting bluetooth address\n");
+		err = hci_h4p_bcm_set_bdaddr(info, fw_skb);
 		if (err < 0) {
 			kfree_skb(fw_skb);
 			info->fw_error = err;
@@ -100,7 +105,7 @@ int hci_h4p_bcm_send_fw(struct hci_h4p_info *info,
 
 	time = jiffies;
 
-	fw_q = fw_queue;
+	info->fw_q = fw_queue;
 	skb = skb_dequeue(fw_queue);
 	if (!skb)
 		return -ENODATA;
