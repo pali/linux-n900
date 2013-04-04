@@ -97,6 +97,9 @@ struct hci_h4p_info {
 	unsigned long rx_state;
 	unsigned long garbage_bytes;
 
+	u8 bd_addr[6];
+	struct sk_buff_head *fw_q;
+
 	int pm_enabled;
 	int tx_enabled;
 	int autorts;

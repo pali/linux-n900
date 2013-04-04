@@ -880,6 +880,50 @@ static int hci_h4p_register_hdev(struct hci_h4p_info *info)
 	return 0;
 }
 
+static ssize_t hci_h4p_store_bdaddr(struct device *dev,
+				    struct device_attribute *attr,
+				    const char *buf, size_t count)
+{
+	struct hci_h4p_info *info = dev_get_drvdata(dev);
+	unsigned int bdaddr[6];
+	int ret, i;
+
+	ret = sscanf(buf, "%2x:%2x:%2x:%2x:%2x:%2x\n",
+			&bdaddr[0], &bdaddr[1], &bdaddr[2],
+			&bdaddr[3], &bdaddr[4], &bdaddr[5]);
+
+	if (ret != 6)
+		return -EINVAL;
+
+	for (i = 0; i < 6; i++)
+		info->bd_addr[i] = bdaddr[i] & 0xff;
+
+	return count;
+}
+
+static ssize_t hci_h4p_show_bdaddr(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct hci_h4p_info *info = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n",
+		       info->bd_addr[0], info->bd_addr[1], info->bd_addr[2],
+		       info->bd_addr[3], info->bd_addr[4], info->bd_addr[5]);
+}
+
+static DEVICE_ATTR(bdaddr, S_IRUGO | S_IWUSR, hci_h4p_show_bdaddr,
+		   hci_h4p_store_bdaddr);
+
+static int hci_h4p_sysfs_create_files(struct device *dev)
+{
+	return device_create_file(dev, &dev_attr_bdaddr);
+}
+
+static void hci_h4p_sysfs_remove_files(struct device *dev)
+{
+	device_remove_file(dev, &dev_attr_bdaddr);
+}
+
 static int hci_h4p_probe(struct platform_device *pdev)
 {
 	struct hci_h4p_platform_data *bt_plat_data;
@@ -963,13 +1007,20 @@ static int hci_h4p_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, info);
 
+	if (hci_h4p_sysfs_create_files(info->dev) < 0) {
+		dev_err(info->dev, "failed to create sysfs files\n");
+		goto cleanup_irq;
+	}
+
 	if (hci_h4p_register_hdev(info) < 0) {
 		dev_err(info->dev, "failed to register hci_h4p hci device\n");
-		goto cleanup_irq;
+		goto cleanup_sysfs;
 	}
 
 	return 0;
 
+cleanup_sysfs:
+	hci_h4p_sysfs_remove_files(info->dev);
 cleanup_irq:
 	free_irq(info->irq, (void *)info);
 	free_irq(gpio_to_irq(info->host_wakeup_gpio), info);
@@ -986,6 +1037,7 @@ static int hci_h4p_remove(struct platform_device *pdev)
 
 	info = platform_get_drvdata(pdev);
 
+	hci_h4p_sysfs_remove_files(info->dev);
 	hci_h4p_hci_close(info->hdev);
 	free_irq(gpio_to_irq(info->host_wakeup_gpio), info);
 	hci_unregister_dev(info->hdev);
