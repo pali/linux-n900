@@ -705,6 +705,17 @@ static void dispc_ovl_set_ba0(enum omap_plane plane, u32 paddr)
 	dispc_write_reg(DISPC_OVL_BA0(plane), paddr);
 }
 
+void omap_dispc_set_plane_ba0(enum omap_channel channel, enum omap_plane plane,
+			      u32 paddr)
+{
+	if (dispc_runtime_get())
+		return;
+	dispc_ovl_set_ba0(plane, paddr);
+	dispc_mgr_go(channel);
+	dispc_runtime_put();
+}
+EXPORT_SYMBOL_GPL(omap_dispc_set_plane_ba0);
+
 static void dispc_ovl_set_ba1(enum omap_plane plane, u32 paddr)
 {
 	dispc_write_reg(DISPC_OVL_BA1(plane), paddr);
