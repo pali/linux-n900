@@ -49,7 +49,7 @@
 #include "omaplfb.h"
 #include "pvrmodule.h"
 
-#include <mach/display.h>
+#include <video/omapdss.h>
 
 MODULE_SUPPORTED_DEVICE(DEVNAME);
 
