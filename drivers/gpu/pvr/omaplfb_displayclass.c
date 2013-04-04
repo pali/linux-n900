@@ -208,9 +208,9 @@ static enum PVRSRV_ERROR UnblankDisplay(struct OMAPLFB_DEVINFO *psDevInfo)
 {
 	int res;
 
-	acquire_console_sem();
+	console_lock();
 	res = fb_blank(psDevInfo->psLINFBInfo, 0);
-	release_console_sem();
+	console_unlock();
 	if (res != 0) {
 		printk(KERN_WARNING DRIVER_PREFIX
 		       ": fb_blank failed (%d)", res);
@@ -988,7 +988,7 @@ static enum PVRSRV_ERROR InitDev(struct OMAPLFB_DEVINFO *psDevInfo)
 	struct OMAPLFB_FBINFO *psPVRFBInfo = &psDevInfo->sFBInfo;
 	enum PVRSRV_ERROR eError = PVRSRV_ERROR_GENERIC;
 
-	acquire_console_sem();
+	console_lock();
 
 	if (fb_idx < 0 || fb_idx >= num_registered_fb) {
 		eError = PVRSRV_ERROR_INVALID_DEVICE;
@@ -1034,7 +1034,7 @@ static enum PVRSRV_ERROR InitDev(struct OMAPLFB_DEVINFO *psDevInfo)
 errModPut:
 	module_put(psLINFBOwner);
 errRelSem:
-	release_console_sem();
+	console_unlock();
 	return eError;
 }
 
@@ -1043,7 +1043,7 @@ static void DeInitDev(struct OMAPLFB_DEVINFO *psDevInfo)
 	struct fb_info *psLINFBInfo = psDevInfo->psLINFBInfo;
 	struct module *psLINFBOwner;
 
-	acquire_console_sem();
+	console_lock();
 
 	psLINFBOwner = psLINFBInfo->fbops->owner;
 
@@ -1052,7 +1052,7 @@ static void DeInitDev(struct OMAPLFB_DEVINFO *psDevInfo)
 
 	module_put(psLINFBOwner);
 
-	release_console_sem();
+	console_unlock();
 }
 
 enum PVRSRV_ERROR OMAPLFBInit(void)
