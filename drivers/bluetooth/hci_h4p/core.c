@@ -50,8 +50,8 @@ static void hci_h4p_set_clk(struct hci_h4p_info *info, int *clock, int enable)
 	spin_lock_irqsave(&info->clocks_lock, flags);
 	if (enable && !*clock) {
 		NBT_DBG_POWER("Enabling %p\n", clock);
-		clk_enable(info->uart_fclk);
-		clk_enable(info->uart_iclk);
+		clk_prepare_enable(info->uart_fclk);
+		clk_prepare_enable(info->uart_iclk);
 		if (atomic_read(&info->clk_users) == 0)
 			hci_h4p_restore_regs(info);
 		atomic_inc(&info->clk_users);
@@ -61,8 +61,8 @@ static void hci_h4p_set_clk(struct hci_h4p_info *info, int *clock, int enable)
 		NBT_DBG_POWER("Disabling %p\n", clock);
 		if (atomic_dec_and_test(&info->clk_users))
 			hci_h4p_store_regs(info);
-		clk_disable(info->uart_fclk);
-		clk_disable(info->uart_iclk);
+		clk_disable_unprepare(info->uart_fclk);
+		clk_disable_unprepare(info->uart_iclk);
 	}
 
 	*clock = enable;
