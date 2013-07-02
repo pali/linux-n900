@@ -328,6 +328,13 @@ static int isp1704_notifier_call(struct notifier_block *nb,
 	struct isp1704_charger *isp =
 		container_of(nb, struct isp1704_charger, nb);
 
+	if (val == USB_EVENT_ENUMERATED) {
+		if (v)
+			isp->current_max = *((unsigned *)v);
+		else
+			isp->current_max = 0;
+	}
+
 	schedule_work(&isp->work);
 
 	return NOTIFY_OK;
