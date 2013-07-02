@@ -24,6 +24,7 @@
 
 struct isp1704_charger_data {
 	void		(*set_power)(bool on);
+	void		(*set_current)(int mA);
 };
 
 #endif
