@@ -244,7 +244,6 @@ obj-$(CONFIG_MACH_NOKIA_RX51)		+= board-rx51.o sdram-nokia.o
 obj-$(CONFIG_MACH_NOKIA_RX51)		+= board-rx51-peripherals.o
 obj-$(CONFIG_MACH_NOKIA_RX51)		+= board-rx51-video.o
 obj-$(CONFIG_MACH_NOKIA_RX51)		+= board-rx51-camera.o
-obj-$(CONFIG_MACH_NOKIA_RX51)		+= board-rx51-smc.o board-rx51-secure.o
 obj-$(CONFIG_MACH_OMAP_ZOOM2)		+= board-zoom.o board-zoom-peripherals.o
 obj-$(CONFIG_MACH_OMAP_ZOOM2)		+= board-zoom-display.o
 obj-$(CONFIG_MACH_OMAP_ZOOM2)		+= board-zoom-debugboard.o
