@@ -37,10 +37,12 @@ off_t printAppend(char *buffer, size_t size, off_t off,
 		  __attribute__ ((format(printf, 4, 5)));
 
 int CreateProcEntries(void);
+#if 0
 int CreateProcReadEntry(const char *name,
 			off_t (handler)(char *, size_t, off_t));
 int CreateProcEntry(const char *name, read_proc_t rhandler,
 		    write_proc_t whandler, void *data);
+#endif
 void RemoveProcEntry(const char *name);
 void RemoveProcEntries(void);
 
