@@ -160,6 +160,25 @@ static u32 rx51_secure_update_aux_cr(u32 set_bits, u32 clear_bits)
 				      1, acr, 0, 0, 0);
 }
 
+/**
+ * rx51_secure_rng_call: Routine for HW random generator
+ */
+static u32 rx51_secure_rng_call(u32 ptr, u32 count, u32 flag)
+{
+	return rx51_secure_dispatcher(RX51_PPA_HWRNG,
+				      0,
+				      NO_FLAG,
+				      3, ptr, count, flag, 0);
+}
+
+static struct platform_device omap3_rom_rng_device = {
+	.name		= "omap3-rom-rng",
+	.id		= -1,
+	.dev	= {
+		.platform_data	= rx51_secure_rng_call,
+	},
+};
+
 static void __init rx51_init(void)
 {
 	struct omap_sdrc_params *sdrc_params;
@@ -181,6 +200,8 @@ static void __init rx51_init(void)
 		/* set IBE to 1 */
 		rx51_secure_update_aux_cr(BIT(6), 0);
 #endif
+		pr_info("RX-51: Registring OMAP3 HWRNG device\n");
+		platform_device_register(&omap3_rom_rng_device);
 	}
 
 	/* Ensure SDRC pins are mux'd for self-refresh */
