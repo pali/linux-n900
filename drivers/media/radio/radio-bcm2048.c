@@ -2363,7 +2363,7 @@ static int bcm2048_vidioc_g_tuner(struct file *file, void *priv,
 }
 
 static int bcm2048_vidioc_s_tuner(struct file *file, void *priv,
-		struct v4l2_tuner *tuner)
+		const struct v4l2_tuner *tuner)
 {
 	struct bcm2048_device *bdev = video_get_drvdata(video_devdata(file));
 
@@ -2398,7 +2398,7 @@ static int bcm2048_vidioc_g_frequency(struct file *file, void *priv,
 }
 
 static int bcm2048_vidioc_s_frequency(struct file *file, void *priv,
-		struct v4l2_frequency *freq)
+		const struct v4l2_frequency *freq)
 {
 	struct bcm2048_device *bdev = video_get_drvdata(video_devdata(file));
 	int err;
