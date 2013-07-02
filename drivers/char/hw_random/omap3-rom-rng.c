@@ -20,44 +20,23 @@
 #include <linux/err.h>
 #include <linux/platform_device.h>
 
-#define SEC_HAL_RNG_GENERATE		29
 #define RNG_RESET			0x01
 #define RNG_GEN_PRNG_HW_INIT		0x02
 #define RNG_GEN_HW			0x08
 
 static const char *omap3_rom_rng_name = "OMAP3 ROM RNG";
 
-static u32 (*omap3_rom_rng_call)(u32, u32, u32, u32);
-
-static int call_sec_rom(u32 appl_id, u32 proc_id, u32 flag, ...)
-{
-	va_list ap;
-	u32 ret;
-	u32 val;
-
-	va_start(ap, flag);
-	val = *(u32 *) &ap;
-	local_irq_disable();
-	local_fiq_disable();
-	ret = omap3_rom_rng_call(appl_id, proc_id, flag,
-				 (u32) virt_to_phys((void *) val));
-	local_fiq_enable();
-	local_irq_enable();
-	va_end(ap);
-
-	return ret;
-}
+static u32 (*omap3_rom_rng_call)(u32, u32, u32);
 
 static struct timer_list idle_timer;
 static int rng_idle;
 static struct clk *rng_clk;
 
-static void omap3_rom_idle_rng(unsigned long data)
+static void omap3_rom_rng_idle(unsigned long data)
 {
 	int r;
 
-	r = call_sec_rom(SEC_HAL_RNG_GENERATE, 0, 0, 3, NULL, 0,
-			 RNG_RESET);
+	r = omap3_rom_rng_call(0, 0, RNG_RESET);
 	if (r != 0) {
 		printk(KERN_ERR "%s: reset failed: %d\n",
 		       omap3_rom_rng_name, r);
@@ -67,7 +46,7 @@ static void omap3_rom_idle_rng(unsigned long data)
 	rng_idle = 1;
 }
 
-static int omap3_rom_get_random(void *buf, unsigned int count)
+static int omap3_rom_rng_get_random(void *buf, unsigned int count)
 {
 	u32 r;
 	u32 ptr;
@@ -75,8 +54,7 @@ static int omap3_rom_get_random(void *buf, unsigned int count)
 	del_timer_sync(&idle_timer);
 	if (rng_idle) {
 		clk_prepare_enable(rng_clk);
-		r = call_sec_rom(SEC_HAL_RNG_GENERATE, 0, 0, 3, NULL, 0,
-				 RNG_GEN_PRNG_HW_INIT);
+		r = omap3_rom_rng_call(0, 0, RNG_GEN_PRNG_HW_INIT);
 		if (r != 0) {
 			clk_disable_unprepare(rng_clk);
 			printk(KERN_ERR "%s: HW init failed: %d\n",
@@ -87,8 +65,7 @@ static int omap3_rom_get_random(void *buf, unsigned int count)
 	}
 
 	ptr = virt_to_phys(buf);
-	r = call_sec_rom(SEC_HAL_RNG_GENERATE, 0, 0, 3, ptr,
-			 count, RNG_GEN_HW);
+	r = omap3_rom_rng_call(ptr, count, RNG_GEN_HW);
 	mod_timer(&idle_timer, jiffies + msecs_to_jiffies(500));
 	if (r != 0)
 		return -EINVAL;
@@ -104,7 +81,7 @@ static int omap3_rom_rng_data_read(struct hwrng *rng, u32 *data)
 {
 	int r;
 
-	r = omap3_rom_get_random(data, 4);
+	r = omap3_rom_rng_get_random(data, 4);
 	if (r < 0)
 		return r;
 	return 4;
@@ -127,7 +104,7 @@ static int omap3_rom_rng_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	setup_timer(&idle_timer, omap3_rom_idle_rng, 0);
+	setup_timer(&idle_timer, omap3_rom_rng_idle, 0);
 	rng_clk = clk_get_sys("omap_rng", "ick");
 	if (IS_ERR(rng_clk)) {
 		printk(KERN_ERR "%s: unable to get RNG clock\n",
@@ -137,7 +114,7 @@ static int omap3_rom_rng_probe(struct platform_device *pdev)
 
 	/* Leave the RNG in reset state. */
 	clk_prepare_enable(rng_clk);
-	omap3_rom_idle_rng(0);
+	omap3_rom_rng_idle(0);
 
 	return hwrng_register(&omap3_rom_rng_ops);
 }
