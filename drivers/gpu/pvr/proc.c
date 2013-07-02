@@ -83,6 +83,7 @@ static int pvr_read_proc(char *page, char **start, off_t off,
 	return len;
 }
 
+#if 0
 int CreateProcEntry(const char *name, read_proc_t rhandler,
 		    write_proc_t whandler, void *data)
 {
@@ -121,7 +122,9 @@ int CreateProcEntry(const char *name, read_proc_t rhandler,
 
 	return -ENOMEM;
 }
+#endif
 
+#if 0
 int CreateProcReadEntry(const char *name,
 			off_t (handler)(char *, size_t, off_t))
 {
@@ -149,6 +152,7 @@ int CreateProcReadEntry(const char *name,
 
 	return -ENOMEM;
 }
+#endif
 
 int CreateProcEntries(void)
 {
@@ -161,6 +165,7 @@ int CreateProcEntries(void)
 		return -ENOMEM;
 	}
 
+#if 0
 	if (CreateProcReadEntry("queue", QueuePrintQueues) ||
 	    CreateProcReadEntry("version", procDumpVersion) ||
 	    CreateProcReadEntry("nodes", procDumpSysNodes)) {
@@ -169,6 +174,7 @@ int CreateProcEntries(void)
 
 		return -ENOMEM;
 	}
+#endif
 #ifdef DEBUG
 	if (CreateProcEntry
 	    ("debug_level", PVRDebugProcGetLevel, PVRDebugProcSetLevel, NULL)) {
@@ -199,12 +205,14 @@ void RemoveProcEntries(void)
 	RemoveProcEntry("nodes");
 	RemoveProcEntry("version");
 
+#if 0
 	while (dir->subdir) {
 		PVR_DPF(PVR_DBG_WARNING, "Belatedly removing /proc/pvr/%s",
 			 dir->subdir->name);
 
 		RemoveProcEntry(dir->subdir->name);
 	}
+#endif
 
 	remove_proc_entry("pvr", NULL);
 }
