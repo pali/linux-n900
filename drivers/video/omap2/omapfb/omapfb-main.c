@@ -2419,6 +2419,15 @@ static int omapfb_probe(struct platform_device *pdev)
 	if (omapdss_is_initialized() == false)
 		return -EPROBE_DEFER;
 
+	dssdev = NULL;
+	for_each_dss_dev(dssdev) {
+		if (!dssdev->driver) {
+			dev_warn(&pdev->dev, "no driver for display: %s\n",
+				dssdev->name);
+			return -EPROBE_DEFER;
+		}
+	}
+
 	if (pdev->num_resources != 0) {
 		dev_err(&pdev->dev, "probed for an unknown device\n");
 		r = -ENODEV;
