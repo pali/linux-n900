@@ -322,6 +322,8 @@ CONFIG_OMAP_GPIO_SWITCH=y
 CONFIG_OMAP_MUX=y
 CONFIG_OMAP_MUX_DEBUG=y
 CONFIG_OMAP_MUX_WARNINGS=y
+CONFIG_OMAP_MBOX_FWK=m
+CONFIG_OMAP_MBOX_KFIFO_SIZE=256
 CONFIG_OMAP_32K_TIMER=y
 # CONFIG_OMAP3_L2_AUX_SECURE_SAVE_RESTORE is not set
 CONFIG_OMAP_DM_TIMER=y
@@ -2092,6 +2094,7 @@ CONFIG_RC_DEVICES=y
 # CONFIG_IR_STREAMZAP is not set
 # CONFIG_IR_IGUANA is not set
 # CONFIG_IR_TTUSBIR is not set
+CONFIG_IR_RX51=m
 # CONFIG_RC_LOOPBACK is not set
 # CONFIG_IR_GPIO_CIR is not set
 # CONFIG_MEDIA_USB_SUPPORT is not set
@@ -2918,7 +2921,143 @@ CONFIG_DMA_OF=y
 #
 # Microsoft Hyper-V guest support
 #
-# CONFIG_STAGING is not set
+CONFIG_STAGING=y
+# CONFIG_USBIP_CORE is not set
+# CONFIG_W35UND is not set
+# CONFIG_PRISM2_USB is not set
+# CONFIG_ECHO is not set
+# CONFIG_COMEDI is not set
+# CONFIG_ASUS_OLED is not set
+# CONFIG_RTLLIB is not set
+# CONFIG_R8712U is not set
+# CONFIG_RTS5139 is not set
+# CONFIG_TRANZPORT is not set
+# CONFIG_LINE6_USB is not set
+# CONFIG_USB_SERIAL_QUATECH2 is not set
+# CONFIG_VT6656 is not set
+
+#
+# IIO staging drivers
+#
+
+#
+# Accelerometers
+#
+# CONFIG_ADIS16201 is not set
+# CONFIG_ADIS16203 is not set
+# CONFIG_ADIS16204 is not set
+# CONFIG_ADIS16209 is not set
+# CONFIG_ADIS16220 is not set
+# CONFIG_ADIS16240 is not set
+# CONFIG_LIS3L02DQ is not set
+
+#
+# Analog to digital converters
+#
+# CONFIG_AD7291 is not set
+# CONFIG_AD7606 is not set
+# CONFIG_AD799X is not set
+# CONFIG_AD7780 is not set
+# CONFIG_AD7816 is not set
+# CONFIG_AD7192 is not set
+# CONFIG_AD7280 is not set
+
+#
+# Analog digital bi-direction converters
+#
+# CONFIG_ADT7316 is not set
+
+#
+# Capacitance to digital converters
+#
+# CONFIG_AD7150 is not set
+# CONFIG_AD7152 is not set
+# CONFIG_AD7746 is not set
+
+#
+# Direct Digital Synthesis
+#
+# CONFIG_AD5930 is not set
+# CONFIG_AD9832 is not set
+# CONFIG_AD9834 is not set
+# CONFIG_AD9850 is not set
+# CONFIG_AD9852 is not set
+# CONFIG_AD9910 is not set
+# CONFIG_AD9951 is not set
+
+#
+# Digital gyroscope sensors
+#
+# CONFIG_ADIS16060 is not set
+# CONFIG_ADIS16130 is not set
+# CONFIG_ADIS16260 is not set
+
+#
+# Network Analyzer, Impedance Converters
+#
+# CONFIG_AD5933 is not set
+
+#
+# Light sensors
+#
+# CONFIG_SENSORS_ISL29018 is not set
+# CONFIG_SENSORS_ISL29028 is not set
+# CONFIG_TSL2583 is not set
+# CONFIG_TSL2x7x is not set
+
+#
+# Magnetometer sensors
+#
+# CONFIG_SENSORS_HMC5843 is not set
+
+#
+# Active energy metering IC
+#
+# CONFIG_ADE7753 is not set
+# CONFIG_ADE7754 is not set
+# CONFIG_ADE7758 is not set
+# CONFIG_ADE7759 is not set
+# CONFIG_ADE7854 is not set
+
+#
+# Resolver to digital converters
+#
+# CONFIG_AD2S90 is not set
+# CONFIG_AD2S1200 is not set
+# CONFIG_AD2S1210 is not set
+
+#
+# Triggers - standalone
+#
+# CONFIG_IIO_SIMPLE_DUMMY is not set
+# CONFIG_ZSMALLOC is not set
+CONFIG_TIDSPBRIDGE=m
+CONFIG_TIDSPBRIDGE_MEMPOOL_SIZE=0x600000
+CONFIG_TIDSPBRIDGE_RECOVERY=y
+# CONFIG_TIDSPBRIDGE_CACHE_LINE_CHECK is not set
+# CONFIG_TIDSPBRIDGE_NTFY_PWRERR is not set
+# CONFIG_TIDSPBRIDGE_BACKTRACE is not set
+# CONFIG_USB_ENESTORAGE is not set
+# CONFIG_BCM_WIMAX is not set
+# CONFIG_FT1000 is not set
+
+#
+# Speakup console speech
+#
+# CONFIG_SPEAKUP is not set
+# CONFIG_TOUCHSCREEN_CLEARPAD_TM1217 is not set
+# CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_RMI4 is not set
+# CONFIG_STAGING_MEDIA is not set
+
+#
+# Android
+#
+# CONFIG_ANDROID is not set
+# CONFIG_USB_WPAN_HCD is not set
+# CONFIG_WIMAX_GDM72XX is not set
+# CONFIG_CSR_WIFI is not set
+# CONFIG_CED1401 is not set
+# CONFIG_DGRP is not set
 CONFIG_CLKDEV_LOOKUP=y
 CONFIG_HAVE_CLK_PREPARE=y
 CONFIG_COMMON_CLK=y
