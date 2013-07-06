@@ -393,10 +393,48 @@ static void lp5523_led_brightness_work(struct work_struct *work)
 	mutex_unlock(&chip->lock);
 }
 
+static ssize_t show_dummy(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	return sprintf(buf, "disabled\n");
+}
+
+static ssize_t store_dummy(struct device *dev,
+				 struct device_attribute *attr,
+				 const char *buf, size_t len)
+{
+	return len;
+}
+
+static DEVICE_ATTR(engine1_mode, S_IRUGO | S_IWUSR,
+		   show_dummy, store_dummy);
+static DEVICE_ATTR(engine2_mode, S_IRUGO | S_IWUSR,
+		   show_dummy, store_dummy);
+static DEVICE_ATTR(engine3_mode, S_IRUGO | S_IWUSR,
+		   show_dummy, store_dummy);
+static DEVICE_ATTR(engine1_leds, S_IRUGO | S_IWUSR,
+		   show_dummy, store_dummy);
+static DEVICE_ATTR(engine2_leds, S_IRUGO | S_IWUSR,
+		   show_dummy, store_dummy);
+static DEVICE_ATTR(engine3_leds, S_IRUGO | S_IWUSR,
+		   show_dummy, store_dummy);
+static DEVICE_ATTR(engine1_load, S_IWUSR, NULL, store_dummy);
+static DEVICE_ATTR(engine2_load, S_IWUSR, NULL, store_dummy);
+static DEVICE_ATTR(engine3_load, S_IWUSR, NULL, store_dummy);
 static DEVICE_ATTR(selftest, S_IRUGO, lp5523_selftest, NULL);
 
 static struct attribute *lp5523_attributes[] = {
 	&dev_attr_selftest.attr,
+	&dev_attr_engine1_mode.attr,
+	&dev_attr_engine2_mode.attr,
+	&dev_attr_engine3_mode.attr,
+	&dev_attr_engine1_load.attr,
+	&dev_attr_engine1_leds.attr,
+	&dev_attr_engine2_load.attr,
+	&dev_attr_engine2_leds.attr,
+	&dev_attr_engine3_load.attr,
+	&dev_attr_engine3_leds.attr,
 	NULL,
 };
 
