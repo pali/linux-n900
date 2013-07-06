@@ -22,8 +22,9 @@
 
 /*  ----------------------------------- Host OS */
 #include <dspbridge/host_os.h>
-#include <plat/dmtimer.h>
 #include <linux/platform_data/asoc-ti-mcbsp.h>
+
+#include "../../../../arch/arm/plat-omap/include/plat/dmtimer.h"
 
 /*  ----------------------------------- DSP/BIOS Bridge */
 #include <dspbridge/dbdefs.h>
