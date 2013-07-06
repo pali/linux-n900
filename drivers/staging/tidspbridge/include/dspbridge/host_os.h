@@ -41,10 +41,11 @@
 #include <linux/ioport.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
-#include <plat/mailbox.h>
 #include <linux/pagemap.h>
 #include <asm/cacheflush.h>
 #include <linux/dma-mapping.h>
+
+#include "../../../../../arch/arm/plat-omap/include/plat/mailbox.h"
 
 /* TODO -- Remove, once omap-iommu is used */
 #define INT_DSP_MMU_IRQ        (28 + NR_IRQS)
