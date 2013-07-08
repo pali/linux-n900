@@ -125,6 +125,7 @@ static long twl4030_madc_ioctl(struct file *filp, unsigned int cmd,
 	}
 
 	switch (cmd) {
+#ifdef CONFIG_TWL4030_MADC
 	case TWL4030_MADC_IOCX_ADC_RAW_READ: {
 		struct twl4030_madc_request req;
 		if (par.channel >= TWL4030_MADC_MAX_CHANNELS)
@@ -148,6 +149,7 @@ static long twl4030_madc_ioctl(struct file *filp, unsigned int cmd,
 		}
 		break;
 	}
+#endif
 	default:
 		return -EINVAL;
 	}
