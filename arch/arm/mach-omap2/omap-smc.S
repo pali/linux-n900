@@ -65,13 +65,12 @@ ENDPROC(omap_smc2)
  * r3 - @pargs: Physical address of parameter list
  */
 ENTRY(omap_smc3)
-	stmfd	sp!, {r4-r12, lr}
+	stmfd	sp!, {r4-r11, lr}
 	mov	r12, r0		@ Copy the secure service ID
 	mov	r6, #0xff	@ Indicate new Task call
-	dsb
-	dmb
-	smc	#1		@ call PPA service
-	ldmfd	sp!, {r4-r12, pc}
+	dsb			@ Memory Barrier
+	smc	#1		@ Call PPA service
+	ldmfd	sp!, {r4-r11, pc}
 ENDPROC(omap_smc3)
 
 ENTRY(omap_modify_auxcoreboot0)
