@@ -106,7 +106,7 @@ static int omap3_rom_rng_probe(struct platform_device *pdev)
 	}
 
 	setup_timer(&idle_timer, omap3_rom_rng_idle, 0);
-	rng_clk = clk_get_sys("omap_rng", "ick");
+	rng_clk = clk_get(&pdev->dev, "ick");
 	if (IS_ERR(rng_clk)) {
 		printk(KERN_ERR "%s: unable to get RNG clock\n",
 		       omap3_rom_rng_name);
@@ -123,6 +123,8 @@ static int omap3_rom_rng_probe(struct platform_device *pdev)
 static int omap3_rom_rng_remove(struct platform_device *pdev)
 {
 	hwrng_unregister(&omap3_rom_rng_ops);
+	clk_disable_unprepare(rng_clk);
+	clk_put(rng_clk);
 	return 0;
 }
 
