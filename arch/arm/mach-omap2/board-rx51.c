@@ -172,7 +172,7 @@ static u32 rx51_secure_rng_call(u32 ptr, u32 count, u32 flag)
 }
 
 static struct platform_device omap3_rom_rng_device = {
-	.name		= "omap3-rom-rng",
+	.name		= "omap_rng",
 	.id		= -1,
 	.dev	= {
 		.platform_data	= rx51_secure_rng_call,
