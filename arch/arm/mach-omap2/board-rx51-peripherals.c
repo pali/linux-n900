@@ -294,7 +294,6 @@ static struct platform_device rx51_battery_device = {
 	.id	= -1,
 };
 
-#if defined(CONFIG_CHARGER_BQ2415X) || defined(CONFIG_CHARGER_BQ2415X_MODULE)
 static enum bq2415x_mode rx51_charger_mode = BQ2415X_MODE_OFF;
 static void *rx51_charger_hook_data;
 static void (*rx51_charger_hook)(enum bq2415x_mode mode, void *data);
@@ -332,7 +331,6 @@ static void rx51_charger_set_current(int mA)
 	if (rx51_charger_hook)
 		rx51_charger_hook(rx51_charger_mode, rx51_charger_hook_data);
 }
-#endif
 
 static void rx51_charger_set_power(bool on)
 {
@@ -341,9 +339,7 @@ static void rx51_charger_set_power(bool on)
 
 static struct isp1704_charger_data rx51_charger_data = {
 	.set_power	= rx51_charger_set_power,
-#if defined(CONFIG_CHARGER_BQ2415X) || defined(CONFIG_CHARGER_BQ2415X_MODULE)
 	.set_current	= rx51_charger_set_current,
-#endif
 };
 
 static struct platform_device rx51_charger_device = {
@@ -1297,7 +1293,6 @@ static struct aic3x_pdata rx51_aic3x_data2 = {
 	.gpio_reset = 60,
 };
 
-#if defined(CONFIG_CHARGER_BQ2415X) || defined(CONFIG_CHARGER_BQ2415X_MODULE)
 static struct bq2415x_platform_data rx51_bq24150a_platform_data = {
 	.current_limit = 100,			/* mA */
 	.weak_battery_voltage = 3400,		/* mV */
@@ -1307,7 +1302,6 @@ static struct bq2415x_platform_data rx51_bq24150a_platform_data = {
 	.resistor_sense = 68,			/* m ohm */
 	.set_mode_hook = &rx51_charger_set_hook,
 };
-#endif
 
 static struct i2c_board_info __initdata rx51_peripherals_i2c_board_info_2[] = {
 	{
@@ -1337,12 +1331,10 @@ static struct i2c_board_info __initdata rx51_peripherals_i2c_board_info_2[] = {
 		I2C_BOARD_INFO("tpa6130a2", 0x60),
 		.platform_data = &rx51_tpa6130a2_data,
 	},
-#if defined(CONFIG_CHARGER_BQ2415X) || defined(CONFIG_CHARGER_BQ2415X_MODULE)
 	{
 		I2C_BOARD_INFO("bq24150a", 0x6b),
 		.platform_data = &rx51_bq24150a_platform_data,
 	},
-#endif
 };
 
 static struct i2c_board_info __initdata rx51_peripherals_i2c_board_info_3[] = {
