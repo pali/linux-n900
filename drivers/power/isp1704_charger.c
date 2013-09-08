@@ -2,6 +2,7 @@
  * ISP1704 USB Charger Detection driver
  *
  * Copyright (C) 2010 Nokia Corporation
+ * Copyright (C) 2012 - 2013 Pali Rohár <pali.rohar@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -271,7 +272,7 @@ static void isp1704_charger_work(struct work_struct *data)
 				isp1704_charger_set_current(isp, 1800);
 			} else {
 				isp->psy.type = POWER_SUPPLY_TYPE_USB;
-				isp->current_max = 100;
+				isp->current_max = 500;
 			}
 
 			/* enable data pullups */
@@ -327,13 +328,6 @@ static int isp1704_notifier_call(struct notifier_block *nb,
 {
 	struct isp1704_charger *isp =
 		container_of(nb, struct isp1704_charger, nb);
-
-	if (val == USB_EVENT_ENUMERATED) {
-		if (v)
-			isp->current_max = *((unsigned *)v);
-		else
-			isp->current_max = 0;
-	}
 
 	schedule_work(&isp->work);
 
