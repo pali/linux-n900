@@ -200,7 +200,7 @@ static int rx51_stingray_set_xclk(struct v4l2_subdev *subdev, int hz)
 	if (!isp)
 		return 1;
 
-	isp->platform_cb.set_xclk(isp, hz, STINGRAY_XCLK);
+//	isp->platform_cb.set_xclk(isp, hz, STINGRAY_XCLK);
 
 	return 0;
 }
@@ -277,27 +277,13 @@ static struct adp1653_platform_data rx51_adp1653_platform_data = {
  *
  */
 
-#define ACMELITE_XCLK		ISP_XCLK_A
-
-static int rx51_acmelite_set_xclk(struct v4l2_subdev *subdev, int hz)
-{
-	struct isp_device *isp = v4l2_dev_to_isp_device(subdev->v4l2_dev);
-
-	if (!isp)
-		return 1;
-
-	isp->platform_cb.set_xclk(isp, hz, ACMELITE_XCLK);
-
-	return 0;
-}
-
 static struct smiapp_platform_data rx51_smiapp_sensor_platform_data = {
 	.ext_clk		= 9.6 * 1000 * 1000,
 	.lanes			= 1,
 	/* bit rate / ddr */
 	.op_sys_clock		= (s64 []){ 12000000 * 10 / 2, 0 },
 	.csi_signalling_mode	= SMIAPP_CSI_SIGNALLING_MODE_CCP2_DATA_CLOCK,
-	.set_xclk		= rx51_acmelite_set_xclk,
+	.ext_clk_name		= "cam_xclka",
 	.xshutdown		= ACMELITE_RESET_GPIO,
 };
 
@@ -381,7 +367,11 @@ static struct isp_v4l2_subdevs_group rx51_camera_subdevs[] = {
 	{ NULL, 0, },
 };
 
+/*{ .dev_id = "3-003e"},*/
+
 static struct isp_platform_data rx51_isp_platform_data = {
+	.xclks[0] = 
+		{ .dev_id = "2-0010"},
 	.subdevs = rx51_camera_subdevs,
 };
 
