@@ -1491,13 +1491,26 @@ static int isp_enable_clocks(struct isp_device *isp)
 {
 	int r;
 	unsigned long rate;
+	int divisor;
+
+	/*
+	 * cam_mclk clock chain:
+	 *   dpll4 -> dpll4_m5 -> dpll4_m5x2 -> cam_mclk
+	 *
+	 * In OMAP3630 dpll4_m5x2 != 2 x dpll4_m5 but both are
+	 * set to the same value. Hence the rate set for dpll4_m5
+	 * has to be twice of what is set on OMAP3430 to get
+	 * the required value for cam_mclk
+	 */
+	divisor = isp->revision == ISP_REVISION_15_0 ? 1 : 2;
 
 	r = clk_prepare_enable(isp->clock[ISP_CLK_CAM_ICK]);
 	if (r) {
 		dev_err(isp->dev, "failed to enable cam_ick clock\n");
 		goto out_clk_enable_ick;
 	}
-	r = clk_set_rate(isp->clock[ISP_CLK_CAM_MCLK], CM_CAM_MCLK_HZ);
+	r = clk_set_rate(isp->clock[ISP_CLK_CAM_MCLK],
+			 CM_CAM_MCLK_HZ/divisor);
 	if (r) {
 		dev_err(isp->dev, "clk_set_rate for cam_mclk failed\n");
 		goto out_clk_enable_mclk;
