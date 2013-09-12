@@ -134,7 +134,7 @@ enum isp_xclk_id {
 struct isp_xclk {
 	struct isp_device *isp;
 	struct clk_hw hw;
-	struct clk_lookup *lookup;
+	struct clk_lookup *lookup[2];
 	enum isp_xclk_id id;
 
 	spinlock_t lock;	/* Protects enabled and divider */
