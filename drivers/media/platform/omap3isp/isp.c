@@ -309,19 +309,33 @@ static int isp_xclk_init(struct isp_device *isp)
 		if (IS_ERR(xclk->clk))
 			return PTR_ERR(xclk->clk);
 
-		if (pdata->xclks[i].con_id == NULL &&
-		    pdata->xclks[i].dev_id == NULL)
+		if (pdata->xclks[i][0].con_id == NULL &&
+		    pdata->xclks[i][0].dev_id == NULL)
 			continue;
 
-		xclk->lookup = kzalloc(sizeof(*xclk->lookup), GFP_KERNEL);
-		if (xclk->lookup == NULL)
+		xclk->lookup[0] = kzalloc(sizeof(*xclk->lookup[0]), GFP_KERNEL);
+		if (xclk->lookup[0] == NULL)
 			return -ENOMEM;
 
-		xclk->lookup->con_id = pdata->xclks[i].con_id;
-		xclk->lookup->dev_id = pdata->xclks[i].dev_id;
-		xclk->lookup->clk = xclk->clk;
+		xclk->lookup[0]->con_id = pdata->xclks[i][0].con_id;
+		xclk->lookup[0]->dev_id = pdata->xclks[i][0].dev_id;
+		xclk->lookup[0]->clk = xclk->clk;
 
-		clkdev_add(xclk->lookup);
+		clkdev_add(xclk->lookup[0]);
+
+		if (pdata->xclks[i][1].con_id == NULL &&
+		    pdata->xclks[i][1].dev_id == NULL)
+			continue;
+
+		xclk->lookup[1] = kzalloc(sizeof(*xclk->lookup[1]), GFP_KERNEL);
+		if (xclk->lookup[1] == NULL)
+			return -ENOMEM;
+
+		xclk->lookup[1]->con_id = pdata->xclks[i][1].con_id;
+		xclk->lookup[1]->dev_id = pdata->xclks[i][1].dev_id;
+		xclk->lookup[1]->clk = xclk->clk;
+
+		clkdev_add(xclk->lookup[1]);
 	}
 
 	return 0;
@@ -337,8 +351,10 @@ static void isp_xclk_cleanup(struct isp_device *isp)
 		if (!IS_ERR(xclk->clk))
 			clk_unregister(xclk->clk);
 
-		if (xclk->lookup)
-			clkdev_drop(xclk->lookup);
+		if (xclk->lookup[0])
+			clkdev_drop(xclk->lookup[0]);
+		if (xclk->lookup[1])
+			clkdev_drop(xclk->lookup[1]);
 	}
 }
 

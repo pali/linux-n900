@@ -158,7 +158,7 @@ struct isp_platform_xclk {
 };
 
 struct isp_platform_data {
-	struct isp_platform_xclk xclks[2];
+	struct isp_platform_xclk xclks[2][2];
 	struct isp_v4l2_subdevs_group *subdevs;
 	void (*set_constraints)(struct isp_device *isp, bool enable);
 };
