@@ -53,6 +53,7 @@ struct et8ek8_sensor {
 	struct v4l2_mbus_framefmt format;
 	struct et8ek8_platform_data *platform_data;
 	struct regulator *vana;
+	struct clk *ext_clk;
 
 	u16 version;
 
