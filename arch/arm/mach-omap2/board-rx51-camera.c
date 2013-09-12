@@ -63,10 +63,12 @@ static unsigned int rx51_camera_xshutdown;
 
 static int rx51_camera_set_xshutdown(unsigned int which, int set)
 {
-	unsigned int new = rx51_camera_xshutdown;
+	unsigned int new;
 	int ret = 0;
 
 	mutex_lock(&rx51_camera_mutex);
+
+	new = rx51_camera_xshutdown;
 
 	if (set)
 		new |= which;
@@ -122,8 +124,6 @@ static void __init rx51_acmelite_init(void)
 	/* XSHUTDOWN off, reset  */
 	gpio_direction_output(ACMELITE_RESET_GPIO, 0);
 	gpio_set_value(ACMELITE_RESET_GPIO, 0);
-
-	gpio_free(ACMELITE_RESET_GPIO);
 }
 
 static int __init rx51_adp1653_init(void)
@@ -191,20 +191,6 @@ static int __init rx51_camera_hw_init(void)
  *
  */
 
-#define STINGRAY_XCLK		ISP_XCLK_A
-
-static int rx51_stingray_set_xclk(struct v4l2_subdev *subdev, int hz)
-{
-	struct isp_device *isp = v4l2_dev_to_isp_device(subdev->v4l2_dev);
-
-	if (!isp)
-		return 1;
-
-//	isp->platform_cb.set_xclk(isp, hz, STINGRAY_XCLK);
-
-	return 0;
-}
-
 static int rx51_stingray_set_xshutdown(struct v4l2_subdev *subdev, int set)
 {
 	int ret;
@@ -222,8 +208,22 @@ static int rx51_stingray_set_xshutdown(struct v4l2_subdev *subdev, int set)
 	return ret;
 }
 
+static int rx51_acmelite_set_xshutdown(struct v4l2_subdev *subdev, u8 set)
+{
+	int ret;
+	ret = rx51_camera_set_xshutdown(RX51_CAMERA_ACMELITE, set);
+	if (ret == 0 && set) {
+		/* CONTROL_CSIRXFE
+		* Data/clock, enable transceiver, disable reset
+		*/
+		omap_ctrl_writel(OMAP343X_CSIB_RESET | OMAP343X_CSIB_PWRDNZ,
+				 OMAP343X_CONTROL_CSIRXFE);
+	}
+
+	return ret;
+}
+
 static struct et8ek8_platform_data rx51_et8ek8_platform_data = {
-	.set_xclk		= rx51_stingray_set_xclk,
 	.set_xshutdown		= rx51_stingray_set_xshutdown,
 };
 
@@ -283,8 +283,8 @@ static struct smiapp_platform_data rx51_smiapp_sensor_platform_data = {
 	/* bit rate / ddr */
 	.op_sys_clock		= (s64 []){ 12000000 * 10 / 2, 0 },
 	.csi_signalling_mode	= SMIAPP_CSI_SIGNALLING_MODE_CCP2_DATA_CLOCK,
-	.ext_clk_name		= "cam_xclka",
-	.xshutdown		= ACMELITE_RESET_GPIO,
+	.set_xshutdown		= rx51_acmelite_set_xshutdown,
+	.xshutdown		= SMIAPP_NO_XSHUTDOWN,
 };
 
 /*
@@ -367,10 +367,11 @@ static struct isp_v4l2_subdevs_group rx51_camera_subdevs[] = {
 	{ NULL, 0, },
 };
 
-/*{ .dev_id = "3-003e"},*/
 
 static struct isp_platform_data rx51_isp_platform_data = {
-	.xclks[0] = 
+	.xclks[0][0] =
+		{ .dev_id = "3-003e"},
+	.xclks[0][1] =
 		{ .dev_id = "2-0010"},
 	.subdevs = rx51_camera_subdevs,
 };
