@@ -27,6 +27,7 @@
  *
  */
 
+#include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/firmware.h>
 #include <linux/i2c.h>
@@ -573,7 +574,12 @@ static int et8ek8_power_off(struct et8ek8_sensor *sensor)
 
 	rval = sensor->platform_data->set_xshutdown(subdev, 0);
 	udelay(1);
-	rval |= sensor->platform_data->set_xclk(subdev, 0);
+
+	if (sensor->platform_data->set_xclk)
+		rval |= sensor->platform_data->set_xclk(subdev, 0);
+	else
+		clk_disable_unprepare(sensor->ext_clk);
+
 	rval |= regulator_disable(sensor->vana);
 	return rval;
 }
@@ -594,7 +600,22 @@ static int et8ek8_power_on(struct et8ek8_sensor *sensor)
 	if (sensor->current_reglist)
 		hz = sensor->current_reglist->mode.ext_clock;
 
-	rval = sensor->platform_data->set_xclk(subdev, hz);
+	if(sensor->platform_data->set_xclk)
+		rval = sensor->platform_data->set_xclk(subdev, hz);
+	else {
+		rval = clk_set_rate(sensor->ext_clk, hz);
+		if (rval < 0) {
+			dev_err(&client->dev,
+				"unable to set extclk clock freq to %u\n", hz);
+			goto out;
+		}
+		rval = clk_prepare_enable(sensor->ext_clk);
+		if (rval < 0) {
+			dev_err(&client->dev, "failed to enable extclk\n");
+			goto out;
+		}
+	}
+
 	if (rval)
 		goto out;
 
@@ -849,6 +870,14 @@ static int et8ek8_dev_init(struct v4l2_subdev *subdev)
 	if (IS_ERR(sensor->vana)) {
 		dev_err(&client->dev, "could not get regulator for vana\n");
 		return -ENODEV;
+	}
+
+	if (!sensor->platform_data->set_xclk) {
+		sensor->ext_clk = devm_clk_get(&client->dev, "ext_clk");
+		if (IS_ERR(sensor->ext_clk)) {
+			dev_err(&client->dev, "could not get clock\n");
+			return -ENODEV;
+		}
 	}
 
 	rval = et8ek8_power_on(sensor);
@@ -1139,6 +1168,16 @@ static int __exit et8ek8_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
+
+	if (sensor->power_count) {
+		if (sensor->platform_data->set_xshutdown)
+			sensor->platform_data->set_xshutdown( subdev, 0);
+		if (sensor->platform_data->set_xclk)
+			sensor->platform_data->set_xclk(subdev, 0);
+		else
+			clk_disable_unprepare(sensor->ext_clk);
+		sensor->power_count = 0;
+	}
 
 	v4l2_device_unregister_subdev(&sensor->subdev);
 	device_remove_file(&client->dev, &dev_attr_priv_mem);
