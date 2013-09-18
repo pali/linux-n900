@@ -718,7 +718,6 @@ static int et8ek8_set_pad_format(struct v4l2_subdev *subdev,
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 	struct v4l2_mbus_framefmt *format;
         struct smia_reglist *reglist;
-	int ret;
 
 	format = __et8ek8_get_pad_format(sensor, fh, fmt->pad, fmt->which);
 	if (format == NULL)
@@ -731,11 +730,6 @@ static int et8ek8_set_pad_format(struct v4l2_subdev *subdev,
 
 	if (fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
 		sensor->current_reglist = reglist;
-		ret = sensor->platform_data->configure_interface(subdev,
-						&sensor->current_reglist->mode);
-		if (ret < 0)
-			return ret;
-
 		et8ek8_update_controls(sensor);
 	}
 
