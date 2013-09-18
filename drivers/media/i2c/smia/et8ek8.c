@@ -29,7 +29,6 @@
 
 #include <linux/clk.h>
 #include <linux/delay.h>
-#include <linux/firmware.h>
 #include <linux/i2c.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -125,6 +124,567 @@ static struct et8ek8_gain {
 #define ET8EK8_I2C_DELAY	3	/* msec delay b/w accesses */
 
 #define USE_CRC			1
+
+/*
+ *
+ * Stingray sensor mode settings for Scooby
+ *
+ *
+ */
+
+/* Mode1_poweron_Mode2_16VGA_2592x1968_12.07fps */
+static struct smia_reglist mode1_poweron_mode2_16vga_2592x1968_12_07fps = {	/* 1 */
+/* (without the +1)
+ * SPCK       = 80 MHz
+ * CCP2       = 640 MHz
+ * VCO        = 640 MHz
+ * VCOUNT     = 84 (2016)
+ * HCOUNT     = 137 (3288)
+ * CKREF_DIV  = 2
+ * CKVAR_DIV  = 200
+ * VCO_DIV    = 0
+ * SPCK_DIV   = 7
+ * MRCK_DIV   = 7
+ * LVDSCK_DIV = 0
+ */
+	.type = SMIA_REGLIST_POWERON,
+	.mode = {
+		.sensor_width = 2592,
+		.sensor_height = 1968,
+		.sensor_window_origin_x = 0,
+		.sensor_window_origin_y = 0,
+		.sensor_window_width = 2592,
+		.sensor_window_height = 1968,
+		.width = 3288,
+		.height = 2016,
+		.window_origin_x = 0,
+		.window_origin_y = 0,
+		.window_width = 2592,
+		.window_height = 1968,
+		.pixel_clock = 80000000,
+		.ext_clock = 9600000,
+		.timeperframe = {
+			.numerator = 100,
+			.denominator = 1207
+		},
+		.max_exp = 2012,
+		/* .max_gain = 0, */
+		.pixel_format = V4L2_PIX_FMT_SGRBG10,
+		.sensitivity = 65536
+	},
+	.regs = {
+		{ SMIA_REG_8BIT, 0x126C, 0xCC },	/* Need to set firstly */
+		{ SMIA_REG_8BIT, 0x1269, 0x00 },	/* Strobe and Data of CCP2 delay are minimized. */
+		{ SMIA_REG_8BIT, 0x1220, 0x89 },	/* Refined value of Min H_COUNT  */
+		{ SMIA_REG_8BIT, 0x123A, 0x07 },	/* Frequency of SPCK setting (SPCK=MRCK) */
+		{ SMIA_REG_8BIT, 0x1241, 0x94 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x1242, 0x02 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x124B, 0x00 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x1255, 0xFF },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x1256, 0x9F },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x1258, 0x00 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x125D, 0x88 },	/* From parallel out to serial out */
+		{ SMIA_REG_8BIT, 0x125E, 0xC0 },	/* From w/ embeded data to w/o embeded data */
+		{ SMIA_REG_8BIT, 0x1263, 0x98 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x1268, 0xC6 },	/* CCP2 out is from STOP to ACTIVE */
+		{ SMIA_REG_8BIT, 0x1434, 0x00 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x1163, 0x44 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x1166, 0x29 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x1140, 0x02 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x1011, 0x24 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x1151, 0x80 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x1152, 0x23 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x1014, 0x05 },	/* Initial setting( for improvement2 of lower frequency noise ) */
+		{ SMIA_REG_8BIT, 0x1033, 0x06 },
+		{ SMIA_REG_8BIT, 0x1034, 0x79 },
+		{ SMIA_REG_8BIT, 0x1423, 0x3F },
+		{ SMIA_REG_8BIT, 0x1424, 0x3F },
+		{ SMIA_REG_8BIT, 0x1426, 0x00 },
+		{ SMIA_REG_8BIT, 0x1439, 0x00 },	/* Switch of Preset-White-balance (0d:disable / 1d:enable) */
+		{ SMIA_REG_8BIT, 0x161F, 0x60 },	/* Switch of blemish correction (0d:disable / 1d:enable) */
+		{ SMIA_REG_8BIT, 0x1634, 0x00 },	/* Switch of auto noise correction (0d:disable / 1d:enable) */
+		{ SMIA_REG_8BIT, 0x1646, 0x00 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x1648, 0x00 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x113E, 0x01 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x113F, 0x22 },	/* Initial setting */
+		{ SMIA_REG_8BIT, 0x1239, 0x64 },
+		{ SMIA_REG_8BIT, 0x1238, 0x02 },
+		{ SMIA_REG_8BIT, 0x123B, 0x70 },
+		{ SMIA_REG_8BIT, 0x123A, 0x07 },
+		{ SMIA_REG_8BIT, 0x121B, 0x64 },
+		{ SMIA_REG_8BIT, 0x121D, 0x64 },
+		{ SMIA_REG_8BIT, 0x1221, 0x00 },
+		{ SMIA_REG_8BIT, 0x1220, 0x89 },
+		{ SMIA_REG_8BIT, 0x1223, 0x00 },
+		{ SMIA_REG_8BIT, 0x1222, 0x54 },
+		{ SMIA_REG_8BIT, 0x125D, 0x88 },	/* CCP_LVDS_MODE/  */
+		{ SMIA_REG_TERM, 0, 0}
+	}
+};
+
+/* Mode1_16VGA_2592x1968_13.12fps_DPCM10-8 */
+static struct smia_reglist mode1_16vga_2592x1968_13_12fps_dpcm10_8 = {	/* 2 */
+/* (without the +1)
+ * SPCK       = 80 MHz
+ * CCP2       = 560 MHz
+ * VCO        = 560 MHz
+ * VCOUNT     = 84 (2016)
+ * HCOUNT     = 128 (3072)
+ * CKREF_DIV  = 2
+ * CKVAR_DIV  = 175
+ * VCO_DIV    = 0
+ * SPCK_DIV   = 6
+ * MRCK_DIV   = 7
+ * LVDSCK_DIV = 0
+ */
+	.type = SMIA_REGLIST_MODE,
+	.mode = {
+		.sensor_width = 2592,
+		.sensor_height = 1968,
+		.sensor_window_origin_x = 0,
+		.sensor_window_origin_y = 0,
+		.sensor_window_width = 2592,
+		.sensor_window_height = 1968,
+		.width = 3072,
+		.height = 2016,
+		.window_origin_x = 0,
+		.window_origin_y = 0,
+		.window_width = 2592,
+		.window_height = 1968,
+		.pixel_clock = 80000000,
+		.ext_clock = 9600000,
+		.timeperframe = {
+			.numerator = 100,
+			.denominator = 1292
+		},
+		.max_exp = 2012,
+		/* .max_gain = 0, */
+		.pixel_format = V4L2_PIX_FMT_SGRBG10DPCM8,
+		.sensitivity = 65536
+	},
+	.regs = {
+		{ SMIA_REG_8BIT, 0x1239, 0x57 },
+		{ SMIA_REG_8BIT, 0x1238, 0x82 },
+		{ SMIA_REG_8BIT, 0x123B, 0x70 },
+		{ SMIA_REG_8BIT, 0x123A, 0x06 },
+		{ SMIA_REG_8BIT, 0x121B, 0x64 },
+		{ SMIA_REG_8BIT, 0x121D, 0x64 },
+		{ SMIA_REG_8BIT, 0x1221, 0x00 },
+		{ SMIA_REG_8BIT, 0x1220, 0x80 },	/* <-changed to v14 7E->80 */
+		{ SMIA_REG_8BIT, 0x1223, 0x00 },
+		{ SMIA_REG_8BIT, 0x1222, 0x54 },
+		{ SMIA_REG_8BIT, 0x125D, 0x83 },	/* CCP_LVDS_MODE/  */
+		{ SMIA_REG_TERM, 0, 0}
+	}
+};
+
+/* Mode3_4VGA_1296x984_29.99fps_DPCM10-8 */
+static struct smia_reglist mode3_4vga_1296x984_29_99fps_dpcm10_8 = {	/* 3 */
+/* (without the +1)
+ * SPCK       = 96.5333333333333 MHz
+ * CCP2       = 579.2 MHz
+ * VCO        = 579.2 MHz
+ * VCOUNT     = 84 (2016)
+ * HCOUNT     = 133 (3192)
+ * CKREF_DIV  = 2
+ * CKVAR_DIV  = 181
+ * VCO_DIV    = 0
+ * SPCK_DIV   = 5
+ * MRCK_DIV   = 7
+ * LVDSCK_DIV = 0
+ */
+	.type = SMIA_REGLIST_MODE,
+	.mode = {
+		.sensor_width = 2592,
+		.sensor_height = 1968,
+		.sensor_window_origin_x = 0,
+		.sensor_window_origin_y = 0,
+		.sensor_window_width = 2592,
+		.sensor_window_height = 1968,
+		.width = 3192,
+		.height = 1008,
+		.window_origin_x = 0,
+		.window_origin_y = 0,
+		.window_width = 1296,
+		.window_height = 984,
+		.pixel_clock = 96533333,
+		.ext_clock = 9600000,
+		.timeperframe = {
+			.numerator = 100,
+			.denominator = 3000
+		},
+		.max_exp = 1004,
+		/* .max_gain = 0, */
+		.pixel_format = V4L2_PIX_FMT_SGRBG10DPCM8,
+		.sensitivity = 65536
+	},
+	.regs = {
+		{ SMIA_REG_8BIT, 0x1239, 0x5A },	/*        */
+		{ SMIA_REG_8BIT, 0x1238, 0x82 },	/*        */
+		{ SMIA_REG_8BIT, 0x123B, 0x70 },	/*        */
+		{ SMIA_REG_8BIT, 0x123A, 0x05 },	/*        */
+		{ SMIA_REG_8BIT, 0x121B, 0x63 },	/*        */
+		{ SMIA_REG_8BIT, 0x1220, 0x85 },	/*        */
+		{ SMIA_REG_8BIT, 0x1221, 0x00 },	/*        */
+		{ SMIA_REG_8BIT, 0x1222, 0x54 },	/*        */
+		{ SMIA_REG_8BIT, 0x1223, 0x00 },	/*        */
+		{ SMIA_REG_8BIT, 0x121D, 0x63 },
+		{ SMIA_REG_8BIT, 0x125D, 0x83 },	/* CCP_LVDS_MODE/  */
+		{ SMIA_REG_TERM, 0, 0}
+	}
+};
+
+/* Mode4_SVGA_864x656_29.88fps */
+static struct smia_reglist mode4_svga_864x656_29_88fps = {	/* 4 */
+/* (without the +1)
+ * SPCK       = 80 MHz
+ * CCP2       = 320 MHz
+ * VCO        = 640 MHz
+ * VCOUNT     = 84 (2016)
+ * HCOUNT     = 166 (3984)
+ * CKREF_DIV  = 2
+ * CKVAR_DIV  = 200
+ * VCO_DIV    = 0
+ * SPCK_DIV   = 7
+ * MRCK_DIV   = 7
+ * LVDSCK_DIV = 1
+ */
+	.type = SMIA_REGLIST_MODE,
+	.mode = {
+		.sensor_width = 2592,
+		.sensor_height = 1968,
+		.sensor_window_origin_x = 0,
+		.sensor_window_origin_y = 0,
+		.sensor_window_width = 2592,
+		.sensor_window_height = 1968,
+		.width = 3984,
+		.height = 672,
+		.window_origin_x = 0,
+		.window_origin_y = 0,
+		.window_width = 864,
+		.window_height = 656,
+		.pixel_clock = 80000000,
+		.ext_clock = 9600000,
+		.timeperframe = {
+			.numerator = 100,
+			.denominator = 2988
+		},
+		.max_exp = 668,
+		/* .max_gain = 0, */
+		.pixel_format = V4L2_PIX_FMT_SGRBG10,
+		.sensitivity = 65536
+	},
+	.regs = {
+		{ SMIA_REG_8BIT, 0x1239, 0x64 },
+		{ SMIA_REG_8BIT, 0x1238, 0x02 },
+		{ SMIA_REG_8BIT, 0x123B, 0x71 },
+		{ SMIA_REG_8BIT, 0x123A, 0x07 },
+		{ SMIA_REG_8BIT, 0x121B, 0x62 },
+		{ SMIA_REG_8BIT, 0x121D, 0x62 },
+		{ SMIA_REG_8BIT, 0x1221, 0x00 },
+		{ SMIA_REG_8BIT, 0x1220, 0xA6 },
+		{ SMIA_REG_8BIT, 0x1223, 0x00 },
+		{ SMIA_REG_8BIT, 0x1222, 0x54 },
+		{ SMIA_REG_8BIT, 0x125D, 0x88 },	/* CCP_LVDS_MODE/  */
+		{ SMIA_REG_TERM, 0, 0}
+	}
+};
+
+/* Mode5_VGA_648x492_29.93fps */
+static struct smia_reglist mode5_vga_648x492_29_93fps = {	/* 5 */
+/* (without the +1)
+ * SPCK       = 80 MHz
+ * CCP2       = 320 MHz
+ * VCO        = 640 MHz
+ * VCOUNT     = 84 (2016)
+ * HCOUNT     = 221 (5304)
+ * CKREF_DIV  = 2
+ * CKVAR_DIV  = 200
+ * VCO_DIV    = 0
+ * SPCK_DIV   = 7
+ * MRCK_DIV   = 7
+ * LVDSCK_DIV = 1
+ */
+	.type = SMIA_REGLIST_MODE,
+	.mode = {
+		.sensor_width = 2592,
+		.sensor_height = 1968,
+		.sensor_window_origin_x = 0,
+		.sensor_window_origin_y = 0,
+		.sensor_window_width = 2592,
+		.sensor_window_height = 1968,
+		.width = 5304,
+		.height = 504,
+		.window_origin_x = 0,
+		.window_origin_y = 0,
+		.window_width = 648,
+		.window_height = 492,
+		.pixel_clock = 80000000,
+		.ext_clock = 9600000,
+		.timeperframe = {
+			.numerator = 100,
+			.denominator = 2993
+		},
+		.max_exp = 500,
+		/* .max_gain = 0, */
+		.pixel_format = V4L2_PIX_FMT_SGRBG10,
+		.sensitivity = 65536
+	},
+	.regs = {
+		{ SMIA_REG_8BIT, 0x1239, 0x64 },
+		{ SMIA_REG_8BIT, 0x1238, 0x02 },
+		{ SMIA_REG_8BIT, 0x123B, 0x71 },
+		{ SMIA_REG_8BIT, 0x123A, 0x07 },
+		{ SMIA_REG_8BIT, 0x121B, 0x61 },
+		{ SMIA_REG_8BIT, 0x121D, 0x61 },
+		{ SMIA_REG_8BIT, 0x1221, 0x00 },
+		{ SMIA_REG_8BIT, 0x1220, 0xDD },
+		{ SMIA_REG_8BIT, 0x1223, 0x00 },
+		{ SMIA_REG_8BIT, 0x1222, 0x54 },
+		{ SMIA_REG_8BIT, 0x125D, 0x88 },	/* CCP_LVDS_MODE/  */
+		{ SMIA_REG_TERM, 0, 0}
+	}
+};
+
+/* Mode2_16VGA_2592x1968_3.99fps */
+static struct smia_reglist mode2_16vga_2592x1968_3_99fps = {	/* 6 */
+/* (without the +1)
+ * SPCK       = 80 MHz
+ * CCP2       = 640 MHz
+ * VCO        = 640 MHz
+ * VCOUNT     = 254 (6096)
+ * HCOUNT     = 137 (3288)
+ * CKREF_DIV  = 2
+ * CKVAR_DIV  = 200
+ * VCO_DIV    = 0
+ * SPCK_DIV   = 7
+ * MRCK_DIV   = 7
+ * LVDSCK_DIV = 0
+ */
+	.type = SMIA_REGLIST_MODE,
+	.mode = {
+		.sensor_width = 2592,
+		.sensor_height = 1968,
+		.sensor_window_origin_x = 0,
+		.sensor_window_origin_y = 0,
+		.sensor_window_width = 2592,
+		.sensor_window_height = 1968,
+		.width = 3288,
+		.height = 6096,
+		.window_origin_x = 0,
+		.window_origin_y = 0,
+		.window_width = 2592,
+		.window_height = 1968,
+		.pixel_clock = 80000000,
+		.ext_clock = 9600000,
+		.timeperframe = {
+			.numerator = 100,
+			.denominator = 399
+		},
+		.max_exp = 6092,
+		/* .max_gain = 0, */
+		.pixel_format = V4L2_PIX_FMT_SGRBG10,
+		.sensitivity = 65536
+	},
+	.regs = {
+		{ SMIA_REG_8BIT, 0x1239, 0x64 },
+		{ SMIA_REG_8BIT, 0x1238, 0x02 },
+		{ SMIA_REG_8BIT, 0x123B, 0x70 },
+		{ SMIA_REG_8BIT, 0x123A, 0x07 },
+		{ SMIA_REG_8BIT, 0x121B, 0x64 },
+		{ SMIA_REG_8BIT, 0x121D, 0x64 },
+		{ SMIA_REG_8BIT, 0x1221, 0x00 },
+		{ SMIA_REG_8BIT, 0x1220, 0x89 },
+		{ SMIA_REG_8BIT, 0x1223, 0x00 },
+		{ SMIA_REG_8BIT, 0x1222, 0xFE },
+		{ SMIA_REG_TERM, 0, 0}
+	}
+};
+
+/* Mode_648x492_5fps */
+static struct smia_reglist mode_648x492_5fps = {	/* 7 */
+/* (without the +1)
+ * SPCK       = 13.3333333333333 MHz
+ * CCP2       = 53.3333333333333 MHz
+ * VCO        = 640 MHz
+ * VCOUNT     = 84 (2016)
+ * HCOUNT     = 221 (5304)
+ * CKREF_DIV  = 2
+ * CKVAR_DIV  = 200
+ * VCO_DIV    = 5
+ * SPCK_DIV   = 7
+ * MRCK_DIV   = 7
+ * LVDSCK_DIV = 1
+ */
+	.type = SMIA_REGLIST_MODE,
+	.mode = {
+		.sensor_width = 2592,
+		.sensor_height = 1968,
+		.sensor_window_origin_x = 0,
+		.sensor_window_origin_y = 0,
+		.sensor_window_width = 2592,
+		.sensor_window_height = 1968,
+		.width = 5304,
+		.height = 504,
+		.window_origin_x = 0,
+		.window_origin_y = 0,
+		.window_width = 648,
+		.window_height = 492,
+		.pixel_clock = 13333333,
+		.ext_clock = 9600000,
+		.timeperframe = {
+			.numerator = 100,
+			.denominator = 499
+		},
+		.max_exp = 500,
+		/* .max_gain = 0, */
+		.pixel_format = V4L2_PIX_FMT_SGRBG10,
+		.sensitivity = 65536
+	},
+	.regs = {
+		{ SMIA_REG_8BIT, 0x1239, 0x64 },
+		{ SMIA_REG_8BIT, 0x1238, 0x02 },
+		{ SMIA_REG_8BIT, 0x123B, 0x71 },
+		{ SMIA_REG_8BIT, 0x123A, 0x57 },
+		{ SMIA_REG_8BIT, 0x121B, 0x61 },
+		{ SMIA_REG_8BIT, 0x121D, 0x61 },
+		{ SMIA_REG_8BIT, 0x1221, 0x00 },
+		{ SMIA_REG_8BIT, 0x1220, 0xDD },
+		{ SMIA_REG_8BIT, 0x1223, 0x00 },
+		{ SMIA_REG_8BIT, 0x1222, 0x54 },
+		{ SMIA_REG_8BIT, 0x125D, 0x88 },	/* CCP_LVDS_MODE/  */
+		{ SMIA_REG_TERM, 0, 0}
+	}
+};
+
+/* Mode3_4VGA_1296x984_5fps */
+static struct smia_reglist mode3_4vga_1296x984_5fps = {	/* 8 */
+/* (without the +1)
+ * SPCK       = 49.4 MHz
+ * CCP2       = 395.2 MHz
+ * VCO        = 790.4 MHz
+ * VCOUNT     = 250 (6000)
+ * HCOUNT     = 137 (3288)
+ * CKREF_DIV  = 2
+ * CKVAR_DIV  = 247
+ * VCO_DIV    = 1
+ * SPCK_DIV   = 7
+ * MRCK_DIV   = 7
+ * LVDSCK_DIV = 0
+ */
+	.type = SMIA_REGLIST_MODE,
+	.mode = {
+		.sensor_width = 2592,
+		.sensor_height = 1968,
+		.sensor_window_origin_x = 0,
+		.sensor_window_origin_y = 0,
+		.sensor_window_width = 2592,
+		.sensor_window_height = 1968,
+		.width = 3288,
+		.height = 3000,
+		.window_origin_x = 0,
+		.window_origin_y = 0,
+		.window_width = 1296,
+		.window_height = 984,
+		.pixel_clock = 49400000,
+		.ext_clock = 9600000,
+		.timeperframe = {
+			.numerator = 100,
+			.denominator = 501
+		},
+		.max_exp = 2996,
+		/* .max_gain = 0, */
+		.pixel_format = V4L2_PIX_FMT_SGRBG10,
+		.sensitivity = 65536
+	},
+	.regs = {
+		{ SMIA_REG_8BIT, 0x1239, 0x7B },
+		{ SMIA_REG_8BIT, 0x1238, 0x82 },
+		{ SMIA_REG_8BIT, 0x123B, 0x70 },
+		{ SMIA_REG_8BIT, 0x123A, 0x17 },
+		{ SMIA_REG_8BIT, 0x121B, 0x63 },
+		{ SMIA_REG_8BIT, 0x121D, 0x63 },
+		{ SMIA_REG_8BIT, 0x1221, 0x00 },
+		{ SMIA_REG_8BIT, 0x1220, 0x89 },
+		{ SMIA_REG_8BIT, 0x1223, 0x00 },
+		{ SMIA_REG_8BIT, 0x1222, 0xFA },
+		{ SMIA_REG_8BIT, 0x125D, 0x88 },	/* CCP_LVDS_MODE/  */
+		{ SMIA_REG_TERM, 0, 0}
+	}
+};
+
+/* Mode_4VGA_1296x984_25fps_DPCM10-8 */
+static struct smia_reglist mode_4vga_1296x984_25fps_dpcm10_8 = {	/* 9 */
+/* (without the +1)
+ * SPCK       = 84.2666666666667 MHz
+ * CCP2       = 505.6 MHz
+ * VCO        = 505.6 MHz
+ * VCOUNT     = 88 (2112)
+ * HCOUNT     = 133 (3192)
+ * CKREF_DIV  = 2
+ * CKVAR_DIV  = 158
+ * VCO_DIV    = 0
+ * SPCK_DIV   = 5
+ * MRCK_DIV   = 7
+ * LVDSCK_DIV = 0
+ */
+	.type = SMIA_REGLIST_MODE,
+	.mode = {
+		.sensor_width = 2592,
+		.sensor_height = 1968,
+		.sensor_window_origin_x = 0,
+		.sensor_window_origin_y = 0,
+		.sensor_window_width = 2592,
+		.sensor_window_height = 1968,
+		.width = 3192,
+		.height = 1056,
+		.window_origin_x = 0,
+		.window_origin_y = 0,
+		.window_width = 1296,
+		.window_height = 984,
+		.pixel_clock = 84266667,
+		.ext_clock = 9600000,
+		.timeperframe = {
+			.numerator = 100,
+			.denominator = 2500
+		},
+		.max_exp = 1052,
+		/* .max_gain = 0, */
+		.pixel_format = V4L2_PIX_FMT_SGRBG10DPCM8,
+		.sensitivity = 65536
+	},
+	.regs = {
+		{ SMIA_REG_8BIT, 0x1239, 0x4F },	/*        */
+		{ SMIA_REG_8BIT, 0x1238, 0x02 },	/*        */
+		{ SMIA_REG_8BIT, 0x123B, 0x70 },	/*        */
+		{ SMIA_REG_8BIT, 0x123A, 0x05 },	/*        */
+		{ SMIA_REG_8BIT, 0x121B, 0x63 },	/*        */
+		{ SMIA_REG_8BIT, 0x1220, 0x85 },	/*        */
+		{ SMIA_REG_8BIT, 0x1221, 0x00 },	/*        */
+		{ SMIA_REG_8BIT, 0x1222, 0x58 },	/*        */
+		{ SMIA_REG_8BIT, 0x1223, 0x00 },	/*        */
+		{ SMIA_REG_8BIT, 0x121D, 0x63 },	/*        */
+		{ SMIA_REG_8BIT, 0x125D, 0x83 },	/*        */
+		{ SMIA_REG_TERM, 0, 0}
+	}
+};
+
+static struct smia_meta_reglist et8ek8_smia_meta_reglist = {
+	.magic   = SMIA_MAGIC,
+	.version = "V14 03-June-2008",
+	.reglist = {
+		{ .offset = (uintptr_t)&mode1_poweron_mode2_16vga_2592x1968_12_07fps },
+		{ .offset = (uintptr_t)&mode1_16vga_2592x1968_13_12fps_dpcm10_8 },
+		{ .offset = (uintptr_t)&mode3_4vga_1296x984_29_99fps_dpcm10_8 },
+		{ .offset = (uintptr_t)&mode4_svga_864x656_29_88fps },
+		{ .offset = (uintptr_t)&mode5_vga_648x492_29_93fps },
+		{ .offset = (uintptr_t)&mode2_16vga_2592x1968_3_99fps },
+		{ .offset = (uintptr_t)&mode_648x492_5fps },
+		{ .offset = (uintptr_t)&mode3_4vga_1296x984_5fps },
+		{ .offset = (uintptr_t)&mode_4vga_1296x984_25fps_dpcm10_8 },
+		{ .offset = 0 }
+	}
+};
 
 /*
  * Return time of one row in microseconds, .8 fixed point format.
@@ -620,13 +1180,11 @@ static int et8ek8_power_on(struct et8ek8_sensor *sensor)
 
 	msleep(5000*1000/hz+1);				/* Wait 5000 cycles */
 
-	if (sensor->meta_reglist) {
-		rval = smia_i2c_reglist_find_write(client,
-						   sensor->meta_reglist,
-						   SMIA_REGLIST_POWERON);
-		if (rval)
-			goto out;
-	}
+	rval = smia_i2c_reglist_find_write(client,
+					   &et8ek8_smia_meta_reglist,
+					   SMIA_REGLIST_POWERON);
+	if (rval)
+		goto out;
 
 #ifdef USE_CRC
 	rval = smia_i2c_read_reg(client,
@@ -659,27 +1217,21 @@ static int et8ek8_enum_mbus_code(struct v4l2_subdev *subdev,
 				 struct v4l2_subdev_fh *fh,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
-	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
-
-	return smia_reglist_enum_mbus_code(sensor->meta_reglist, code);
+	return smia_reglist_enum_mbus_code(&et8ek8_smia_meta_reglist, code);
 }
 
 static int et8ek8_enum_frame_size(struct v4l2_subdev *subdev,
 				  struct v4l2_subdev_fh *fh,
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
-	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
-
-	return smia_reglist_enum_frame_size(sensor->meta_reglist, fse);
+	return smia_reglist_enum_frame_size(&et8ek8_smia_meta_reglist, fse);
 }
 
 static int et8ek8_enum_frame_ival(struct v4l2_subdev *subdev,
 				  struct v4l2_subdev_fh *fh,
 				  struct v4l2_subdev_frame_interval_enum *fie)
 {
-	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
-
-	return smia_reglist_enum_frame_ival(sensor->meta_reglist, fie);
+	return smia_reglist_enum_frame_ival(&et8ek8_smia_meta_reglist, fie);
 }
 
 static struct v4l2_mbus_framefmt *
@@ -723,7 +1275,7 @@ static int et8ek8_set_pad_format(struct v4l2_subdev *subdev,
 	if (format == NULL)
 		return -EINVAL;
 
-	reglist = smia_reglist_find_mode_fmt(sensor->meta_reglist,
+	reglist = smia_reglist_find_mode_fmt(&et8ek8_smia_meta_reglist,
 					     &fmt->format);
 	smia_reglist_to_mbus(reglist, &fmt->format);
 	*format = fmt->format;
@@ -753,7 +1305,7 @@ static int et8ek8_set_frame_interval(struct v4l2_subdev *subdev,
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 	struct smia_reglist *reglist;
 
-	reglist = smia_reglist_find_mode_ival(sensor->meta_reglist,
+	reglist = smia_reglist_find_mode_ival(&et8ek8_smia_meta_reglist,
 					      sensor->current_reglist,
 					      &fi->interval);
 
@@ -850,7 +1402,6 @@ static int et8ek8_dev_init(struct v4l2_subdev *subdev)
 {
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 	struct i2c_client *client = v4l2_get_subdevdata(subdev);
-	char name[SMIA_MAX_LEN];
 	int rval, rev_l, rev_h;
 
 	sensor->vana = regulator_get(&client->dev, "VANA");
@@ -887,69 +1438,54 @@ static int et8ek8_dev_init(struct v4l2_subdev *subdev)
 			 "unknown version 0x%x detected, "
 			 "continuing anyway\n", sensor->version);
 
-	snprintf(name, sizeof(name), "%s-%4.4x.bin", ET8EK8_NAME,
-		 sensor->version);
-	if (request_firmware(&sensor->fw, name,
-			     &client->dev)) {
-		dev_err(&client->dev,
-			"can't load firmware %s\n", name);
-		rval = -ENODEV;
-		goto out_poweroff;
-	}
-	sensor->meta_reglist =
-		(struct smia_meta_reglist *)sensor->fw->data;
-	rval = smia_reglist_import(sensor->meta_reglist);
+	rval = smia_reglist_import(&et8ek8_smia_meta_reglist);
 	if (rval) {
 		dev_err(&client->dev,
 			"invalid register list %s, import failed\n",
-			name);
-		goto out_release;
+			ET8EK8_NAME);
+		goto out_poweroff;
 	}
 
 	sensor->current_reglist =
-		smia_reglist_find_type(sensor->meta_reglist,
+		smia_reglist_find_type(&et8ek8_smia_meta_reglist,
 				       SMIA_REGLIST_MODE);
 	if (!sensor->current_reglist) {
 		dev_err(&client->dev,
 			"invalid register list %s, no mode found\n",
-			name);
+			ET8EK8_NAME);
 		rval = -ENODEV;
-		goto out_release;
+		goto out_poweroff;
 	}
 
 	smia_reglist_to_mbus(sensor->current_reglist, &sensor->format);
 
 	rval = smia_i2c_reglist_find_write(client,
-					   sensor->meta_reglist,
+					   &et8ek8_smia_meta_reglist,
 					   SMIA_REGLIST_POWERON);
 	if (rval) {
 		dev_err(&client->dev,
 			"invalid register list %s, no POWERON mode found\n",
-			name);
-		goto out_release;
+			ET8EK8_NAME);
+		goto out_poweroff;
 	}
 	rval = et8ek8_stream_on(sensor);	/* Needed to be able to read EEPROM */
 	if (rval)
-		goto out_release;
+		goto out_poweroff;
 	rval = et8ek8_g_priv_mem(subdev);
 	if (rval)
 		dev_warn(&client->dev,
 			"can not read OTP (EEPROM) memory from sensor\n");
 	rval = et8ek8_stream_off(sensor);
 	if (rval)
-		goto out_release;
+		goto out_poweroff;
 
 	rval = et8ek8_power_off(sensor);
 	if (rval)
-		goto out_release;
+		goto out_poweroff;
 
 	return 0;
 
-out_release:
-	release_firmware(sensor->fw);
 out_poweroff:
-	sensor->meta_reglist = NULL;
-	sensor->fw = NULL;
 	et8ek8_power_off(sensor);
 out_regulator_put:
 	regulator_put(sensor->vana);
@@ -1046,7 +1582,7 @@ static int et8ek8_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	struct v4l2_mbus_framefmt *format;
 	struct smia_reglist *reglist;
 
-	reglist = smia_reglist_find_type(sensor->meta_reglist,
+	reglist = smia_reglist_find_type(&et8ek8_smia_meta_reglist,
 					 SMIA_REGLIST_MODE);
 	format = __et8ek8_get_pad_format(sensor, fh, 0, V4L2_SUBDEV_FORMAT_TRY);
 	smia_reglist_to_mbus(reglist, format);
@@ -1168,7 +1704,6 @@ static int __exit et8ek8_remove(struct i2c_client *client)
 	if (sensor->vana)
 		regulator_put(sensor->vana);
 
-	release_firmware(sensor->fw);
 	kfree(sensor);
 	return 0;
 }
