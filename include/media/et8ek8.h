@@ -58,8 +58,6 @@ struct et8ek8_sensor {
 	struct v4l2_ctrl *exposure;
 	struct smia_reglist *current_reglist;
 
-	const struct firmware *fw;
-	struct smia_meta_reglist *meta_reglist;
 	u8 priv_mem[ET8EK8_PRIV_MEM_SIZE];
 
 	struct mutex power_lock;
