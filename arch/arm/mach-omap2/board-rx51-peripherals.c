@@ -63,6 +63,8 @@
 #include "common-board-devices.h"
 #include "gpmc.h"
 #include "gpmc-onenand.h"
+#include "soc.h"
+#include "omap-secure.h"
 
 #define SYSTEM_REV_B_USES_VAUX3	0x1699
 #define SYSTEM_REV_S_USES_VAUX3 0x8
@@ -1485,6 +1487,22 @@ fail:
 	printk(KERN_ERR "Bluetooth device registration failed\n");
 }
 
+static struct platform_device omap3_rom_rng_device = {
+	.name		= "omap3-rom-rng",
+	.id		= -1,
+	.dev	= {
+		.platform_data	= rx51_secure_rng_call,
+	},
+};
+
+static void __init rx51_init_omap3_rom_rng(void)
+{
+	if (omap_type() == OMAP2_DEVICE_TYPE_SEC) {
+		pr_info("RX-51: Registring OMAP3 HWRNG device\n");
+		platform_device_register(&omap3_rom_rng_device);
+	}
+}
+
 void __init rx51_peripherals_init(void)
 {
 	rx51_i2c_init();
@@ -1510,5 +1528,6 @@ void __init rx51_peripherals_init(void)
 
 	rx51_charger_init();
 	rx51_init_twl4030_hwmon();
+	rx51_init_omap3_rom_rng();
 }
 
