@@ -43,7 +43,6 @@ struct et8ek8_platform_data {
 	int (*g_priv)(struct v4l2_subdev *subdev, void *priv);
 	int (*configure_interface)(struct v4l2_subdev *subdev,
 				   struct smia_mode *mode);
-	int (*set_xclk)(struct v4l2_subdev *subdev, int hz);
 	int (*set_xshutdown)(struct v4l2_subdev *subdev, int set);
 };
 
