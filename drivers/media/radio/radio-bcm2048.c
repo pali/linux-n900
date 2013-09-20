@@ -6,6 +6,8 @@
  * Copyright (C) Nokia Corporation
  * Contact: Eero Nurkkala <ext-eero.nurkkala@nokia.com>
  *
+ * Copyright (C) Nils Faerber <nils.faerber@kernelconcepts.de>
+ *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
  * version 2 as published by the Free Software Foundation.
@@ -19,6 +21,16 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
  * 02110-1301 USA
+ */
+
+/*
+ * History:
+ *		Eero Nurkkala <ext-eero.nurkkala@nokia.com>
+ *		Version 0.0.1
+ *		- Initial implementation
+ * 2010-02-21	Nils Faerber <nils.faerber@kernelconcepts.de>
+ *		Version 0.0.2
+ *		- Add support for interrupt driven rds data reading
  */
 
 #include <linux/kernel.h>
@@ -283,6 +295,12 @@ struct bcm2048_device {
 	u8 fifo_size;
 	u8 scan_state;
 	u8 mute_state;
+
+	/* for rds data device read */
+	wait_queue_head_t read_queue;
+	unsigned int users;
+	unsigned char rds_data_available;
+	unsigned int rd_index;
 };
 
 static int radio_nr = -1;	/* radio device minor (-1 ==> auto assign) */
@@ -1758,6 +1776,8 @@ static void bcm2048_rds_fifo_receive(struct bcm2048_device *bdev)
 	bcm2048_parse_rds_ps(bdev);
 
 	mutex_unlock(&bdev->mutex);
+
+	wake_up_interruptible(&bdev->read_queue);
 }
 
 static int bcm2048_get_rds_data(struct bcm2048_device *bdev, char *data)
@@ -1876,6 +1896,11 @@ static int bcm2048_probe(struct bcm2048_device *bdev)
 
 	err = bcm2048_set_power_state(bdev, BCM2048_POWER_OFF);
 
+	init_waitqueue_head(&bdev->read_queue);
+	bdev->rds_data_available = 0;
+	bdev->rd_index = 0;
+	bdev->users = 0;
+
 unlock:
 	return err;
 }
@@ -1910,7 +1935,8 @@ static void bcm2048_work(struct work_struct *work)
 			bcm2048_send_command(bdev, BCM2048_I2C_FM_RDS_MASK1,
 						flags);
 		}
-
+		bdev->rds_data_available = 1;
+		bdev->rd_index = 0; /* new data, new start */
 	}
 }
 
@@ -2146,12 +2172,111 @@ static int bcm2048_sysfs_register_properties(struct bcm2048_device *bdev)
 	return err;
 }
 
+
+static int bcm2048_fops_open(struct inode *inode, struct file *file)
+{
+	struct bcm2048_device *bdev = video_drvdata(file);
+
+	bdev->users++;
+	bdev->rd_index = 0;
+	bdev->rds_data_available = 0;
+
+	return 0;
+}
+
+static int bcm2048_fops_release(struct inode *inode, struct file *file)
+{
+	struct bcm2048_device *bdev = video_drvdata(file);
+
+	bdev->users--;
+
+	return 0;
+}
+
+static unsigned int bcm2048_fops_poll(struct file *file,
+		struct poll_table_struct *pts)
+{
+	struct bcm2048_device *bdev = video_drvdata(file);
+	int retval = 0;
+
+	poll_wait(file, &bdev->read_queue, pts);
+
+	if (bdev->rds_data_available) {
+		retval = POLLIN | POLLRDNORM;
+	}
+
+	return retval;
+}
+
+static ssize_t bcm2048_fops_read(struct file *file, char __user *buf,
+	size_t count, loff_t *ppos)
+{
+	struct bcm2048_device *bdev = video_drvdata(file);
+	int i;
+	int retval = 0;
+
+	/* we return at least 3 bytes, one block */
+	count = (count / 3) * 3; /* only multiples of 3 */
+	if (count < 3)
+		return -ENOBUFS;
+
+	while (!bdev->rds_data_available) {
+		if (file->f_flags & O_NONBLOCK) {
+			retval = -EWOULDBLOCK;
+			goto done;
+		}
+		//interruptible_sleep_on(&bdev->read_queue);
+		if (wait_event_interruptible(bdev->read_queue,
+			bdev->rds_data_available) < 0) {
+			retval = -EINTR;
+			goto done;
+		}
+	}
+
+	mutex_lock(&bdev->mutex);
+	/* copy data to userspace */
+	i = bdev->fifo_size - bdev->rd_index;
+	if (count > i)
+		count = (i / 3) * 3;
+
+	i = 0;
+	while (i < count) {
+		unsigned char tmpbuf[3];
+		tmpbuf[i] = bdev->rds_info.radio_text[bdev->rd_index+i+2];
+		tmpbuf[i+1] = bdev->rds_info.radio_text[bdev->rd_index+i+1];
+		tmpbuf[i+2] = ((bdev->rds_info.radio_text[bdev->rd_index+i] & 0xf0) >> 4);
+		if  ((bdev->rds_info.radio_text[bdev->rd_index+i] & BCM2048_RDS_CRC_MASK) == BCM2048_RDS_CRC_UNRECOVARABLE)
+			tmpbuf[i+2] |= 0x80;
+		if (copy_to_user(buf+i, tmpbuf, 3)) {
+			retval = -EFAULT;
+			break;
+		};
+		i += 3;
+	}
+
+	bdev->rd_index += i;
+	if (bdev->rd_index >= bdev->fifo_size)
+		bdev->rds_data_available = 0;
+
+	mutex_unlock(&bdev->mutex);
+	if (retval == 0)
+		retval = i;
+
+done:
+	return retval;
+}
+
 /*
  *	bcm2048_fops - file operations interface
  */
 static const struct v4l2_file_operations bcm2048_fops = {
 	.owner		= THIS_MODULE,
 	.ioctl		= video_ioctl2,
+	/* for RDS read support */
+	.open		= bcm2048_fops_open,
+	.release	= bcm2048_fops_release,
+	.read		= bcm2048_fops_read,
+	.poll		= bcm2048_fops_poll
 };
 
 /*
@@ -2615,4 +2740,4 @@ module_exit(bcm2048_module_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR(BCM2048_DRIVER_AUTHOR);
 MODULE_DESCRIPTION(BCM2048_DRIVER_DESC);
-MODULE_VERSION("0.0.1");
+MODULE_VERSION("0.0.2");
