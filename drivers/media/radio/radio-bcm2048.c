@@ -2173,7 +2173,7 @@ static int bcm2048_sysfs_register_properties(struct bcm2048_device *bdev)
 }
 
 
-static int bcm2048_fops_open(struct inode *inode, struct file *file)
+static int bcm2048_fops_open(struct file *file)
 {
 	struct bcm2048_device *bdev = video_drvdata(file);
 
@@ -2184,7 +2184,7 @@ static int bcm2048_fops_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int bcm2048_fops_release(struct inode *inode, struct file *file)
+static int bcm2048_fops_release(struct file *file)
 {
 	struct bcm2048_device *bdev = video_drvdata(file);
 
