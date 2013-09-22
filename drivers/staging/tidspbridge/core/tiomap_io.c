@@ -405,7 +405,7 @@ int sm_interrupt_dsp(struct bridge_dev_context *dev_context, u16 mb_val)
 		 * 2:0 AUTO_IVA2_DPLL - Enabling IVA2 DPLL auto control
 		 *     in CM_AUTOIDLE_PLL_IVA2 register
 		 */
-		(*pdata->dsp_cm_write)(1 << OMAP3430_AUTO_IVA2_DPLL_SHIFT,
+		(*pdata->dsp_cm_write)(1,
 				OMAP3430_IVA2_MOD, OMAP3430_CM_AUTOIDLE_PLL);
 
 		/*
@@ -415,8 +415,7 @@ int sm_interrupt_dsp(struct bridge_dev_context *dev_context, u16 mb_val)
 		 */
 		(*pdata->dsp_cm_rmw_bits)(OMAP3430_IVA2_DPLL_FREQSEL_MASK |
 				OMAP3430_EN_IVA2_DPLL_MASK,
-				0x3 << OMAP3430_IVA2_DPLL_FREQSEL_SHIFT |
-				0x7 << OMAP3430_EN_IVA2_DPLL_SHIFT,
+				0x3 << 4 | 0x7,
 				OMAP3430_IVA2_MOD, OMAP3430_CM_CLKEN_PLL);
 
 		/* Restore mailbox settings */
