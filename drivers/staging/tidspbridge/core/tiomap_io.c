@@ -33,6 +33,8 @@
 #include "_tiomap_pwr.h"
 #include "tiomap_io.h"
 
+#include "../../../../arch/arm/mach-omap2/cm3xxx.h"
+
 static u32 ul_ext_base;
 static u32 ul_ext_end;
 
