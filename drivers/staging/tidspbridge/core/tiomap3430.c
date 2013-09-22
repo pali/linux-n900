@@ -55,6 +55,8 @@
 #include "_tiomap_pwr.h"
 #include "tiomap_io.h"
 
+#include "../../../../arch/arm/mach-omap2/cm3xxx.h"
+
 /* Offset in shared mem to write to in order to synchronize start with DSP */
 #define SHMSYNCOFFSET 4		/* GPP byte offset */
 
