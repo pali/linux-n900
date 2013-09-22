@@ -524,6 +524,9 @@ static struct regulator_consumer_supply rx51_vmmc1_supply[] = {
 
 static struct regulator_consumer_supply rx51_vaux2_supply[] = {
 	REGULATOR_SUPPLY("vdds_csib", "omap3isp"),
+	{
+		.supply		= "vaux2",
+	},
 };
 
 static struct regulator_consumer_supply rx51_vaux3_supply[] = {
