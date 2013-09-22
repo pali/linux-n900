@@ -221,7 +221,7 @@ int dsp_clk_enable(enum dsp_clk_id clk_id)
 
 	switch (get_clk_type(clk_id)) {
 	case IVA2_CLK:
-		clk_enable(iva2_clk);
+		clk_prepare_enable(iva2_clk);
 		break;
 	case GPT_CLK:
 		status = omap_dm_timer_start(timer[clk_id - 1]);
@@ -236,9 +236,9 @@ int dsp_clk_enable(enum dsp_clk_id clk_id)
 		dev_err(bridge, "ERROR: DSP requested to enable WDT3 clk\n");
 		break;
 	case SSI_CLK:
-		clk_enable(ssi.sst_fck);
-		clk_enable(ssi.ssr_fck);
-		clk_enable(ssi.ick);
+		clk_prepare_enable(ssi.sst_fck);
+		clk_prepare_enable(ssi.ssr_fck);
+		clk_prepare_enable(ssi.ick);
 
 		/*
 		 * The SSI module need to configured not to have the Forced
@@ -297,7 +297,7 @@ int dsp_clk_disable(enum dsp_clk_id clk_id)
 
 	switch (get_clk_type(clk_id)) {
 	case IVA2_CLK:
-		clk_disable(iva2_clk);
+		clk_disable_unprepare(iva2_clk);
 		break;
 	case GPT_CLK:
 		status = omap_dm_timer_stop(timer[clk_id - 1]);
@@ -314,9 +314,9 @@ int dsp_clk_disable(enum dsp_clk_id clk_id)
 	case SSI_CLK:
 		ssi_clk_prepare(false);
 		ssi_clk_prepare(false);
-		clk_disable(ssi.sst_fck);
-		clk_disable(ssi.ssr_fck);
-		clk_disable(ssi.ick);
+		clk_disable_unprepare(ssi.sst_fck);
+		clk_disable_unprepare(ssi.ssr_fck);
+		clk_disable_unprepare(ssi.ick);
 		break;
 	default:
 		dev_err(bridge, "Invalid clock id for disable\n");
