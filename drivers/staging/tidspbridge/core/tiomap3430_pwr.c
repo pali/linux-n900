@@ -439,11 +439,11 @@ void dsp_clk_wakeup_event_ctrl(u32 clock_id, bool enable)
 		iva2_grpsel = readl(resources->per_pm_base + 0xA8);
 		mpu_grpsel = readl(resources->per_pm_base + 0xA4);
 		if (enable) {
-			iva2_grpsel |= OMAP3430_GRPSEL_GPT5_MASK;
-			mpu_grpsel &= ~OMAP3430_GRPSEL_GPT5_MASK;
+			iva2_grpsel |= (1 << 6);
+			mpu_grpsel &= ~(1 << 6);
 		} else {
-			mpu_grpsel |= OMAP3430_GRPSEL_GPT5_MASK;
-			iva2_grpsel &= ~OMAP3430_GRPSEL_GPT5_MASK;
+			mpu_grpsel |= (1 << 6);
+			iva2_grpsel &= ~(1 << 6);
 		}
 		writel(iva2_grpsel, resources->per_pm_base + 0xA8);
 		writel(mpu_grpsel, resources->per_pm_base + 0xA4);
@@ -452,11 +452,11 @@ void dsp_clk_wakeup_event_ctrl(u32 clock_id, bool enable)
 		iva2_grpsel = readl(resources->per_pm_base + 0xA8);
 		mpu_grpsel = readl(resources->per_pm_base + 0xA4);
 		if (enable) {
-			iva2_grpsel |= OMAP3430_GRPSEL_GPT6_MASK;
-			mpu_grpsel &= ~OMAP3430_GRPSEL_GPT6_MASK;
+			iva2_grpsel |= (1 << 7);
+			mpu_grpsel &= ~(1 << 7);
 		} else {
-			mpu_grpsel |= OMAP3430_GRPSEL_GPT6_MASK;
-			iva2_grpsel &= ~OMAP3430_GRPSEL_GPT6_MASK;
+			mpu_grpsel |= (1 << 7);
+			iva2_grpsel &= ~(1 << 7);
 		}
 		writel(iva2_grpsel, resources->per_pm_base + 0xA8);
 		writel(mpu_grpsel, resources->per_pm_base + 0xA4);
@@ -465,11 +465,11 @@ void dsp_clk_wakeup_event_ctrl(u32 clock_id, bool enable)
 		iva2_grpsel = readl(resources->per_pm_base + 0xA8);
 		mpu_grpsel = readl(resources->per_pm_base + 0xA4);
 		if (enable) {
-			iva2_grpsel |= OMAP3430_GRPSEL_GPT7_MASK;
-			mpu_grpsel &= ~OMAP3430_GRPSEL_GPT7_MASK;
+			iva2_grpsel |= (1 << 8);
+			mpu_grpsel &= ~(1 << 8);
 		} else {
-			mpu_grpsel |= OMAP3430_GRPSEL_GPT7_MASK;
-			iva2_grpsel &= ~OMAP3430_GRPSEL_GPT7_MASK;
+			mpu_grpsel |= (1 << 8);
+			iva2_grpsel &= ~(1 << 8);
 		}
 		writel(iva2_grpsel, resources->per_pm_base + 0xA8);
 		writel(mpu_grpsel, resources->per_pm_base + 0xA4);
@@ -478,11 +478,11 @@ void dsp_clk_wakeup_event_ctrl(u32 clock_id, bool enable)
 		iva2_grpsel = readl(resources->per_pm_base + 0xA8);
 		mpu_grpsel = readl(resources->per_pm_base + 0xA4);
 		if (enable) {
-			iva2_grpsel |= OMAP3430_GRPSEL_GPT8_MASK;
-			mpu_grpsel &= ~OMAP3430_GRPSEL_GPT8_MASK;
+			iva2_grpsel |= (1 << 9);
+			mpu_grpsel &= ~(1 << 9);
 		} else {
-			mpu_grpsel |= OMAP3430_GRPSEL_GPT8_MASK;
-			iva2_grpsel &= ~OMAP3430_GRPSEL_GPT8_MASK;
+			mpu_grpsel |= (1 << 9);
+			iva2_grpsel &= ~(1 << 9);
 		}
 		writel(iva2_grpsel, resources->per_pm_base + 0xA8);
 		writel(mpu_grpsel, resources->per_pm_base + 0xA4);
@@ -491,11 +491,11 @@ void dsp_clk_wakeup_event_ctrl(u32 clock_id, bool enable)
 		iva2_grpsel = readl(resources->core_pm_base + 0xA8);
 		mpu_grpsel = readl(resources->core_pm_base + 0xA4);
 		if (enable) {
-			iva2_grpsel |= OMAP3430_GRPSEL_MCBSP1_MASK;
-			mpu_grpsel &= ~OMAP3430_GRPSEL_MCBSP1_MASK;
+			iva2_grpsel |= (1 << 9);
+			mpu_grpsel &= ~(1 << 9);
 		} else {
-			mpu_grpsel |= OMAP3430_GRPSEL_MCBSP1_MASK;
-			iva2_grpsel &= ~OMAP3430_GRPSEL_MCBSP1_MASK;
+			mpu_grpsel |= (1 << 9);
+			iva2_grpsel &= ~(1 << 9);
 		}
 		writel(iva2_grpsel, resources->core_pm_base + 0xA8);
 		writel(mpu_grpsel, resources->core_pm_base + 0xA4);
@@ -543,11 +543,11 @@ void dsp_clk_wakeup_event_ctrl(u32 clock_id, bool enable)
 		iva2_grpsel = readl(resources->per_pm_base + 0xA8);
 		mpu_grpsel = readl(resources->per_pm_base + 0xA4);
 		if (enable) {
-			iva2_grpsel |= OMAP3430_GRPSEL_MCBSP5_MASK;
-			mpu_grpsel &= ~OMAP3430_GRPSEL_MCBSP5_MASK;
+			iva2_grpsel |= (1 << 10);
+			mpu_grpsel &= ~(1 << 10);
 		} else {
-			mpu_grpsel |= OMAP3430_GRPSEL_MCBSP5_MASK;
-			iva2_grpsel &= ~OMAP3430_GRPSEL_MCBSP5_MASK;
+			mpu_grpsel |= (1 << 10);
+			iva2_grpsel &= ~(1 << 10);
 		}
 		writel(iva2_grpsel, resources->per_pm_base + 0xA8);
 		writel(mpu_grpsel, resources->per_pm_base + 0xA4);
