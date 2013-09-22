@@ -129,8 +129,8 @@ void dsp_wdt_enable(bool enable)
 	wdt_enable = enable;
 
 	if (enable) {
-		clk_enable(dsp_wdt.fclk);
-		clk_enable(dsp_wdt.iclk);
+		clk_prepare_enable(dsp_wdt.fclk);
+		clk_prepare_enable(dsp_wdt.iclk);
 		dsp_wdt.sm_wdt->wdt_setclocks = 1;
 		tmp = __raw_readl(dsp_wdt.reg_base + OMAP3_WDT3_ISR_OFFSET);
 		__raw_writel(tmp, dsp_wdt.reg_base + OMAP3_WDT3_ISR_OFFSET);
@@ -138,7 +138,7 @@ void dsp_wdt_enable(bool enable)
 	} else {
 		disable_irq(INT_34XX_WDT3_IRQ);
 		dsp_wdt.sm_wdt->wdt_setclocks = 0;
-		clk_disable(dsp_wdt.iclk);
-		clk_disable(dsp_wdt.fclk);
+		clk_disable_unprepare(dsp_wdt.iclk);
+		clk_disable_unprepare(dsp_wdt.fclk);
 	}
 }
