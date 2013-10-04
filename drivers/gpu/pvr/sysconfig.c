@@ -24,6 +24,8 @@
  *
  ******************************************************************************/
 
+#include <linux/irq.h>
+
 #include "services_headers.h"
 #include "kerneldisplay.h"
 #include "oemfuncs.h"
