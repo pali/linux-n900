@@ -24,9 +24,11 @@
 #include <linux/init.h>
 #include <linux/err.h>
 #include <linux/gpio.h>
+#include <linux/irq.h>
 #include <linux/platform_device.h>
 #include <linux/platform_data/ssi.h>
 
+#include "common.h"
 #include "omap-pm.h"
 
 static struct omap_ssi_platform_data ssi_pdata = {
@@ -50,8 +52,8 @@ static struct resource ssi_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[2] = {
-		.start	= 71,
-		.end	= 71,
+		.start	= 71 + OMAP_INTC_START,
+		.end	= 71 + OMAP_INTC_START,
 		.name	= "ssi_gdd",
 		.flags	= IORESOURCE_IRQ,
 	},
@@ -69,14 +71,14 @@ static struct resource ssi_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[5] = {
-		.start	= 67,
-		.end	= 67,
+		.start	= 67 + OMAP_INTC_START,
+		.end	= 67 + OMAP_INTC_START,
 		.name	= "ssi_p1_mpu_irq0",
 		.flags	= IORESOURCE_IRQ,
 	},
 	[6] = {
-		.start	= 68,
-		.end	= 68,
+		.start	= 68 + OMAP_INTC_START,
+		.end	= 68 + OMAP_INTC_START,
 		.name	= "ssi_p1_mpu_irq1",
 		.flags	= IORESOURCE_IRQ,
 	},
