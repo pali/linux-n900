@@ -491,6 +491,22 @@ static void ssip_wd(unsigned long data)
 	ssip_error(cl);
 }
 
+static void ssip_send_bootinfo_req_cmd(struct hsi_client *cl)
+{
+	struct ssi_protocol *ssi = hsi_client_drvdata(cl);
+	struct hsi_msg *msg;
+
+	dev_dbg(&cl->device, "Issuing BOOT INFO REQ command\n");
+	msg = ssip_claim_cmd(ssi);
+	ssip_set_cmd(msg, SSIP_BOOTINFO_REQ_CMD(SSIP_LOCAL_VERID));
+	msg->complete = ssip_release_cmd;
+	hsi_async_write(cl, msg);
+	dev_dbg(&cl->device, "Issuing RX command\n");
+	msg = ssip_claim_cmd(ssi);
+	msg->complete = ssip_rxcmd_complete;
+	hsi_async_read(cl, msg);
+}
+
 static void ssip_start_rx(struct hsi_client *cl)
 {
 	struct ssi_protocol *ssi = hsi_client_drvdata(cl);
@@ -504,7 +520,14 @@ static void ssip_start_rx(struct hsi_client *cl)
 	 * high transition. Therefore we need to ignore the sencond UP event.
 	 */
 	if ((ssi->main_state != ACTIVE) || (ssi->recv_state == RECV_READY)) {
-		spin_unlock(&ssi->lock);
+		if(ssi->main_state == INIT)
+		{
+			ssi->main_state = HANDSHAKE;
+			spin_unlock(&ssi->lock);
+			ssip_send_bootinfo_req_cmd(cl);
+		}
+		else
+			spin_unlock(&ssi->lock);
 		return;
 	}
 	ssip_set_rxstate(ssi, RECV_READY);
@@ -895,7 +918,6 @@ static int ssip_pn_open(struct net_device *dev)
 {
 	struct hsi_client *cl = to_hsi_client(dev->dev.parent);
 	struct ssi_protocol *ssi = hsi_client_drvdata(cl);
-	struct hsi_msg *msg;
 	int err;
 
 	err = hsi_claim_port(cl, 1);
@@ -915,17 +937,8 @@ static int ssip_pn_open(struct net_device *dev)
 		ssi->waketest = 1;
 		ssi_waketest(cl, 1); /* FIXME: To be removed */
 	}
-	ssi->main_state = HANDSHAKE;
+	ssi->main_state = INIT;
 	spin_unlock_bh(&ssi->lock);
-	dev_dbg(&cl->device, "Issuing BOOT INFO REQ command\n");
-	msg = ssip_claim_cmd(ssi);
-	ssip_set_cmd(msg, SSIP_BOOTINFO_REQ_CMD(SSIP_LOCAL_VERID));
-	msg->complete = ssip_release_cmd;
-	hsi_async_write(cl, msg);
-	dev_dbg(&cl->device, "Issuing RX command\n");
-	msg = ssip_claim_cmd(ssi);
-	msg->complete = ssip_rxcmd_complete;
-	hsi_async_read(cl, msg);
 
 	return 0;
 }
