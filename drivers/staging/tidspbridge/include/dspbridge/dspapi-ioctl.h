@@ -378,6 +378,9 @@ union trapped_args {
 #define DB_MODULE_MASK		0xE0
 #define DB_IOC_MASK		0x1F
 
+#define DB_MODULE_SHIFT		5
+
+#ifdef BRIDGE_NEW_API
 /* Ioctl module masks */
 #define DB_MGR		0x0
 #define DB_PROC		0x20
@@ -385,7 +388,6 @@ union trapped_args {
 #define DB_STRM		0x60
 #define DB_CMM		0x80
 
-#define DB_MODULE_SHIFT		5
 
 /* Used to calculate the ioctl per dspbridge module */
 #define DB_IOC(module, num) \
@@ -394,6 +396,33 @@ union trapped_args {
 #define DB_GET_MODULE(cmd)	((cmd) & DB_MODULE_MASK)
 /* Used to get dspbridge ioctl number */
 #define DB_GET_IOC(cmd)		((cmd) & DB_IOC_MASK)
+
+#else /* NEW_API */
+/* Old api starts here */
+#define DB_MGR  1
+#define DB_PROC 7
+#define DB_NODE 24
+#define DB_STRM 39
+#define DB_CMM  50
+
+#define DB_MGR_NEW		0x0
+#define DB_PROC_NEW		0x20
+#define DB_NODE_NEW		0x40
+#define DB_STRM_NEW		0x60
+#define DB_CMM_NEW		0x80
+
+
+#define DB_IOC(module, num)	((module) + (num))
+
+#undef _IOR
+#undef _IOW
+#undef _IOWR
+
+#define _IOR(type, nr, size)	(nr)
+#define _IOW(type, nr, size)	(nr)
+#define _IOWR(type, nr, size)	(nr)
+/* End of IOCTL old API functions */
+#endif /* NEW_API */
 
 /* TODO: Remove deprecated and not implemented */
 
