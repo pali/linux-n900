@@ -16,6 +16,11 @@ libhw = hw/hw_mmu.o
 tidspbridge-y := $(libgen) $(libservices) $(libcore) $(libpmgr) $(librmgr) \
 			$(libdload) $(libhw)
 
+#New DSP API only
+ifeq ($(CONFIG_TIDSPBRIDGE_NEW_API),y)
+ccflags-y += -DBRIDGE_NEW_API
+endif
+
 #Machine dependent
 ccflags-y += -D_TI_ -D_DB_TIOMAP -DTMS32060 \
 		-DTICFG_PROC_VER -DTICFG_EVM_TYPE -DCHNL_SMCLASS \
