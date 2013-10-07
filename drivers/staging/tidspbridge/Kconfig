@@ -67,3 +67,9 @@ config TIDSPBRIDGE_BACKTRACE
 	help
 	  Enable useful information to backtrace fatal errors. Say Y if you
 	  want to dump information for testing purposes.
+
+config TIDSPBRIDGE_NEW_API
+	bool "DSP Bridge new API"
+	depends on TIDSPBRIDGE
+	help
+	  Say Y to allow only new DSP API(ioctl codes)
