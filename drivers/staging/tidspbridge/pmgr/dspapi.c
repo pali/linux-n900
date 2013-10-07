@@ -59,8 +59,68 @@
 #define MAX_STREAMS     16
 #define MAX_BUFS	64
 
+#ifdef BRIDGE_NEW_API
+
 /* Used to get dspbridge ioctl table */
 #define DB_GET_IOC_TABLE(cmd)	(DB_GET_MODULE(cmd) >> DB_MODULE_SHIFT)
+
+#else /* BRIDGE_NEW_API */
+
+/* Used to get dspbridge ioctl module */
+static u32 DB_GET_MODULE(int cmd)
+{
+	/* Check for new API */
+	if(_IOC_TYPE(cmd) == DB)
+		return ((cmd) & DB_MODULE_MASK);
+	if(cmd<DB_PROC)
+		return DB_MGR;
+	else if(cmd<DB_NODE)
+		return DB_PROC;
+	else if(cmd<DB_STRM)
+		return DB_NODE;
+	else if(cmd<DB_CMM)
+		return DB_STRM;
+	else
+		return DB_CMM;
+}
+
+/* Used to get dspbridge ioctl number */
+static u32 DB_GET_IOC(int cmd)
+{
+	/* Check for new API */
+	if(_IOC_TYPE(cmd) == DB)
+		return ((cmd) & DB_IOC_MASK);
+	if(cmd<DB_PROC)
+		return (cmd-DB_MGR);
+	else if(cmd<DB_NODE)
+		return (cmd-DB_PROC);
+	else if(cmd<DB_STRM)
+		return (cmd-DB_NODE);
+	else if(cmd<DB_CMM)
+		return (cmd-DB_STRM);
+	else
+		return (cmd-DB_CMM);
+}
+
+/* Used to get dspbridge ioctl table */
+static u32 DB_GET_IOC_TABLE(int cmd)
+{
+	/* Check for new API */
+	if(_IOC_TYPE(cmd) == DB)
+		return (DB_GET_MODULE(cmd) >> DB_MODULE_SHIFT);
+	if(cmd<DB_PROC)
+		return 0;
+	else if(cmd<DB_NODE)
+		return 1;
+	else if(cmd<DB_STRM)
+		return 2;
+	else if(cmd<DB_CMM)
+		return 3;
+	else
+		return 4;
+}
+
+#endif
 
 /* Device IOCtl function pointer */
 struct api_cmd {
@@ -209,41 +269,76 @@ inline int api_call_dev_ioctl(u32 cmd, union trapped_args *args,
 	u32(*ioctl_cmd) (union trapped_args *args, void *pr_ctxt) = NULL;
 	int i;
 
+#ifdef BRIDGE_NEW_API
 	if (_IOC_TYPE(cmd) != DB) {
 		pr_err("%s: Incompatible dspbridge ioctl number\n", __func__);
 		goto err;
 	}
-
 	if (DB_GET_IOC_TABLE(cmd) > ARRAY_SIZE(size_cmd)) {
+#else
+	if (
+	    ((_IOC_TYPE(cmd) == DB) && (DB_GET_IOC_TABLE(cmd) > ARRAY_SIZE(size_cmd))) ||
+	    ((_IOC_TYPE(cmd) != DB) && (DB_GET_IOC_TABLE(cmd) >= ARRAY_SIZE(size_cmd)))
+	    ) {
+#endif
 		pr_err("%s: undefined ioctl module\n", __func__);
 		goto err;
 	}
 
 	/* Check the size of the required cmd table */
 	i = DB_GET_IOC(cmd);
+#ifdef BRIDGE_NEW_API
 	if (i > size_cmd[DB_GET_IOC_TABLE(cmd)]) {
+#else
+	if (
+	    ((_IOC_TYPE(cmd) == DB) && (i > size_cmd[DB_GET_IOC_TABLE(cmd)])) ||
+	    ((_IOC_TYPE(cmd) != DB) && (i >= size_cmd[DB_GET_IOC_TABLE(cmd)])) 
+	    ) {
+#endif
 		pr_err("%s: requested ioctl %d out of bounds for table %d\n",
 		       __func__, i, DB_GET_IOC_TABLE(cmd));
 		goto err;
 	}
 
-	switch (DB_GET_MODULE(cmd)) {
-	case DB_MGR:
-		ioctl_cmd = mgr_cmd[i].fxn;
-		break;
-	case DB_PROC:
-		ioctl_cmd = proc_cmd[i].fxn;
-		break;
-	case DB_NODE:
-		ioctl_cmd = node_cmd[i].fxn;
-		break;
-	case DB_STRM:
-		ioctl_cmd = strm_cmd[i].fxn;
-		break;
-	case DB_CMM:
-		ioctl_cmd = cmm_cmd[i].fxn;
-		break;
-	}
+#ifndef BRIDGE_NEW_API
+	/* Check for new API */
+	if(_IOC_TYPE(cmd) == DB) 
+		switch (DB_GET_MODULE(cmd)) {
+		case DB_MGR_NEW:
+			ioctl_cmd = mgr_cmd[i].fxn;
+			break;
+		case DB_PROC_NEW:
+			ioctl_cmd = proc_cmd[i].fxn;
+			break;
+		case DB_NODE_NEW:
+			ioctl_cmd = node_cmd[i].fxn;
+			break;
+		case DB_STRM_NEW:
+			ioctl_cmd = strm_cmd[i].fxn;
+			break;
+		case DB_CMM_NEW:
+			ioctl_cmd = cmm_cmd[i].fxn;
+			break;
+		}
+	else
+#endif
+		switch (DB_GET_MODULE(cmd)) {
+		case DB_MGR:
+			ioctl_cmd = mgr_cmd[i].fxn;
+			break;
+		case DB_PROC:
+			ioctl_cmd = proc_cmd[i].fxn;
+			break;
+		case DB_NODE:
+			ioctl_cmd = node_cmd[i].fxn;
+			break;
+		case DB_STRM:
+			ioctl_cmd = strm_cmd[i].fxn;
+			break;
+		case DB_CMM:
+			ioctl_cmd = cmm_cmd[i].fxn;
+			break;
+		}
 
 	if (!ioctl_cmd) {
 		pr_err("%s: requested ioctl not defined\n", __func__);
