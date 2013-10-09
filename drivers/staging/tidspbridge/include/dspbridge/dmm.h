@@ -29,7 +29,7 @@ struct dmm_mgrattrs {
 	u32 reserved;
 };
 
-#define DMMPOOLSIZE      0x4000000
+#define DMMPOOLSIZE      0x10000000
 
 /*
  *  ======== dmm_get_handle ========
