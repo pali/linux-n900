@@ -585,7 +585,7 @@ static int bridge_brd_start(struct bridge_dev_context *dev_ctxt,
 		(*pdata->dsp_prm_rmw_bits)(OMAP3430_RST1_IVA2_MASK, 0,
 					OMAP3430_IVA2_MOD, OMAP2_RM_RSTCTRL);
 
-		dev_dbg(bridge, "Waiting for Sync @ 0x%x\n", *(u32 *)sync_addr);
+		dev_dbg(bridge, "Waiting for Sync @ 0x%p\n", sync_addr);
 		dev_dbg(bridge, "DSP c_int00 Address =  0x%x\n", dsp_addr);
 		if (dsp_debug)
 			while (__raw_readw(sync_addr))
