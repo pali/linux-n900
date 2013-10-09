@@ -52,10 +52,10 @@ struct dmm_object {
 };
 
 struct map_page {
-	u32 region_size:15;
-	u32 mapped_size:15;
-	u32 reserved:1;
-	u32 mapped:1;
+	u64 region_size:31;
+	u64 mapped_size:31;
+	u64 reserved:1;
+	u64 mapped:1;
 };
 
 /*  Create the free list */
