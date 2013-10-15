@@ -217,8 +217,6 @@ static int smia_reglist_cmp(const void *a, const void *b)
 
 /*
  * Prepare register list created by dcc-pulautin for use in kernel.
- * The pointers in the list are actually offsets from the beginning of
- * the blob.
  */
 int smia_reglist_import(struct smia_meta_reglist *meta)
 {
@@ -233,25 +231,17 @@ int smia_reglist_import(struct smia_meta_reglist *meta)
 	printk(KERN_ALERT "%s: meta_reglist version %s\n",
 	       __func__, meta->version);
 
-	while (meta->reglist[nlists].offset != 0) {
-		struct smia_reglist *list;
-
-		meta->reglist[nlists].offset =
-			(uintptr_t)meta + meta->reglist[nlists].offset;
-
-		list = meta->reglist[nlists].ptr;
-
+	while (meta->reglist[nlists].ptr != NULL)
 		nlists++;
-	}
 
 	if (!nlists)
 		return -EINVAL;
 
-	sort(&meta->reglist[0].offset, nlists, sizeof(meta->reglist[0].offset),
+	sort(&meta->reglist[0].ptr, nlists, sizeof(meta->reglist[0].ptr),
 	     smia_reglist_cmp, NULL);
 
 	nlists = 0;
-	while (meta->reglist[nlists].offset != 0) {
+	while (meta->reglist[nlists].ptr != NULL) {
 		struct smia_reglist *list;
 
 		list = meta->reglist[nlists].ptr;
@@ -264,7 +254,7 @@ int smia_reglist_import(struct smia_meta_reglist *meta)
 		       list->mode.pixel_format,
 		       list->mode.timeperframe.numerator,
 		       list->mode.timeperframe.denominator,
-		       (void *)meta->reglist[nlists].offset);
+		       (void *)meta->reglist[nlists].ptr);
 
 		nlists++;
 	}
