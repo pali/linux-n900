@@ -97,19 +97,7 @@ struct smia_reglist {
 struct smia_meta_reglist {
 	u32 magic;
 	char version[SMIA_MAX_LEN];
-	/*
-	 * When we generate a reglist, the objcopy program will put
-	 * here the list of addresses to reglists local to that object
-	 * file.
-	 *
-	 * In the kernel they serve as offsets inside the the register
-	 * list binary.
-	 *
-	 * The list must be NULL-terminated. That is expected by the
-	 * drivers.
-	 */
 	union {
-		uintptr_t offset;
 		struct smia_reglist *ptr;
 	} reglist[];
 };
