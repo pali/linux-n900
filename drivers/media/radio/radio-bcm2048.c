@@ -2201,9 +2201,8 @@ static unsigned int bcm2048_fops_poll(struct file *file,
 
 	poll_wait(file, &bdev->read_queue, pts);
 
-	if (bdev->rds_data_available) {
+	if (bdev->rds_data_available)
 		retval = POLLIN | POLLRDNORM;
-	}
 
 	return retval;
 }
@@ -2225,7 +2224,7 @@ static ssize_t bcm2048_fops_read(struct file *file, char __user *buf,
 			retval = -EWOULDBLOCK;
 			goto done;
 		}
-		//interruptible_sleep_on(&bdev->read_queue);
+		/* interruptible_sleep_on(&bdev->read_queue); */
 		if (wait_event_interruptible(bdev->read_queue,
 			bdev->rds_data_available) < 0) {
 			retval = -EINTR;
@@ -2244,8 +2243,10 @@ static ssize_t bcm2048_fops_read(struct file *file, char __user *buf,
 		unsigned char tmpbuf[3];
 		tmpbuf[i] = bdev->rds_info.radio_text[bdev->rd_index+i+2];
 		tmpbuf[i+1] = bdev->rds_info.radio_text[bdev->rd_index+i+1];
-		tmpbuf[i+2] = ((bdev->rds_info.radio_text[bdev->rd_index+i] & 0xf0) >> 4);
-		if  ((bdev->rds_info.radio_text[bdev->rd_index+i] & BCM2048_RDS_CRC_MASK) == BCM2048_RDS_CRC_UNRECOVARABLE)
+		tmpbuf[i+2] = ((bdev->rds_info.radio_text[bdev->rd_index+i]
+				& 0xf0) >> 4);
+		if ((bdev->rds_info.radio_text[bdev->rd_index+i] &
+			BCM2048_RDS_CRC_MASK) == BCM2048_RDS_CRC_UNRECOVARABLE)
 			tmpbuf[i+2] |= 0x80;
 		if (copy_to_user(buf+i, tmpbuf, 3)) {
 			retval = -EFAULT;
@@ -2541,7 +2542,7 @@ static int bcm2048_vidioc_s_frequency(struct file *file, void *priv,
 }
 
 static int bcm2048_vidioc_s_hw_freq_seek(struct file *file, void *priv,
-						const struct v4l2_hw_freq_seek *seek)
+					const struct v4l2_hw_freq_seek *seek)
 {
 	struct bcm2048_device *bdev = video_get_drvdata(video_devdata(file));
 	int err;
@@ -2594,7 +2595,7 @@ static int bcm2048_i2c_driver_probe(struct i2c_client *client,
 	struct bcm2048_device *bdev;
 	int err, skip_release = 0;
 
-	bdev = kzalloc(sizeof *bdev, GFP_KERNEL);
+	bdev = kzalloc(sizeof(*bdev), GFP_KERNEL);
 	if (!bdev) {
 		dev_dbg(&client->dev, "Failed to alloc video device.\n");
 		err = -ENOMEM;
@@ -2725,7 +2726,7 @@ static struct i2c_driver bcm2048_i2c_driver = {
  */
 static int __init bcm2048_module_init(void)
 {
-	printk(KERN_INFO BCM2048_DRIVER_DESC "\n");
+	pr_info(BCM2048_DRIVER_DESC "\n");
 
 	return i2c_add_driver(&bcm2048_i2c_driver);
 }
