@@ -673,16 +673,16 @@ static struct smia_meta_reglist et8ek8_smia_meta_reglist = {
 	.magic   = SMIA_MAGIC,
 	.version = "V14 03-June-2008",
 	.reglist = {
-		{ .offset = (uintptr_t)&mode1_poweron_mode2_16vga_2592x1968_12_07fps },
-		{ .offset = (uintptr_t)&mode1_16vga_2592x1968_13_12fps_dpcm10_8 },
-		{ .offset = (uintptr_t)&mode3_4vga_1296x984_29_99fps_dpcm10_8 },
-		{ .offset = (uintptr_t)&mode4_svga_864x656_29_88fps },
-		{ .offset = (uintptr_t)&mode5_vga_648x492_29_93fps },
-		{ .offset = (uintptr_t)&mode2_16vga_2592x1968_3_99fps },
-		{ .offset = (uintptr_t)&mode_648x492_5fps },
-		{ .offset = (uintptr_t)&mode3_4vga_1296x984_5fps },
-		{ .offset = (uintptr_t)&mode_4vga_1296x984_25fps_dpcm10_8 },
-		{ .offset = 0 }
+		{ .ptr = &mode1_poweron_mode2_16vga_2592x1968_12_07fps },
+		{ .ptr = &mode1_16vga_2592x1968_13_12fps_dpcm10_8 },
+		{ .ptr = &mode3_4vga_1296x984_29_99fps_dpcm10_8 },
+		{ .ptr = &mode4_svga_864x656_29_88fps },
+		{ .ptr = &mode5_vga_648x492_29_93fps },
+		{ .ptr = &mode2_16vga_2592x1968_3_99fps },
+		{ .ptr = &mode_648x492_5fps },
+		{ .ptr = &mode3_4vga_1296x984_5fps },
+		{ .ptr = &mode_4vga_1296x984_25fps_dpcm10_8 },
+		{ .ptr = 0 }
 	}
 };
 
