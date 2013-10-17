@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm 3.12.0-rc1 Kernel Configuration
+# Linux/arm 3.12.0-rc5 Kernel Configuration
 #
 CONFIG_ARM=y
 CONFIG_SYS_SUPPORTS_APM_EMULATION=y
@@ -219,7 +219,7 @@ CONFIG_LBDAF=y
 # CONFIG_BLK_DEV_BSGLIB is not set
 # CONFIG_BLK_DEV_INTEGRITY is not set
 # CONFIG_BLK_DEV_THROTTLING is not set
-# CONFIG_CMDLINE_PARSER is not set
+# CONFIG_BLK_CMDLINE_PARSER is not set
 
 #
 # Partition Types
@@ -392,18 +392,6 @@ CONFIG_MACH_NOKIA_RX51=y
 # CONFIG_ARCH_SUNXI is not set
 # CONFIG_ARCH_SIRF is not set
 # CONFIG_ARCH_TEGRA is not set
-
-#
-# ST-Ericsson AB U300/U335 Platform
-#
-
-#
-# ST-Ericsson Mobile Platform Products
-#
-
-#
-# ST-Ericsson U300/U335 Feature Selections
-#
 # CONFIG_ARCH_U8500 is not set
 # CONFIG_ARCH_VEXPRESS is not set
 # CONFIG_ARCH_VIRT is not set
@@ -2683,6 +2671,7 @@ CONFIG_USB_STORAGE=m
 #
 # CONFIG_USB_MDC800 is not set
 # CONFIG_USB_MICROTEK is not set
+# CONFIG_USB_DWC3 is not set
 # CONFIG_USB_CHIPIDEA is not set
 
 #
@@ -3134,7 +3123,6 @@ CONFIG_STAGING=y
 # CONFIG_IIO_SIMPLE_DUMMY is not set
 # CONFIG_ZSMALLOC is not set
 CONFIG_TIDSPBRIDGE=m
-CONFIG_TIDSPBRIDGE_DVFS=y
 CONFIG_TIDSPBRIDGE_MEMPOOL_SIZE=0x600000
 # CONFIG_TIDSPBRIDGE_RECOVERY is not set
 # CONFIG_TIDSPBRIDGE_CACHE_LINE_CHECK is not set
