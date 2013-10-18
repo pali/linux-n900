@@ -31,7 +31,7 @@ void hci_h4p_bc4_parse_fw_event(struct hci_h4p_info *info, struct sk_buff *skb)
 {
 	/* Check if this is fw packet */
 	if (skb->data[0] != 0xff) {
-		hci_recv_frame(skb);
+		hci_recv_frame(info->hdev, skb);
 		return;
 	}
 
