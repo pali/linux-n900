@@ -454,7 +454,7 @@ static inline void hci_h4p_recv_frame(struct hci_h4p_info *info,
 		}
 	}
 
-	hci_recv_frame(skb);
+	hci_recv_frame(info->hdev, skb);
 	NBT_DBG("Frame sent to upper layer\n");
 }
 
@@ -532,7 +532,6 @@ static void hci_h4p_rx_tasklet(unsigned long data)
 				goto finish_rx;
 			}
 			info->rx_state = WAIT_FOR_PKT_TYPE;
-			info->rx_skb->dev = (void *)info->hdev;
 		}
 		info->hdev->stat.byte_rx++;
 		NBT_DBG_TRANSFER_NF("0x%.2x  ", byte);
@@ -819,7 +818,7 @@ static int hci_h4p_reset(struct hci_h4p_info *info)
 		return -EPROTO;
 	}
 
-	INIT_COMPLETION(info->test_completion);
+	reinit_completion(&info->test_completion);
 	gpio_set_value(info->reset_gpio, 1);
 
 	if (!wait_for_completion_interruptible_timeout(&info->test_completion,
@@ -1020,10 +1019,9 @@ static int hci_h4p_hci_close(struct hci_dev *hdev)
 	return 0;
 }
 
-static int hci_h4p_hci_send_frame(struct sk_buff *skb)
+static int hci_h4p_hci_send_frame(struct hci_dev *hdev, struct sk_buff *skb)
 {
 	struct hci_h4p_info *info;
-	struct hci_dev *hdev = (struct hci_dev *)skb->dev;
 	int err = 0;
 
 	if (!hdev) {
@@ -1067,12 +1065,6 @@ static int hci_h4p_hci_send_frame(struct sk_buff *skb)
 	hci_h4p_enable_tx(info);
 
 	return 0;
-}
-
-static int hci_h4p_hci_ioctl(struct hci_dev *hdev, unsigned int cmd,
-			     unsigned long arg)
-{
-	return -ENOIOCTLCMD;
 }
 
 static ssize_t hci_h4p_store_bdaddr(struct device *dev,
@@ -1139,7 +1131,6 @@ static int hci_h4p_register_hdev(struct hci_h4p_info *info)
 	hdev->close = hci_h4p_hci_close;
 	hdev->flush = hci_h4p_hci_flush;
 	hdev->send = hci_h4p_hci_send_frame;
-	hdev->ioctl = hci_h4p_hci_ioctl;
 	set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);
 
 	SET_HCIDEV_DEV(hdev, info->dev);
