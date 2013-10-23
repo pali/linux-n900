@@ -194,6 +194,7 @@ void isp_af_config_registers(struct isp_af_device *isp_af)
 		       ~AF_PCR_MASK, pcr);
 
 	isp_af->update = 0;
+	isp_af->stat.config_counter++;
 	ispstat_bufs_set_size(&isp_af->stat, isp_af->buf_size);
 
 	spin_unlock_irqrestore(isp_af->lock, irqflags);
@@ -299,8 +300,8 @@ void isp_af_try_enable(struct isp_af_device *isp_af)
 }
 
 /* Function to perform hardware set up */
-int omap34xx_isp_af_config(struct isp_af_device *isp_af,
-			   struct af_configuration *afconfig)
+int isp_af_config(struct isp_af_device *isp_af,
+		  struct af_configuration *afconfig)
 {
 	struct device *dev = to_device(isp_af);
 	int result;
@@ -337,14 +338,14 @@ int omap34xx_isp_af_config(struct isp_af_device *isp_af,
 	/* Success */
 	return 0;
 }
-EXPORT_SYMBOL(omap34xx_isp_af_config);
+EXPORT_SYMBOL(isp_af_config);
 
 /*
  * This API allows the user to update White Balance gains, as well as
  * exposure time and analog gain. It is also used to request frame
  * statistics.
  */
-int omap34xx_isp_af_request_statistics(struct isp_af_device *isp_af,
+int isp_af_request_statistics(struct isp_af_device *isp_af,
 			      struct isp_af_data *afdata)
 {
 	struct device *dev = to_device(isp_af);
@@ -374,7 +375,7 @@ int omap34xx_isp_af_request_statistics(struct isp_af_device *isp_af,
 
 	return 0;
 }
-EXPORT_SYMBOL(omap34xx_isp_af_request_statistics);
+EXPORT_SYMBOL(isp_af_request_statistics);
 
 /* This function will handle the AF buffer. */
 int isp_af_buf_process(struct isp_af_device *isp_af)

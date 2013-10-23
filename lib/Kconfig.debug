@@ -731,6 +731,12 @@ config FAULT_INJECTION_DEBUG_FS
 	help
 	  Enable configuration of fault-injection capabilities via debugfs.
 
+config PANIC_INFO_BUFF
+	tristate "Buffer to be printed at panic"
+	depends on DEBUG_FS
+	help
+	  Provide a small buffer which will be printed at panic.
+
 config FAULT_INJECTION_STACKTRACE_FILTER
 	bool "stacktrace filter for fault-injection capabilities"
 	depends on FAULT_INJECTION_DEBUG_FS && STACKTRACE_SUPPORT

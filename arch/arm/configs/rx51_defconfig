@@ -319,7 +319,7 @@ CONFIG_ALIGNMENT_TRAP=y
 #
 CONFIG_ZBOOT_ROM_TEXT=0x0
 CONFIG_ZBOOT_ROM_BSS=0x0
-CONFIG_CMDLINE="init=/sbin/preinit ubi.mtd=rootfs root=ubi0:rootfs rootfstype=ubifs rootflags=bulk_read,no_chk_data_crc rw console=ttyMTD,log console=tty0"
+CONFIG_CMDLINE="init=/sbin/preinit ubi.mtd=rootfs root=ubi0:rootfs rootfstype=ubifs rootflags=bulk_read,no_chk_data_crc rw console=ttyMTD,log console=tty0 snd-soc-rx51.hp_lim=42 snd-soc-tlv320aic3x.hp_dac_lim=6"
 # CONFIG_XIP_KERNEL is not set
 CONFIG_KEXEC=y
 CONFIG_ATAGS_PROC=y
@@ -689,6 +689,8 @@ CONFIG_OMAP_SSI=m
 CONFIG_SSI_MCSAAB_IMP=m
 CONFIG_SSI_CMT_SPEECH=m
 # CONFIG_SSI_CMT_SPEECH_DEBUG is not set
+CONFIG_SSI_CHAR=m
+# CONFIG_SSI_CHAR_DEBUG is not set
 CONFIG_HAVE_IDE=y
 # CONFIG_IDE is not set
 
@@ -1884,6 +1886,7 @@ CONFIG_FRAME_POINTER=y
 # CONFIG_DEBUG_BLOCK_EXT_DEVT is not set
 # CONFIG_LKDTM is not set
 # CONFIG_FAULT_INJECTION is not set
+CONFIG_PANIC_INFO_BUFF=m
 # CONFIG_LATENCYTOP is not set
 # CONFIG_SYSCTL_SYSCALL_CHECK is not set
 CONFIG_HAVE_FUNCTION_TRACER=y

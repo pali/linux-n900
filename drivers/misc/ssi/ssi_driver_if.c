@@ -24,6 +24,127 @@
 
 #include "ssi_driver.h"
 
+#define NOT_SET		(-1)
+
+int ssi_set_rx(struct ssi_port *sport, struct ssr_ctx *cfg)
+{
+	struct ssi_dev *ssi_ctrl = sport->ssi_controller;
+	void __iomem *base = ssi_ctrl->base;
+	int port = sport->port_number;
+
+	if ((cfg->mode != SSI_MODE_STREAM) &&
+		(cfg->mode != SSI_MODE_FRAME) &&
+		(cfg->mode != SSI_MODE_SLEEP) &&
+		(cfg->mode != NOT_SET))
+		return -EINVAL;
+
+	if ((cfg->frame_size > SSI_MAX_FRAME_SIZE) &&
+		(cfg->frame_size != NOT_SET))
+		return -EINVAL;
+
+	if ((cfg->channels == 0) ||
+		((cfg->channels > SSI_CHANNELS_DEFAULT) &&
+			(cfg->channels != NOT_SET)))
+		return -EINVAL;
+
+	if ((cfg->timeout > SSI_MAX_RX_TIMEOUT) && (cfg->timeout != NOT_SET))
+		return -EINVAL;
+
+	if (cfg->mode != NOT_SET)
+		ssi_outl(cfg->mode, base, SSI_SSR_MODE_REG(port));
+
+	if (cfg->frame_size != NOT_SET)
+		ssi_outl(cfg->frame_size, base, SSI_SSR_FRAMESIZE_REG(port));
+
+	if (cfg->channels != NOT_SET) {
+		if ((cfg->channels & (-cfg->channels)) ^ cfg->channels)
+			return -EINVAL;
+		else
+			ssi_outl(cfg->channels, base,
+					SSI_SSR_CHANNELS_REG(port));
+	}
+
+	if (cfg->timeout != NOT_SET)
+		ssi_outl(cfg->timeout, base, SSI_SSR_TIMEOUT_REG(port));
+
+	return 0;
+}
+
+void ssi_get_rx(struct ssi_port *sport, struct ssr_ctx *cfg)
+{
+	struct ssi_dev *ssi_ctrl = sport->ssi_controller;
+	void __iomem *base = ssi_ctrl->base;
+	int port = sport->port_number;
+
+	cfg->mode = ssi_inl(base, SSI_SSR_MODE_REG(port));
+	cfg->frame_size = ssi_inl(base, SSI_SSR_FRAMESIZE_REG(port));
+	cfg->channels = ssi_inl(base, SSI_SSR_CHANNELS_REG(port));
+	cfg->timeout = ssi_inl(base, SSI_SSR_TIMEOUT_REG(port));
+}
+
+int ssi_set_tx(struct ssi_port *sport, struct sst_ctx *cfg)
+{
+	struct ssi_dev *ssi_ctrl = sport->ssi_controller;
+	void __iomem *base = ssi_ctrl->base;
+	int port = sport->port_number;
+
+	if ((cfg->mode != SSI_MODE_STREAM) &&
+		(cfg->mode != SSI_MODE_FRAME) &&
+		(cfg->mode != NOT_SET))
+		return -EINVAL;
+
+	if ((cfg->frame_size > SSI_MAX_FRAME_SIZE) &&
+		(cfg->frame_size != NOT_SET))
+		return -EINVAL;
+
+	if ((cfg->channels == 0) ||
+		((cfg->channels > SSI_CHANNELS_DEFAULT) &&
+			(cfg->channels != NOT_SET)))
+		return -EINVAL;
+
+	if ((cfg->divisor > SSI_MAX_TX_DIVISOR) && (cfg->divisor != NOT_SET))
+		return -EINVAL;
+
+	if ((cfg->arb_mode != SSI_ARBMODE_ROUNDROBIN) &&
+		(cfg->arb_mode != SSI_ARBMODE_PRIORITY) &&
+		(cfg->mode != NOT_SET))
+		return -EINVAL;
+
+	if (cfg->mode != NOT_SET)
+		ssi_outl(cfg->channels, base, SSI_SST_CHANNELS_REG(port));
+
+	if (cfg->frame_size != NOT_SET)
+		ssi_outl(cfg->frame_size, base, SSI_SST_FRAMESIZE_REG(port));
+
+	if (cfg->channels != NOT_SET) {
+		if ((cfg->channels & (-cfg->channels)) ^ cfg->channels)
+			return -EINVAL;
+		else
+			ssi_outl(cfg->mode, base, SSI_SST_MODE_REG(port));
+	}
+
+	if (cfg->divisor != NOT_SET)
+		ssi_outl(cfg->divisor, base, SSI_SST_DIVISOR_REG(port));
+
+	if (cfg->arb_mode != NOT_SET)
+		ssi_outl(cfg->arb_mode, base, SSI_SST_ARBMODE_REG(port));
+
+	return 0;
+}
+
+void ssi_get_tx(struct ssi_port *sport, struct sst_ctx *cfg)
+{
+    struct ssi_dev *ssi_ctrl = sport->ssi_controller;
+    void __iomem *base = ssi_ctrl->base;
+    int port = sport->port_number;
+
+    cfg->mode = ssi_inl(base, SSI_SST_MODE_REG(port));
+    cfg->frame_size = ssi_inl(base, SSI_SST_FRAMESIZE_REG(port));
+    cfg->channels = ssi_inl(base, SSI_SST_CHANNELS_REG(port));
+    cfg->divisor = ssi_inl(base, SSI_SST_DIVISOR_REG(port));
+    cfg->arb_mode = ssi_inl(base, SSI_SST_ARBMODE_REG(port));
+}
+
 /**
  * ssi_open - open a ssi device channel.
  * @dev - Reference to the ssi device channel to be openned.
@@ -225,6 +346,38 @@ void ssi_read_cancel(struct ssi_device *dev)
 EXPORT_SYMBOL(ssi_read_cancel);
 
 /**
+ * ssi_poll - SSI poll
+ * @dev - ssi device channel reference to apply the I/O control
+ * 						(or port associated to it)
+ *
+ * Return 0 on sucess, a negative value on failure.
+ *
+ */
+int ssi_poll(struct ssi_device *dev)
+{
+	struct ssi_channel *ch;
+	int err;
+
+	if (unlikely(!dev || !dev->ch))
+		return -EINVAL;
+
+	if (unlikely(!(dev->ch->flags & SSI_CH_OPEN))) {
+		dev_err(&dev->device, "SSI device NOT open\n");
+		return -EINVAL;
+	}
+
+	ch = dev->ch;
+	spin_lock_bh(&ch->ssi_port->ssi_controller->lock);
+	ch->flags |= SSI_CH_RX_POLL;
+	err = ssi_driver_read_interrupt(ch, NULL);
+	spin_unlock_bh(&ch->ssi_port->ssi_controller->lock);
+
+	return err;
+}
+EXPORT_SYMBOL(ssi_poll);
+
+
+/**
  * ssi_ioctl - SSI I/O control
  * @dev - ssi device channel reference to apply the I/O control
  * 						(or port associated to it)
@@ -305,6 +458,33 @@ int ssi_ioctl(struct ssi_device *dev, unsigned int command, void *arg)
 		}
 		*(unsigned int *)arg = ssi_cawake(dev->ch->ssi_port);
 		break;
+	case SSI_IOCTL_SET_RX:
+		if (!arg) {
+			err = -EINVAL;
+			goto out;
+		}
+		err = ssi_set_rx(dev->ch->ssi_port, (struct ssr_ctx *)arg);
+		break;
+	case SSI_IOCTL_GET_RX:
+		if (!arg) {
+			err = -EINVAL;
+			goto out;
+		}
+		ssi_get_rx(dev->ch->ssi_port, (struct ssr_ctx *)arg);
+		break;
+	case SSI_IOCTL_SET_TX:
+		if (!arg) {
+			err = -EINVAL;
+			goto out;
+		}
+		err = ssi_set_tx(dev->ch->ssi_port, (struct sst_ctx *)arg);
+		break;
+	case SSI_IOCTL_GET_TX:
+		if (!arg) {
+			err = -EINVAL;
+			goto out;
+		}
+		ssi_get_tx(dev->ch->ssi_port, (struct sst_ctx *)arg);
 	case SSI_IOCTL_TX_CH_FULL:
 		if (!arg) {
 			err = -EINVAL;

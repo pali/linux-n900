@@ -419,8 +419,7 @@ void isppreview_restore_context(struct device *dev);
 static inline void isppreview_restore_context(struct device *dev) {}
 #endif
 
-int omap34xx_isp_preview_config(struct isp_prev_device *isp_prev,
-				void *userspace_add);
+int isppreview_config(struct isp_prev_device *isp_prev, void *userspace_add);
 
 void isppreview_set_skip(struct isp_prev_device *isp_prev, u32 h, u32 v);
 

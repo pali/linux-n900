@@ -25,9 +25,19 @@
 
 void ssi_reset_ch_read(struct ssi_channel *ch)
 {
+	struct ssi_port *p = ch->ssi_port;
+	struct ssi_dev *ssi_ctrl = p->ssi_controller;
+	unsigned int channel = ch->channel_number;
+	void __iomem *base = ssi_ctrl->base;
+	unsigned int port = p->port_number;
+	unsigned int irq = p->n_irq;
+
 	ch->read_data.addr = NULL;
 	ch->read_data.size = 0;
 	ch->read_data.lch = -1;
+
+	ssi_outl(SSI_SSR_DATAAVAILABLE(channel), base,
+			SSI_SYS_MPU_STATUS_REG(port, irq));
 }
 
 void ssi_reset_ch_write(struct ssi_channel *ch)
@@ -145,6 +155,8 @@ static void do_channel_rx(struct ssi_channel *ch)
 	unsigned int n_ch;
 	unsigned int n_p;
 	unsigned int irq;
+	int rx_poll = 0;
+	int data_read = 0;
 
 	n_ch = ch->channel_number;
 	n_p = ch->ssi_port->port_number;
@@ -152,7 +164,14 @@ static void do_channel_rx(struct ssi_channel *ch)
 
 	spin_lock(&ssi_ctrl->lock);
 
-	*(ch->read_data.addr) = ssi_inl(base, SSI_SSR_BUFFER_CH_REG(n_p, n_ch));
+	if (ch->flags & SSI_CH_RX_POLL)
+		rx_poll = 1;
+
+	if (ch->read_data.addr) {
+		data_read = 1;
+		*(ch->read_data.addr) = ssi_inl(base,
+						SSI_SSR_BUFFER_CH_REG(n_p, n_ch));
+	}
 
 	ssi_outl_and(~SSI_SSR_DATAAVAILABLE(n_ch), base,
 					SSI_SYS_MPU_ENABLE_REG(n_p, irq));
@@ -160,7 +179,13 @@ static void do_channel_rx(struct ssi_channel *ch)
 
 	spin_unlock(&ssi_ctrl->lock);
 
-	(*ch->read_done)(ch->dev);
+	if (rx_poll)
+		ssi_port_event_handler(ch->ssi_port,
+					SSI_EVENT_SSR_DATAAVAILABLE,
+					(void *)n_ch);
+
+	if (data_read)
+		(*ch->read_done)(ch->dev);
 }
 
 static void do_ssi_tasklet(unsigned long ssi_port)

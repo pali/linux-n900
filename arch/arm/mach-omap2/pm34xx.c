@@ -127,6 +127,9 @@ static int (*_omap_save_secure_sram)(u32 *addr);
 
 static void (*saved_idle)(void);
 
+static unsigned int *_sdrc_counters;
+static unsigned int save_sdrc_counters[2];
+
 static struct powerdomain *mpu_pwrdm, *neon_pwrdm;
 static struct powerdomain *core_pwrdm, *per_pwrdm;
 static struct powerdomain *cam_pwrdm, *iva2_pwrdm, *dss_pwrdm, *usb_pwrdm;
@@ -301,7 +304,15 @@ static void omap3_core_save_context(void)
 	/* wait for the save to complete */
 	while (!(omap_ctrl_readl(OMAP343X_CONTROL_GENERAL_PURPOSE_STATUS)
 			& PADCONF_SAVE_DONE))
-		;
+		udelay(1);
+
+	/*
+	 * Force write last pad into memory, as this can fail in some
+	 * cases according to errata XYZ
+	 */
+	omap_ctrl_writel(omap_ctrl_readl(OMAP343X_PADCONF_ETK_D14),
+		OMAP343X_CONTROL_MEM_WKUP + 0x2a0);
+
 	/* Save the Interrupt controller context */
 	omap3_intc_save_context();
 	/* Save the GPMC context */
@@ -668,6 +679,8 @@ void omap_sram_idle(void)
 				  OMAP3_PRM_CLKSETUP_OFFSET);
 	}
 
+	memcpy(save_sdrc_counters, _sdrc_counters, sizeof(save_sdrc_counters));
+
 	/*
 	 * omap3_arm_context is the location where ARM registers
 	 * get saved. The restore path then reads from this
@@ -697,6 +710,7 @@ void omap_sram_idle(void)
 			omap3_sram_restore_context();
 			omap2_sms_restore_context();
 			reset_ssi();
+			memcpy(_sdrc_counters, save_sdrc_counters, sizeof(save_sdrc_counters));
 		}
 		omap_uart_resume_idle(0);
 		omap_uart_resume_idle(1);
@@ -800,6 +814,12 @@ int set_pwrdm_state(struct powerdomain *pwrdm, u32 state)
 
 err:
 	return ret;
+}
+
+/* return a pointer to the sdrc counters */
+unsigned int *omap3_get_sdrc_counters(void)
+{
+	return _sdrc_counters;
 }
 
 static void omap3_pm_idle(void)
@@ -1251,6 +1271,10 @@ void omap_push_sram_idle(void)
 {
 	_omap_sram_idle = omap_sram_push(omap34xx_cpu_suspend,
 					omap34xx_cpu_suspend_sz);
+	/* the sdrc counters are always at the end of the omap34xx_cpu_suspend
+	 * block */
+	_sdrc_counters = (unsigned *)((u8 *)_omap_sram_idle + omap34xx_cpu_suspend_sz - 8);
+
 	if (omap_type() != OMAP2_DEVICE_TYPE_GP)
 		_omap_save_secure_sram = omap_sram_push(save_secure_ram_context,
 				save_secure_ram_context_sz);

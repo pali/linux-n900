@@ -169,7 +169,8 @@ static int pm_dbg_init_done;
 enum {
 	DEBUG_FILE_COUNTERS = 0,
 	DEBUG_FILE_TIMERS,
-	DEBUG_FILE_RESOURCES
+	DEBUG_FILE_RESOURCES,
+	DEBUG_FILE_WAIT_SDRC_COUNT
 };
 
 struct pm_module_def {
@@ -428,9 +429,21 @@ static int pm_dbg_show_timers(struct seq_file *s, void *unused)
 	return 0;
 }
 
+static int pm_dbg_show_sdrc_wait_count(struct seq_file *s, void *unused)
+{
+	unsigned int *sdrc_counters = omap3_get_sdrc_counters();
+
+	seq_printf(s, "dll kick count: %u\n", sdrc_counters[0]);
+	seq_printf(s, "wait dll lock count: %u\n", sdrc_counters[1]);
+
+	return 0;
+}
 static int pm_dbg_open(struct inode *inode, struct file *file)
 {
 	switch ((int)inode->i_private) {
+	case DEBUG_FILE_WAIT_SDRC_COUNT:
+		return single_open(file, pm_dbg_show_sdrc_wait_count,
+			&inode->i_private);
 	case DEBUG_FILE_COUNTERS:
 		return single_open(file, pm_dbg_show_counters,
 			&inode->i_private);
@@ -548,6 +561,8 @@ static int __init pm_dbg_init(void)
 		d, (void *)DEBUG_FILE_TIMERS, &debug_fops);
 	(void) debugfs_create_file("resources", S_IRUGO,
 		d, (void *)DEBUG_FILE_RESOURCES, &debug_fops);
+	(void) debugfs_create_file("wait_sdrc_count", S_IRUGO,
+		d, (void *)DEBUG_FILE_WAIT_SDRC_COUNT, &debug_fops);
 
 	pwrdm_for_each(pwrdms_setup, (void *)d);
 

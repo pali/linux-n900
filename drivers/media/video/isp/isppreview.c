@@ -184,17 +184,16 @@ static u32 luma_enhance_table[] = {
 #include "luma_enhance_table.h"
 };
 
-static int omap34xx_isp_tables_update(struct isp_prev_device *isp_prev,
-				struct isptables_update *isptables_struct);
+static int isppreview_tables_update(struct isp_prev_device *isp_prev,
+				    struct isptables_update *isptables_struct);
 
 
 /**
- * omap34xx_isp_preview_config - Abstraction layer Preview configuration.
+ * isppreview_config - Abstraction layer Preview configuration.
  * @userspace_add: Pointer from Userspace to structure with flags and data to
  *                 update.
  **/
-int omap34xx_isp_preview_config(struct isp_prev_device *isp_prev,
-				void *userspace_add)
+int isppreview_config(struct isp_prev_device *isp_prev, void *userspace_add)
 {
 	struct isp_device *isp = to_isp_device(isp_prev);
 	struct device *dev = to_device(isp_prev);
@@ -348,32 +347,26 @@ out_config_shadow:
 	isp_table_update.prev_cfa = config->prev_cfa;
 	isp_table_update.prev_wbal = config->prev_wbal;
 
-	if (omap34xx_isp_tables_update(isp_prev, &isp_table_update))
+	if (isppreview_tables_update(isp_prev, &isp_table_update))
 		goto err_copy_from_user;
 
-	spin_lock_irqsave(&isp_prev->lock, flags);
 	isp_prev->shadow_update = 0;
-	spin_unlock_irqrestore(&isp_prev->lock, flags);
-
 	return 0;
 
 err_copy_from_user:
-	spin_lock_irqsave(&isp_prev->lock, flags);
 	isp_prev->shadow_update = 0;
-	spin_unlock_irqrestore(&isp_prev->lock, flags);
-
 	dev_err(dev, "preview: Config: Copy From User Error\n");
 	return -EFAULT;
 }
-EXPORT_SYMBOL_GPL(omap34xx_isp_preview_config);
+EXPORT_SYMBOL_GPL(isppreview_config);
 
 /**
- * omap34xx_isp_tables_update - Abstraction layer Tables update.
+ * isppreview_tables_update - Abstraction layer Tables update.
  * @isptables_struct: Pointer from Userspace to structure with flags and table
  *                 data to update.
  **/
-static int omap34xx_isp_tables_update(struct isp_prev_device *isp_prev,
-			       struct isptables_update *isptables_struct)
+static int isppreview_tables_update(struct isp_prev_device *isp_prev,
+				    struct isptables_update *isptables_struct)
 {
 	struct device *dev = to_device(isp_prev);
 

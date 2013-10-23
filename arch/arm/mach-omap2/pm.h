@@ -50,6 +50,7 @@ extern void omap3_pm_off_mode_enable(int);
 extern int omap3_pm_get_suspend_state(struct powerdomain *pwrdm);
 extern int omap3_pm_set_suspend_state(struct powerdomain *pwrdm, int state);
 extern void omap3_set_prm_setup_times(struct prm_setup_times *setup_times);
+extern unsigned int *omap3_get_sdrc_counters(void);
 #else
 #define omap3_pm_off_mode_enable(int) do {} while (0);
 #define omap3_pm_get_suspend_state(pwrdm) do {} while (0);

@@ -30,6 +30,8 @@
 #include "ra.h"
 #include "pdump_km.h"
 
+#include <linux/kernel.h>
+
 #define MIN(a,b)       (a > b ? b : a)
 
 static IMG_BOOL
@@ -985,6 +987,34 @@ BM_IsWrapped(IMG_HANDLE hDevMemHeap,
 	pBuf = (BM_BUF *) HASH_Retrieve(psBMContext->pBufferHash,
 					(IMG_UINTPTR_T) sSysAddr.uiAddr);
 	return pBuf != IMG_NULL;
+}
+
+IMG_BOOL
+BM_IsWrappedCheckSize(IMG_HANDLE hDevMemHeap,
+		 IMG_UINT32 ui32Offset,
+		 IMG_SYS_PHYADDR sSysAddr,
+		 IMG_UINT32 ui32ByteSize)
+{
+	BM_BUF *pBuf;
+	BM_CONTEXT *psBMContext;
+	BM_HEAP *psBMHeap;
+
+	IMG_BOOL ret = IMG_FALSE;
+
+	psBMHeap = (BM_HEAP *) hDevMemHeap;
+	psBMContext = psBMHeap->pBMContext;
+	sSysAddr.uiAddr += ui32Offset;
+	pBuf = (BM_BUF *) HASH_Retrieve(psBMContext->pBufferHash,
+			(IMG_UINTPTR_T) sSysAddr.uiAddr);
+
+	if (pBuf != NULL) {
+		if (pBuf->pMapping->uSize >= ui32ByteSize)
+			ret = IMG_TRUE;
+		else
+			ret = IMG_FALSE;
+	}
+
+	return ret;
 }
 
 IMG_BOOL

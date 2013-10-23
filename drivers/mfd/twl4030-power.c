@@ -69,6 +69,11 @@ static u8 triton_next_free_address = 0x2b;
 #define KEY_1			0xC0
 #define KEY_2			0x0C
 
+#define R_VDD1_OSC		0x5C
+#define R_VDD2_OSC		0x6A
+#define R_VIO_OSC		0x52
+#define EXT_FS_CLK_EN		(0x1 << 6)
+
 /* resource configuration registers */
 
 #define DEVGROUP_OFFSET		0
@@ -467,6 +472,31 @@ int twl4030_disable_regulator(int res)
 }
 EXPORT_SYMBOL(twl4030_disable_regulator);
 
+/**
+ * @brief twl_workaround - implement errata XYZ
+ * XYZ errata workaround requires the TWL DCDCs to use
+ * HFCLK - for this you need to write to all OSC regs to
+ * enable this path
+ * WARNING: you SHOULD change your board dependent script
+ * file to handle RET and OFF mode sequences correctly
+ *
+ * @return
+ */
+static void __init twl_workaround(void)
+{
+	u8 val;
+	u8 reg[]={R_VDD1_OSC, R_VDD2_OSC, R_VIO_OSC};
+	int i;
+	int err = 0;
+	for (i = 0; i < sizeof(reg); i++) {
+		err |= twl4030_i2c_read_u8(TWL4030_MODULE_PM_RECEIVER, &val, reg[i]);
+		val |= EXT_FS_CLK_EN;
+		err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, val, reg[i]);
+	}
+	if (err)
+		pr_warning("TWL4030: workaround setup failed!\n");
+}
+
 void __init twl4030_power_init(struct twl4030_power_data *triton2_scripts)
 {
 	int err = 0;
@@ -502,6 +532,8 @@ void __init twl4030_power_init(struct twl4030_power_data *triton2_scripts)
 		}
 	}
 
+	/* TODO: introduce workaround based on TWL4030 revision */
+	twl_workaround();
 	if (twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, 0, R_PROTECT_KEY))
 		printk(KERN_ERR
 			"TWL4030 Unable to relock registers\n");

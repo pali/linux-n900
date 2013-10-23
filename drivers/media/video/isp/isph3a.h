@@ -130,11 +130,11 @@ struct isp_h3a_device {
 	struct ispstat stat;
 };
 
-int omap34xx_isph3a_aewb_config(struct isp_h3a_device *isp_h3a,
-				struct isph3a_aewb_config *aewbcfg);
+int isph3a_aewb_config(struct isp_h3a_device *isp_h3a,
+		       struct isph3a_aewb_config *aewbcfg);
 
-int omap34xx_isph3a_aewb_request_statistics(struct isp_h3a_device *isp_h3a,
-					    struct isph3a_aewb_data *aewbdata);
+int isph3a_aewb_request_statistics(struct isp_h3a_device *isp_h3a,
+				   struct isph3a_aewb_data *aewbdata);
 
 void isph3a_save_context(struct device *dev);
 

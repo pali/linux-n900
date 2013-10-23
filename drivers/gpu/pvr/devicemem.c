@@ -34,6 +34,7 @@
 #include "pvr_bridge_km.h"
 
 #include "linux/kernel.h"
+#include "linux/pagemap.h"
 
 static PVRSRV_ERROR AllocDeviceMem(IMG_HANDLE hDevCookie,
 				   IMG_HANDLE hDevMemHeap,
@@ -595,8 +596,87 @@ static PVRSRV_ERROR UnwrapExtMemoryCallBack(IMG_PVOID pvParam,
 	}
 
 	if (hOSWrapMem) {
-		OSReleasePhysPageAddr(hOSWrapMem);
+		OSReleasePhysPageAddr(hOSWrapMem, IMG_TRUE);
 	}
+
+	return eError;
+}
+
+IMG_EXPORT
+    PVRSRV_ERROR IMG_CALLCONV PVRSRVIsWrappedExtMemoryKM(IMG_HANDLE hDevCookie,
+							   PVRSRV_PER_PROCESS_DATA
+							   *psPerProc,
+							   IMG_UINT32
+							   *pui32ByteSize,
+							   IMG_VOID
+							   **pvLinAddr)
+{
+	DEVICE_MEMORY_INFO *psDevMemoryInfo;
+	IMG_UINT32 ui32HostPageSize = HOST_PAGESIZE();
+	PVRSRV_DEVICE_NODE *psDeviceNode;
+	PVRSRV_ERROR eError;
+	IMG_SYS_PHYADDR sIntSysPAddr;
+	IMG_HANDLE hOSWrapMem = IMG_NULL;
+	IMG_HANDLE hDevMemHeap;
+	IMG_UINT32 ui32PageOffset = 0;
+
+	IMG_UINT32 ui32ReturnedByteSize = *pui32ByteSize;
+
+	eError = PVRSRV_ERROR_OUT_OF_MEMORY;
+
+	psDeviceNode = (PVRSRV_DEVICE_NODE *)hDevCookie;
+	PVR_ASSERT(psDeviceNode != IMG_NULL);
+	psDevMemoryInfo = &psDeviceNode->sDevMemoryInfo;
+
+	hDevMemHeap = psDevMemoryInfo->psDeviceMemoryHeap[SGX_GENERAL_MAPPING_HEAP_ID].hDevMemHeap;
+
+	if (pvLinAddr) {
+		ui32PageOffset = ((IMG_UINT32)*pvLinAddr) & ~PAGE_MASK;
+		*pvLinAddr = (IMG_VOID *)((IMG_UINT32)*pvLinAddr & PAGE_MASK);
+		ui32ReturnedByteSize += ui32PageOffset;
+
+		/* let's start by getting the address of the first page */
+		eError = OSAcquirePhysPageAddr(*pvLinAddr,
+										ui32HostPageSize,
+										&sIntSysPAddr,
+										&hOSWrapMem,
+										IMG_FALSE);
+		if (eError != PVRSRV_OK) {
+			PVR_DPF((PVR_DBG_ERROR, "PVRSRVIsWrappedExtMemoryKM: Failed to alloc memory for block"));
+			eError = PVRSRV_ERROR_OUT_OF_MEMORY;
+			goto ErrorExitPhase1;
+		}
+
+		OSReleasePhysPageAddr(hOSWrapMem, IMG_FALSE);
+		hOSWrapMem = IMG_NULL;
+
+		/* now check if this memory address is already wrapped */
+		if (BM_IsWrappedCheckSize(hDevMemHeap,
+							ui32PageOffset,
+							sIntSysPAddr,
+							*pui32ByteSize)) {
+			/* already wrapped */
+			eError = PVRSRV_OK;
+		} else {
+			/* not mapped in this heap */
+			/* try the alternative heap */
+			hDevMemHeap = psDevMemoryInfo->psDeviceMemoryHeap[SGX_ALT_MAPPING_HEAP_ID].hDevMemHeap;
+
+			if (BM_IsWrappedCheckSize(hDevMemHeap,
+								ui32PageOffset,
+								sIntSysPAddr,
+								*pui32ByteSize)) {
+				/* already wrapped */
+				eError = PVRSRV_OK;
+			} else {
+				eError = PVRSRV_ERROR_BAD_MAPPING;
+			}
+		}
+	}
+
+ErrorExitPhase1:
+
+	*pui32ByteSize = ui32ReturnedByteSize;
 
 	return eError;
 }
@@ -631,6 +711,13 @@ IMG_EXPORT
 	IMG_SYS_PHYADDR *pPageList = psExtSysPAddr;
 	IMG_UINT32 ui32PageCount;
 
+	IMG_UINT32 ui32CalculatedPageOffset = ((IMG_UINT32)pvLinAddr) & ~PAGE_MASK;
+	if (ui32CalculatedPageOffset != ui32PageOffset)	{
+		PVR_DPF((PVR_DBG_ERROR,
+			"PVRSRVWrapExtMemoryKM: offset from address not match offset param"));
+		return PVRSRV_ERROR_BAD_MAPPING;
+	}
+
 	psDeviceNode = (PVRSRV_DEVICE_NODE *) hDevCookie;
 	PVR_ASSERT(psDeviceNode != IMG_NULL);
 	psDevMemoryInfo = &psDeviceNode->sDevMemoryInfo;
@@ -657,7 +744,7 @@ IMG_EXPORT
 		/* let's start by getting the address of the first page */
 		eError = OSAcquirePhysPageAddr(pvPageAlignedCPUVAddr,
 					       ui32HostPageSize,
-					       psIntSysPAddr, &hOSWrapMem);
+					       psIntSysPAddr, &hOSWrapMem, IMG_TRUE);
 		if (eError != PVRSRV_OK) {
 			PVR_DPF((PVR_DBG_ERROR,
 				 "PVRSRVWrapExtMemoryKM: Failed to alloc memory for block"));
@@ -667,10 +754,10 @@ IMG_EXPORT
 		/* now check if this memory address is already wrapped */
 		if (BM_IsWrapped(hDevMemHeap, ui32PageOffset, psIntSysPAddr[0])) {
 			/* already wrapped */
-			OSReleasePhysPageAddr(hOSWrapMem);
+			OSReleasePhysPageAddr(hOSWrapMem, IMG_TRUE);
 			hOSWrapMem = IMG_NULL;
 		} else if (ui32PageCount > 1) {
-			OSReleasePhysPageAddr(hOSWrapMem);
+			OSReleasePhysPageAddr(hOSWrapMem, IMG_TRUE);
 			hOSWrapMem = IMG_NULL;
 			/* the memory is going to wrapped for the first time,
 			 * so we need full page list */
@@ -678,7 +765,8 @@ IMG_EXPORT
 						       ui32PageCount *
 						       ui32HostPageSize,
 						       psIntSysPAddr,
-						       &hOSWrapMem);
+						       &hOSWrapMem,
+						       IMG_TRUE);
 			if (eError != PVRSRV_OK) {
 				PVR_DPF((PVR_DBG_ERROR,
 					 "PVRSRVWrapExtMemoryKM: Failed to alloc memory for block"));
@@ -783,7 +871,7 @@ ErrorExitPhase2:
 	}
 
 	if (hOSWrapMem)
-		OSReleasePhysPageAddr(hOSWrapMem);
+		OSReleasePhysPageAddr(hOSWrapMem, IMG_TRUE);
 ErrorExitPhase1:
 	if (psIntSysPAddr) {
 		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,

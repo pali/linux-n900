@@ -1103,9 +1103,14 @@ sector_t map_swap_page(struct swap_info_struct *sis, pgoff_t offset, int write)
 		/* Update the free pages gap */
 		sis->gap_next += 1;
 	} else {
-		/* Always read from the existing re-mapping */
-		BUG_ON(!old);
-		offset = old;
+		/*
+		 * Always read from the existing re-mapping
+		 * if there is one. There may not be because
+		 * 'swapin_readahead()' has won a race with
+		 * 'add_to_swap()'.
+		 */
+		if (old)
+			offset = old;
 	}
 	spin_unlock(&sis->remap_lock);
 

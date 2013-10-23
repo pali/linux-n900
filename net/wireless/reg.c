@@ -637,7 +637,7 @@ static void print_rd_rules(const struct ieee80211_regdomain *rd)
 	const struct ieee80211_freq_range *freq_range = NULL;
 	const struct ieee80211_power_rule *power_rule = NULL;
 
-	printk(KERN_INFO "\t(start_freq - end_freq @ bandwidth), "
+	printk(KERN_DEBUG "\t(start_freq - end_freq @ bandwidth), "
 		"(max_antenna_gain, max_eirp)\n");
 
 	for (i = 0; i < rd->n_reg_rules; i++) {
@@ -648,7 +648,7 @@ static void print_rd_rules(const struct ieee80211_regdomain *rd)
 		/* There may not be documentation for max antenna gain
 		 * in certain regions */
 		if (power_rule->max_antenna_gain)
-			printk(KERN_INFO "\t(%d KHz - %d KHz @ %d KHz), "
+			printk(KERN_DEBUG "\t(%d KHz - %d KHz @ %d KHz), "
 				"(%d mBi, %d mBm)\n",
 				freq_range->start_freq_khz,
 				freq_range->end_freq_khz,
@@ -656,7 +656,7 @@ static void print_rd_rules(const struct ieee80211_regdomain *rd)
 				power_rule->max_antenna_gain,
 				power_rule->max_eirp);
 		else
-			printk(KERN_INFO "\t(%d KHz - %d KHz @ %d KHz), "
+			printk(KERN_DEBUG "\t(%d KHz - %d KHz @ %d KHz), "
 				"(N/A, %d mBm)\n",
 				freq_range->start_freq_khz,
 				freq_range->end_freq_khz,
@@ -669,15 +669,15 @@ static void print_regdomain(const struct ieee80211_regdomain *rd)
 {
 
 	if (is_world_regdom(rd->alpha2))
-		printk(KERN_INFO "cfg80211: World regulatory "
+		printk(KERN_DEBUG "cfg80211: World regulatory "
 			"domain updated:\n");
 	else {
 		if (is_unknown_alpha2(rd->alpha2))
-			printk(KERN_INFO "cfg80211: Regulatory domain "
+			printk(KERN_DEBUG "cfg80211: Regulatory domain "
 				"changed to driver built-in settings "
 				"(unknown country)\n");
 		else
-			printk(KERN_INFO "cfg80211: Regulatory domain "
+			printk(KERN_DEBUG "cfg80211: Regulatory domain "
 				"changed to country: %c%c\n",
 				rd->alpha2[0], rd->alpha2[1]);
 	}
@@ -686,7 +686,7 @@ static void print_regdomain(const struct ieee80211_regdomain *rd)
 
 void print_regdomain_info(const struct ieee80211_regdomain *rd)
 {
-	printk(KERN_INFO "cfg80211: Regulatory domain: %c%c\n",
+	printk(KERN_DEBUG "cfg80211: Regulatory domain: %c%c\n",
 		rd->alpha2[0], rd->alpha2[1]);
 	print_rd_rules(rd);
 }
@@ -805,7 +805,7 @@ int regulatory_init(void)
 #ifdef CONFIG_WIRELESS_OLD_REGULATORY
 	cfg80211_regdomain = static_regdom(ieee80211_regdom);
 
-	printk(KERN_INFO "cfg80211: Using static regulatory domain info\n");
+	printk(KERN_DEBUG "cfg80211: Using static regulatory domain info\n");
 	print_regdomain_info(cfg80211_regdomain);
 	/* The old code still requests for a new regdomain and if
 	 * you have CRDA you get it updated, otherwise you get

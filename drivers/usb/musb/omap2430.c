@@ -49,6 +49,17 @@
 
 static struct timer_list musb_idle_timer;
 
+static void musb_vbus_work(struct work_struct *data)
+{
+	struct musb *musb = container_of(data, struct musb, vbus_work);
+	u8 devctl = musb_readb(musb->mregs, MUSB_DEVCTL);
+
+	/* clear/set requirements for musb to work with DPS on omap3 */
+	if (musb->board && musb->board->set_pm_limits && !musb->is_charger)
+		musb->board->set_pm_limits(musb->controller,
+					(devctl & MUSB_DEVCTL_VBUS));
+}
+
 static void musb_do_idle(unsigned long _musb)
 {
 	struct musb	*musb = (void *)_musb;
@@ -276,6 +287,7 @@ int __init musb_platform_init(struct musb *musb)
 	musb->a_wait_bcon = MUSB_TIMEOUT_A_WAIT_BCON;
 
 	setup_timer(&musb_idle_timer, musb_do_idle, (unsigned long) musb);
+	INIT_WORK(&musb->vbus_work, musb_vbus_work);
 
 	return 0;
 }
@@ -448,6 +460,9 @@ void musb_restore_ctx_and_resume(struct usb_gadget *gadget)
 
 	/* Restore register context */
 	musb_restore_ctx(musb);
+
+	/* set constraints */
+	schedule_work(&musb->vbus_work);
 	spin_unlock_irqrestore(&musb->lock, flags);
 }
 EXPORT_SYMBOL_GPL(musb_restore_ctx_and_resume);

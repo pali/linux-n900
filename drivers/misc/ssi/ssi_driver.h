@@ -44,6 +44,8 @@
 
 /* Channel states */
 #define	SSI_CH_OPEN		0x01
+#define SSI_CH_RX_POLL		0x10
+
 /*
  * The number of channels to use by the driver in the ports, or the highest
  * port channel number (+1) used. (MAX:8)
@@ -87,8 +89,8 @@ struct ssi_channel {
 	u8 channel_number;
 	rwlock_t rw_lock;
 	struct ssi_device *dev;
-	void (*write_done)(struct ssi_device *dev);
-	void (*read_done)(struct ssi_device *dev);
+	void (*write_done) (struct ssi_device *dev);
+	void (*read_done) (struct ssi_device *dev);
 	void (*port_event)(struct ssi_device *dev, unsigned int event,
 								void *arg);
 };

@@ -235,6 +235,19 @@ static int musb_charger_detect(struct musb *musb)
 			/* we always reset transceiver */
 			check_charger = 1;
 
+			/* HACK: ULPI tends to get stuck when booting with
+			 * the cable connected
+			 */
+			r = musb_readb(musb->mregs, MUSB_DEVCTL);
+			if ((r & MUSB_DEVCTL_VBUS)
+					== (3 << MUSB_DEVCTL_VBUS_SHIFT)) {
+				musb_save_ctx_and_suspend(&musb->g, 0);
+				musb_restore_ctx_and_resume(&musb->g);
+				if (musb->board && musb->board->set_pm_limits)
+					musb->board->set_pm_limits(
+							musb->controller, 1);
+			}
+
 			/* disable RESET and RESUME interrupts */
 			r = musb_readb(musb->mregs, MUSB_INTRUSBE);
 			r &= ~(MUSB_INTR_RESUME | MUSB_INTR_RESET);
@@ -2113,19 +2126,8 @@ static void musb_irq_work(struct work_struct *data)
 {
 	struct musb *musb = container_of(data, struct musb, irq_work);
 	static int old_state, old_ma, old_suspend;
-	u8 devctl;
 
 	if (musb->xceiv->state != old_state) {
-		devctl = musb_readb(musb->mregs, MUSB_DEVCTL);
-		if (musb->xceiv->state == OTG_STATE_B_IDLE &&
-					(devctl & MUSB_DEVCTL_VBUS))
-			goto keep_limit;
-
-		/* clear/set requirements for musb to work with DPS on omap3 */
-		if (musb->board && musb->board->set_pm_limits)
-			musb->board->set_pm_limits(musb->controller,
-				(musb->xceiv->state == OTG_STATE_B_PERIPHERAL));
-keep_limit:
 		old_state = musb->xceiv->state;
 		sysfs_notify(&musb->controller->kobj, NULL, "mode");
 	}
@@ -2456,6 +2458,12 @@ bad_config:
 #endif
 	if (status)
 		goto fail2;
+
+	/* Resets the controller. Has to be done. Without this, most likely
+	 * the state machine inside the transceiver doesn't get fixed properly
+	 */
+	musb_save_ctx_and_suspend(&musb->g, 0);
+	musb_restore_ctx_and_resume(&musb->g);
 
 	return 0;
 

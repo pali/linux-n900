@@ -291,8 +291,10 @@
 	PVRSRV_ERROR OSAcquirePhysPageAddr(IMG_VOID * pvCPUVAddr,
 					   IMG_UINT32 ui32Bytes,
 					   IMG_SYS_PHYADDR * psSysPAddr,
-					   IMG_HANDLE * phOSWrapMem);
-	PVRSRV_ERROR OSReleasePhysPageAddr(IMG_HANDLE hOSWrapMem);
+					   IMG_HANDLE * phOSWrapMem,
+					   IMG_BOOL bUseLock);
+	PVRSRV_ERROR OSReleasePhysPageAddr(IMG_HANDLE hOSWrapMem,
+					   IMG_BOOL bUseLock);
 
 
 #endif

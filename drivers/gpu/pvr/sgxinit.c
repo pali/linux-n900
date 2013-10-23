@@ -225,8 +225,12 @@ static IMG_VOID SGXGetTimingInfo(PVRSRV_DEVICE_NODE * psDeviceNode)
 		}
 		if (psDevInfo->hTimer == IMG_NULL) {
 
+			/*
+			 * the magic calculation below sets the hardware lock-up
+			 * detection and recovery timer interval to ~150msecs
+			 */
 			psDevInfo->hTimer = OSAddTimer(SGXOSTimer, psDeviceNode,
-						       1000 * 50 /
+						       1000 * 150 /
 						       psSGXTimingInfo->
 						       ui32uKernelFreq);
 			if (psDevInfo->hTimer == IMG_NULL) {

@@ -1191,7 +1191,6 @@ struct wl1251_acx_mem_map {
 	u32 num_rx_mem_blocks;
 } __attribute__ ((packed));
 
-
 struct wl1251_acx_wr_tbtt_and_dtim {
 
 	struct acx_header header;
@@ -1221,6 +1220,31 @@ struct wl1251_acx_arp_filter {
 			       dropped. When the IP Version is 4, the last 12
 			       bytes of the the address are ignored.*/
 } __attribute__((packed));
+
+enum wl1251_acx_bet_mode {
+	WL1251_ACX_BET_DISABLE = 0,
+	WL1251_ACX_BET_ENABLE = 1,
+};
+
+struct wl1251_acx_bet_enable {
+	struct acx_header header;
+
+	/*
+	 * Specifies if beacon early termination procedure is enabled or
+	 * disabled, see enum wl1251_acx_bet_mode.
+	 */
+	u8 enable;
+
+	/*
+	 * Specifies the maximum number of consecutive beacons that may be
+	 * early terminated. After this number is reached at least one full
+	 * beacon must be correctly received in FW before beacon ET
+	 * resumes. Range 0 - 255.
+	 */
+	u8 max_consecutive;
+
+	u8 padding[2];
+} __attribute__ ((packed));
 
 /*************************************************************************
 
@@ -1384,4 +1408,7 @@ int wl1251_acx_mem_cfg(struct wl1251 *wl);
 int wl1251_acx_wr_tbtt_and_dtim(struct wl1251 *wl, u16 tbtt, u8 dtim);
 int wl1251_acx_ip_config(struct wl1251 *wl, bool enable, u8 *address,
 			 u8 version);
+int wl1251_acx_bet_enable(struct wl1251 *wl, enum wl1251_acx_bet_mode mode,
+			  u8 max_consecutive);
+
 #endif /* __WL1251_ACX_H__ */

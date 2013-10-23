@@ -791,25 +791,25 @@ PVRSRVUnmapDeviceMemoryBW(IMG_UINT32 ui32BridgeID,
 }
 
 static int
-FlushCacheDRI(IMG_UINT32 ui32Type, IMG_UINT32 ui32Virt, IMG_UINT32 ui32Length)
+FlushCacheDRI(IMG_UINT32 ui32Type, IMG_VOID *pvVirt, IMG_UINT32 ui32Length)
 {
 	switch (ui32Type) {
 	case DRM_PVR2D_CFLUSH_FROM_GPU:
 		PVR_DPF((PVR_DBG_MESSAGE,
 			 "DRM_PVR2D_CFLUSH_FROM_GPU 0x%08x, length 0x%08x\n",
-			 ui32Virt, ui32Length));
+			 pvVirt, ui32Length));
 #ifdef CONFIG_ARM
-		dmac_inv_range((const void *)ui32Virt,
-			       (const void *)(ui32Virt + ui32Length));
+		dmac_inv_range((const void *)pvVirt,
+			       (const void *)(pvVirt + ui32Length));
 #endif
 		return 0;
 	case DRM_PVR2D_CFLUSH_TO_GPU:
 		PVR_DPF((PVR_DBG_MESSAGE,
 			 "DRM_PVR2D_CFLUSH_TO_GPU 0x%08x, length 0x%08x\n",
-			 ui32Virt, ui32Length));
+			 pvVirt, ui32Length));
 #ifdef CONFIG_ARM
-		dmac_clean_range((const void *)ui32Virt,
-				 (const void *)(ui32Virt + ui32Length));
+		dmac_clean_range((const void *)pvVirt,
+				 (const void *)(pvVirt + ui32Length));
 #endif
 		return 0;
 	default:
@@ -821,18 +821,51 @@ FlushCacheDRI(IMG_UINT32 ui32Type, IMG_UINT32 ui32Virt, IMG_UINT32 ui32Length)
 	return 0;
 }
 
+PVRSRV_ERROR
+PVRSRVIsWrappedExtMemoryBW(PVRSRV_PER_PROCESS_DATA *psPerProc,
+			   PVRSRV_BRIDGE_IN_CACHEFLUSHDRMFROMUSER *psCacheFlushIN)
+{
+	PVRSRV_ERROR eError;
+	IMG_HANDLE hDevCookieInt;
+
+	PVRSRVLookupHandle(psPerProc->psHandleBase, &hDevCookieInt,
+						   psCacheFlushIN->hDevCookie,
+						   PVRSRV_HANDLE_TYPE_DEV_NODE);
+
+	eError = PVRSRVIsWrappedExtMemoryKM(
+					hDevCookieInt,
+					psPerProc,
+					&(psCacheFlushIN->ui32Length),
+					&(psCacheFlushIN->pvVirt));
+
+	return eError;
+}
+
 static int
 PVRSRVCacheFlushDRIBW(IMG_UINT32 ui32BridgeID,
 		      PVRSRV_BRIDGE_IN_CACHEFLUSHDRMFROMUSER * psCacheFlushIN,
 		      PVRSRV_BRIDGE_RETURN * psRetOUT,
 		      PVRSRV_PER_PROCESS_DATA * psPerProc)
 {
+	PVRSRV_ERROR eError;
 	PVRSRV_BRIDGE_ASSERT_CMD(ui32BridgeID, PVRSRV_BRIDGE_CACHE_FLUSH_DRM);
 
-	psRetOUT->eError = FlushCacheDRI(psCacheFlushIN->ui32Type,
-					 psCacheFlushIN->ui32Virt,
-					 psCacheFlushIN->ui32Length);
+	down_read(&current->mm->mmap_sem);
 
+	eError = PVRSRVIsWrappedExtMemoryBW(psPerProc, psCacheFlushIN);
+
+	if (eError == PVRSRV_OK) {
+		psRetOUT->eError = FlushCacheDRI(psCacheFlushIN->ui32Type,
+											psCacheFlushIN->pvVirt,
+											psCacheFlushIN->ui32Length);
+	} else {
+		printk(KERN_WARNING
+			": PVRSRVCacheFlushDRIBW: Start address 0x%08x and length 0x%08x not wrapped \n",
+			(unsigned int)(psCacheFlushIN->pvVirt),
+			(unsigned int)(psCacheFlushIN->ui32Length));
+	}
+
+	up_read(&current->mm->mmap_sem);
 	return 0;
 }
 
@@ -987,7 +1020,7 @@ PVRSRVWrapExtMemoryBW(IMG_UINT32 ui32BridgeID,
 	IMG_HANDLE hDevCookieInt;
 	PVRSRV_KERNEL_MEM_INFO *psMemInfo;
 	IMG_UINT32 ui32PageTableSize = 0;
-	IMG_SYS_PHYADDR *psSysPAddr = IMG_NULL;;
+	IMG_SYS_PHYADDR *psSysPAddr = IMG_NULL;
 
 	PVRSRV_BRIDGE_ASSERT_CMD(ui32BridgeID, PVRSRV_BRIDGE_WRAP_EXT_MEMORY);
 

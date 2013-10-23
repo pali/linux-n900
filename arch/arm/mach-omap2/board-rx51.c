@@ -84,11 +84,16 @@ static void __init rx51_init_irq(void)
 static void __init rx51_pm_init(void)
 {
 	struct prm_setup_times prm_setup = {
-		.clksetup = 81,
+		.clksetup = 111, /* must equal Volt offset + voltsetup2 */
 		.voltsetup_time1 = 270,
 		.voltsetup_time2 = 150,
-		.voltoffset = 17,
-		.voltsetup2 = 37,
+		/* Time between wakeup event to when the sysoff goes high */
+		.voltoffset = 16,
+		 /* The following is for a 2.25ms ramp time of the oscillator
+		  * Documented 2ms, added .25 as margin. NOTE: scripts
+		  * change as oscillator changes
+		  */
+		.voltsetup2 = 95,
 	};
 
 	omap3_set_prm_setup_times(&prm_setup);

@@ -606,6 +606,10 @@ enum fsg_buffer_state {
 struct fsg_dev;
 
 struct fsg_buffhd {
+	struct rb_node			rb_node;
+	sector_t			sector;
+	int				sectors;
+
 	void				*buf;
 	size_t				buflen;
 	enum fsg_buffer_state		state;
@@ -693,6 +697,9 @@ struct fsg_dev {
 	struct fsg_buffhd	*next_buffhd_to_drain;
 	struct fsg_buffhd	buffhds[NUM_BUFFERS];
 	int			num_buffers;
+
+	/* Tree to find direct I/O's with overlapping sectors */
+	struct rb_root		bio_tree;
 
 	int			thread_wakeup_needed;
 	struct completion	thread_notifier;
@@ -1054,6 +1061,58 @@ static struct usb_gadget_strings	stringtab = {
 	.language	= 0x0409,		// en-us
 	.strings	= strings,
 };
+
+/*
+ *	Find overlapped bio in fsg->bio_tree rb tree.
+ */
+static int fsg_rbtree_find(struct fsg_dev *fsg, sector_t s,
+		unsigned int sectors)
+{
+	struct rb_node *n;
+	struct fsg_buffhd *tmp;
+	int found = 0;
+
+	spin_lock_irq(&fsg->lock);
+	n = fsg->bio_tree.rb_node;
+	while (n) {
+		tmp = rb_entry(n, struct fsg_buffhd, rb_node);
+		if (s + sectors <= tmp->sector)
+			n = n->rb_left;
+		else if (s >= tmp->sector + tmp->sectors)
+			n = n->rb_right;
+		else {
+			found = 1;
+			break;
+		}
+	}
+	spin_unlock_irq(&fsg->lock);
+	return found;
+}
+
+/*
+ * Insert a node into the fsg->bio_tree rb tree.
+ */
+static void fsg_rbtree_insert(struct fsg_dev *fsg, struct fsg_buffhd *node)
+{
+	struct rb_node **p;
+	struct rb_node *parent = NULL;
+	struct fsg_buffhd *tmp;
+
+	spin_lock_irq(&fsg->lock);
+	p = &fsg->bio_tree.rb_node;
+
+	while (*p) {
+		parent = *p;
+		tmp = rb_entry(parent, struct fsg_buffhd, rb_node);
+		if (node->sector < tmp->sector)
+			p = &(*p)->rb_left;
+		else
+			p = &(*p)->rb_right;
+	}
+	rb_link_node(&node->rb_node, parent, p);
+	rb_insert_color(&node->rb_node, &fsg->bio_tree);
+	spin_unlock_irq(&fsg->lock);
+}
 
 /** UGLY UGLY HACK: Windows problems with multiple
  * configurations.
@@ -1721,7 +1780,8 @@ static void direct_read_end_io(struct bio *bio, int err)
  * or b) more than one bio must be submitted
  */
 /* FIXME: Needs an equivalent of readahead */
-static ssize_t direct_read(struct file *file, char *buf, size_t amount, loff_t *pos)
+static ssize_t direct_read(struct file *file, struct fsg_buffhd *bh,
+		size_t amount, loff_t *pos)
 {
 	DECLARE_COMPLETION_ONSTACK(wait);
 	unsigned max_pages = (amount >> PAGE_SHIFT) + 1;
@@ -1729,7 +1789,8 @@ static ssize_t direct_read(struct file *file, char *buf, size_t amount, loff_t *
 	ssize_t totlen = 0;
 	struct page *page;
 	struct bio *bio;
-	char *p = buf;
+	char *p = bh->buf;
+	int rc;
 
 	if (!amount)
 		return 0;
@@ -1765,6 +1826,15 @@ static ssize_t direct_read(struct file *file, char *buf, size_t amount, loff_t *
 	if (!totlen) {
 		bio_put(bio);
 		return -EINVAL;
+	}
+
+	while (fsg_rbtree_find(bh->fsg, bio->bi_sector,
+		bio_sectors(bio))) {
+		rc = sleep_thread(bh->fsg);
+		if (rc) {
+			bio_put(bio);
+			return rc;
+		}
 	}
 
 	submit_bio(READ, bio);
@@ -1865,7 +1935,7 @@ static int do_read(struct fsg_dev *fsg)
 		/* Perform the read */
 		file_offset_tmp = file_offset;
 		if (curlun->direct)
-			nread = direct_read(curlun->filp, bh->buf,
+			nread = direct_read(curlun->filp, bh,
 					amount, &file_offset_tmp);
 		else
 			nread = vfs_read(curlun->filp,
@@ -1920,6 +1990,7 @@ static void direct_write_end_io(struct bio *bio, int err)
 {
 	struct fsg_buffhd *bh = bio->bi_private;
 	struct fsg_dev *fsg = bh->fsg;
+	unsigned long flags;
 
 	if (err) {
 		/* FIXME: how to let host know about this error */
@@ -1927,11 +1998,13 @@ static void direct_write_end_io(struct bio *bio, int err)
 		clear_bit(BIO_UPTODATE, &bio->bi_flags);
 	}
 
+	/* FIXME: smp barriers are not necessary for this this driver */
 	smp_wmb();
-	spin_lock(&fsg->lock);
+	spin_lock_irqsave(&fsg->lock, flags);
+	rb_erase(&bh->rb_node, &fsg->bio_tree);
 	bh->state = BUF_STATE_EMPTY;
 	wakeup_thread(fsg);
-	spin_unlock(&fsg->lock);
+	spin_unlock_irqrestore(&fsg->lock, flags);
 
 	bio_put(bio);
 }
@@ -1949,6 +2022,7 @@ static ssize_t direct_write(struct file *file, struct fsg_buffhd *bh, size_t amo
 	struct page *page;
 	struct bio *bio;
 	char *p = bh->buf;
+	int rc;
 
 	if (!amount)
 		return 0;
@@ -1987,6 +2061,16 @@ static ssize_t direct_write(struct file *file, struct fsg_buffhd *bh, size_t amo
 	}
 
 	bh->state = BUF_STATE_BUSY;
+	bh->sector = bio->bi_sector;
+	bh->sectors = bio_sectors(bio);
+	while (fsg_rbtree_find(bh->fsg, bh->sector, bh->sectors)) {
+		rc = sleep_thread(bh->fsg);
+		if (rc) {
+			bio_put(bio);
+			return rc;
+		}
+	}
+	fsg_rbtree_insert(bh->fsg, bh);
 
 	submit_bio(WRITE, bio);
 
@@ -4456,6 +4540,7 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 		bh->next = bh + 1;
 	}
 	fsg->buffhds[fsg->num_buffers - 1].next = &fsg->buffhds[0];
+	fsg->bio_tree = RB_ROOT;
 
 	snprintf(manufacturer, sizeof manufacturer, "%s %s with %s",
 			init_utsname()->sysname, init_utsname()->release,

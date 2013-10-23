@@ -1126,6 +1126,7 @@ PVRSRV_ERROR OSEnableTimer(IMG_HANDLE hTimer)
 
 	psTimerCBData->bActive = IMG_TRUE;
 
+	psTimerCBData->sTimer.expires = psTimerCBData->ui32Delay + jiffies;
 	add_timer(&psTimerCBData->sTimer);
 
 	return PVRSRV_OK;
@@ -1400,7 +1401,8 @@ exit_unlock:
 	return psPage;
 }
 
-PVRSRV_ERROR OSReleasePhysPageAddr(IMG_HANDLE hOSWrapMem)
+PVRSRV_ERROR OSReleasePhysPageAddr(IMG_HANDLE hOSWrapMem,
+							   IMG_BOOL bUseLock)
 {
 	sWrapMemInfo *psInfo = (sWrapMemInfo *) hOSWrapMem;
 	unsigned ui;
@@ -1415,7 +1417,8 @@ PVRSRV_ERROR OSReleasePhysPageAddr(IMG_HANDLE hOSWrapMem)
 		{
 			struct vm_area_struct *psVMArea;
 
-			down_read(&current->mm->mmap_sem);
+			if (bUseLock)
+				down_read(&current->mm->mmap_sem);
 
 			psVMArea = find_vma(current->mm, psInfo->ulStartAddr);
 			if (psVMArea == NULL) {
@@ -1423,7 +1426,9 @@ PVRSRV_ERROR OSReleasePhysPageAddr(IMG_HANDLE hOSWrapMem)
 				       ": OSCpuVToPageListRelease: Couldn't find memory region containing start address %lx",
 				       psInfo->ulStartAddr);
 
-				up_read(&current->mm->mmap_sem);
+				if (bUseLock)
+					up_read(&current->mm->mmap_sem);
+
 				break;
 			}
 
@@ -1459,7 +1464,9 @@ PVRSRV_ERROR OSReleasePhysPageAddr(IMG_HANDLE hOSWrapMem)
 				       psVMArea->vm_flags);
 			}
 
-			up_read(&current->mm->mmap_sem);
+			if (bUseLock)
+				up_read(&current->mm->mmap_sem);
+
 			break;
 		}
 	default:
@@ -1514,10 +1521,11 @@ PVRSRV_ERROR OSReleasePhysPageAddr(IMG_HANDLE hOSWrapMem)
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR OSAcquirePhysPageAddr(IMG_VOID * pvCPUVAddr,
+PVRSRV_ERROR OSAcquirePhysPageAddr(IMG_VOID *pvCPUVAddr,
 				   IMG_UINT32 ui32Bytes,
-				   IMG_SYS_PHYADDR * psSysPAddr,
-				   IMG_HANDLE * phOSWrapMem)
+				   IMG_SYS_PHYADDR *psSysPAddr,
+				   IMG_HANDLE *phOSWrapMem,
+				   IMG_BOOL bUseLock)
 {
 	unsigned long ulStartAddrOrig = (unsigned long)pvCPUVAddr;
 	unsigned long ulAddrRangeOrig = (unsigned long)ui32Bytes;
@@ -1538,7 +1546,7 @@ PVRSRV_ERROR OSAcquirePhysPageAddr(IMG_VOID * pvCPUVAddr,
 	psInfo = kmalloc(sizeof(*psInfo), GFP_KERNEL);
 	if (psInfo == NULL) {
 		printk(KERN_WARNING
-		       ": OSCpuVToPageList: Couldn't allocate information structure");
+		       ": OSCpuVToPageList: Couldn't allocate information structure\n");
 		return PVRSRV_ERROR_OUT_OF_MEMORY;
 	}
 	memset(psInfo, 0, sizeof(*psInfo));
@@ -1556,7 +1564,7 @@ PVRSRV_ERROR OSAcquirePhysPageAddr(IMG_VOID * pvCPUVAddr,
 		    GFP_KERNEL);
 	if (psInfo->psPhysAddr == NULL) {
 		printk(KERN_WARNING
-		       ": OSCpuVToPageList: Couldn't allocate page array");
+		       ": OSCpuVToPageList: Couldn't allocate page array\n");
 		goto error_free;
 	}
 
@@ -1564,21 +1572,26 @@ PVRSRV_ERROR OSAcquirePhysPageAddr(IMG_VOID * pvCPUVAddr,
 	    kmalloc(psInfo->iNumPages * sizeof(*psInfo->ppsPages), GFP_KERNEL);
 	if (psInfo->ppsPages == NULL) {
 		printk(KERN_WARNING
-		       ": OSCpuVToPageList: Couldn't allocate page array");
+		       ": OSCpuVToPageList: Couldn't allocate page array\n");
 		goto error_free;
 	}
 
-	down_read(&current->mm->mmap_sem);
+	if (bUseLock)
+		down_read(&current->mm->mmap_sem);
+
 	iNumPagesMapped =
 	    get_user_pages(current, current->mm, ulStartAddr, psInfo->iNumPages,
 			   1, 0, psInfo->ppsPages, NULL);
-	up_read(&current->mm->mmap_sem);
+
+	if (bUseLock)
+		up_read(&current->mm->mmap_sem);
+
 
 	if (iNumPagesMapped >= 0) {
 
 		if (iNumPagesMapped != psInfo->iNumPages) {
 			printk(KERN_WARNING
-			       ": OSCpuVToPageList: Couldn't map all the pages needed (wanted: %d, got %d)",
+			       ": OSCpuVToPageList: Couldn't map all the pages needed (wanted: %d, got %d \n)",
 			       psInfo->iNumPages, iNumPagesMapped);
 
 			for (ui = 0; ui < iNumPagesMapped; ui++) {
@@ -1605,15 +1618,16 @@ PVRSRV_ERROR OSAcquirePhysPageAddr(IMG_VOID * pvCPUVAddr,
 	}
 
 	printk(KERN_WARNING
-	       ": OSCpuVToPageList: get_user_pages failed (%d), trying something else",
+	       ": OSCpuVToPageList: get_user_pages failed (%d), trying something else \n",
 	       iNumPagesMapped);
 
-	down_read(&current->mm->mmap_sem);
+	if (bUseLock)
+		down_read(&current->mm->mmap_sem);
 
 	psVMArea = find_vma(current->mm, ulStartAddrOrig);
 	if (psVMArea == NULL) {
 		printk(KERN_WARNING
-		       ": OSCpuVToPageList: Couldn't find memory region containing start address %lx",
+		       ": OSCpuVToPageList: Couldn't find memory region containing start address %lx \n",
 		       ulStartAddrOrig);
 
 		goto error_release_mmap_sem;
@@ -1624,14 +1638,14 @@ PVRSRV_ERROR OSAcquirePhysPageAddr(IMG_VOID * pvCPUVAddr,
 
 	if (ulStartAddrOrig < psVMArea->vm_start) {
 		printk(KERN_WARNING
-		       ": OSCpuVToPageList: Start address %lx is outside of the region returned by find_vma",
+		       ": OSCpuVToPageList: Start address %lx is outside of the region returned by find_vma\n",
 		       ulStartAddrOrig);
 		goto error_release_mmap_sem;
 	}
 
 	if (ulBeyondEndAddrOrig > psVMArea->vm_end) {
 		printk(KERN_WARNING
-		       ": OSCpuVToPageList: End address %lx is outside of the region returned by find_vma",
+		       ": OSCpuVToPageList: End address %lx is outside of the region returned by find_vma\n",
 		       ulBeyondEndAddrOrig);
 		goto error_release_mmap_sem;
 	}
@@ -1639,14 +1653,14 @@ PVRSRV_ERROR OSAcquirePhysPageAddr(IMG_VOID * pvCPUVAddr,
 	if ((psVMArea->vm_flags & (VM_IO | VM_RESERVED)) !=
 	    (VM_IO | VM_RESERVED)) {
 		printk(KERN_WARNING
-		       ": OSCpuVToPageList: Memory region does not represent memory mapped I/O (VMA flags: 0x%lx)",
+		       ": OSCpuVToPageList: Memory region does not represent memory mapped I/O (VMA flags: 0x%lx)\n",
 		       psVMArea->vm_flags);
 		goto error_release_mmap_sem;
 	}
 
 	if ((psVMArea->vm_flags & (VM_READ | VM_WRITE)) != (VM_READ | VM_WRITE)) {
 		printk(KERN_WARNING
-		       ": OSCpuVToPageList: No read/write access to memory region (VMA flags: 0x%lx)",
+		       ": OSCpuVToPageList: No read/write access to memory region (VMA flags: 0x%lx)\n",
 		       psVMArea->vm_flags);
 		goto error_release_mmap_sem;
 	}
@@ -1662,7 +1676,7 @@ PVRSRV_ERROR OSAcquirePhysPageAddr(IMG_VOID * pvCPUVAddr,
 			unsigned uj;
 
 			printk(KERN_WARNING
-			       ": OSCpuVToPageList: Couldn't lookup page structure for address 0x%lx, trying something else",
+			       ": OSCpuVToPageList: Couldn't lookup page structure for address 0x%lx, trying something else\n",
 			       ulAddr);
 
 			for (uj = 0; uj < ui; uj++) {
@@ -1693,7 +1707,7 @@ PVRSRV_ERROR OSAcquirePhysPageAddr(IMG_VOID * pvCPUVAddr,
 
 		if ((psVMArea->vm_flags & VM_PFNMAP) == 0) {
 			printk(KERN_WARNING
-			       ": OSCpuVToPageList: Region isn't a raw PFN mapping.  Giving up.");
+			       ": OSCpuVToPageList: Region isn't a raw PFN mapping.  Giving up.\n");
 			goto error_release_mmap_sem;
 		}
 
@@ -1714,10 +1728,11 @@ PVRSRV_ERROR OSAcquirePhysPageAddr(IMG_VOID * pvCPUVAddr,
 		psInfo->eType = WRAP_TYPE_FIND_VMA_PFN;
 
 		printk(KERN_WARNING
-		       ": OSCpuVToPageList: Region can't be locked down");
+		       ": OSCpuVToPageList: Region can't be locked down\n");
 	}
 
-	up_read(&current->mm->mmap_sem);
+	if (bUseLock)
+		up_read(&current->mm->mmap_sem);
 
 exit_check:
 	CheckPagesContiguous(psInfo);
@@ -1727,9 +1742,11 @@ exit_check:
 	return PVRSRV_OK;
 
 error_release_mmap_sem:
-	up_read(&current->mm->mmap_sem);
+	if (bUseLock)
+		up_read(&current->mm->mmap_sem);
+
 error_free:
 	psInfo->eType = WRAP_TYPE_CLEANUP;
-	OSReleasePhysPageAddr((IMG_HANDLE) psInfo);
+	OSReleasePhysPageAddr((IMG_HANDLE) psInfo, bUseLock);
 	return PVRSRV_ERROR_GENERIC;
 }

@@ -106,12 +106,16 @@ IMG_EXPORT IMG_VOID PVRSRVDvfsUnlock(IMG_VOID)
 	mutex_unlock(&hPowerAndFreqLock);
 }
 
+static IMG_BOOL IsPowerLocked(void)
+{
+	return mutex_is_locked(&hPowerAndFreqLock) || gbDvfsActive;
+}
+
 IMG_EXPORT
     PVRSRV_ERROR PVRSRVPowerLock(IMG_UINT32 ui32CallerID,
 				 IMG_BOOL bSystemPowerEvent)
 {
-	if ((ui32CallerID == TIMER_ID) &&
-	    (mutex_is_locked(&hPowerAndFreqLock) || gbDvfsActive))
+	if ((ui32CallerID == TIMER_ID) && IsPowerLocked())
 		return PVRSRV_ERROR_RETRY;
 	mutex_lock(&hPowerAndFreqLock);
 	while (gbDvfsActive) {
@@ -553,11 +557,8 @@ IMG_EXPORT IMG_BOOL PVRSRVIsDevicePowered(IMG_UINT32 ui32DeviceIndex)
 		return IMG_FALSE;
 	}
 
-	if (OSIsResourceLocked(&psSysData->sPowerStateChangeResource, KERNEL_ID)
-	    || OSIsResourceLocked(&psSysData->sPowerStateChangeResource,
-				  ISR_ID)) {
+	if (IsPowerLocked())
 		return IMG_FALSE;
-	}
 
 	psPowerDevice = psSysData->psPowerDeviceList;
 	while (psPowerDevice) {

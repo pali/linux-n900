@@ -356,7 +356,7 @@ struct wl1251 {
 	/* Are we currently scanning */
 	bool scanning;
 
-	u32 last_event;
+	unsigned long last_event;
 
 	/* Our association ID */
 	u16 aid;
@@ -380,6 +380,8 @@ struct wl1251 {
 
 	/* PSM mode requested */
 	bool psm_requested;
+
+	u8 ps_entry_retry;
 
 	u16 beacon_int;
 	u8 dtim_period;
@@ -422,6 +424,8 @@ int wl1251_plt_stop(struct wl1251 *wl);
 #define WL1251_DEFAULT_DTIM_PERIOD 1
 
 #define WL1251_DEFAULT_CHANNEL 0
+
+#define WL1251_DEFAULT_BET_CONSECUTIVE 10
 
 #define CHIP_ID_1251_PG10	           (0x7010101)
 #define CHIP_ID_1251_PG11	           (0x7020101)

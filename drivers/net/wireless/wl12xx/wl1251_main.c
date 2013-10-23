@@ -939,6 +939,7 @@ static void wl1251_op_stop(struct ieee80211_hw *hw)
 	wl->next_tx_complete = 0;
 	wl->elp = false;
 	wl->psm = 0;
+	wl->ps_entry_retry = 0;
 	wl->tx_queue_stopped = false;
 	wl->power_level = WL1251_DEFAULT_POWER_LEVEL;
 	wl->channel = WL1251_DEFAULT_CHANNEL;
@@ -1092,6 +1093,7 @@ static int wl1251_op_config_interface(struct ieee80211_hw *hw,
 	struct wl1251 *wl = hw->priv;
 	struct sk_buff *beacon;
 	DECLARE_MAC_BUF(mac);
+	bool do_join = false;
 	int ret;
 
 	wl1251_debug(DEBUG_MAC80211, "mac80211 config_interface bssid %s",
@@ -1105,22 +1107,20 @@ static int wl1251_op_config_interface(struct ieee80211_hw *hw,
 	if (ret < 0)
 		goto out;
 
+	if (!is_zero_ether_addr(conf->bssid))
+		do_join = true;
+
 	memcpy(wl->bssid, conf->bssid, ETH_ALEN);
 
-	ret = wl1251_build_null_data(wl);
-	if (ret < 0)
-		goto out_sleep;
+	if (do_join) {
+		ret = wl1251_build_null_data(wl);
+		if (ret < 0)
+			goto out_sleep;
+	}
 
 	wl->ssid_len = conf->ssid_len;
 	if (wl->ssid_len)
 		memcpy(wl->ssid, conf->ssid, wl->ssid_len);
-
-	if (wl->bss_type != BSS_TYPE_IBSS) {
-		ret = wl1251_join(wl, wl->bss_type, wl->channel,
-				  wl->beacon_int, wl->dtim_period);
-		if (ret < 0)
-			goto out_sleep;
-	}
 
 	if (conf->changed & IEEE80211_IFCC_BEACON) {
 		beacon = ieee80211_beacon_get(hw, vif);
@@ -1142,7 +1142,9 @@ static int wl1251_op_config_interface(struct ieee80211_hw *hw,
 
 		if (ret < 0)
 			goto out_sleep;
+	}
 
+	if (do_join) {
 		ret = wl1251_join(wl, wl->bss_type, wl->channel,
 				  wl->beacon_int, wl->dtim_period);
 		if (ret < 0)
@@ -1177,18 +1179,7 @@ static int wl1251_op_config(struct ieee80211_hw *hw,
 	if (ret < 0)
 		goto out;
 
-	if (channel != wl->channel) {
-		wl->channel = channel;
-
-		ret = wl1251_join(wl, wl->bss_type, wl->channel,
-				  wl->beacon_int, wl->dtim_period);
-		if (ret < 0)
-			goto out_sleep;
-	}
-
-	ret = wl1251_build_null_data(wl);
-	if (ret < 0)
-		goto out_sleep;
+	wl->channel = channel;
 
 	if (conf->flags & IEEE80211_CONF_PS && !wl->psm_requested) {
 		wl1251_debug(DEBUG_PSM, "psm enabled");
@@ -1215,7 +1206,7 @@ static int wl1251_op_config(struct ieee80211_hw *hw,
 	if (conf->power_level != wl->power_level) {
 		ret = wl1251_acx_tx_power(wl, conf->power_level);
 		if (ret < 0)
-			goto out;
+			goto out_sleep;
 
 		wl->power_level = conf->power_level;
 	}
@@ -1939,6 +1930,7 @@ static int __devinit wl1251_probe(struct spi_device *spi)
 	wl->elp = false;
 	wl->psm = 0;
 	wl->psm_requested = false;
+	wl->ps_entry_retry = 0;
 	wl->tx_queue_stopped = false;
 	wl->power_level = WL1251_DEFAULT_POWER_LEVEL;
 	wl->beacon_int = WL1251_DEFAULT_BEACON_INT;

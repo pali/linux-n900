@@ -34,7 +34,6 @@
 #define IEEE80211_ASSOC_TIMEOUT (HZ / 5)
 #define IEEE80211_ASSOC_MAX_TRIES 3
 #define IEEE80211_MONITORING_INTERVAL (2 * HZ)
-#define IEEE80211_PROBE_IDLE_TIME (60 * HZ)
 #define IEEE80211_RETRY_AUTH_INTERVAL (1 * HZ)
 #define IEEE80211_SCAN_INTERVAL (2 * HZ)
 #define IEEE80211_SCAN_INTERVAL_SLOW (15 * HZ)
@@ -784,6 +783,7 @@ static void ieee80211_direct_probe(struct ieee80211_sub_if_data *sdata,
 		printk(KERN_DEBUG "%s: direct probe to AP %s timed out\n",
 		       sdata->dev->name, print_mac(mac, ifsta->bssid));
 		ifsta->state = IEEE80211_STA_MLME_DISABLED;
+		ifsta->flags &= ~IEEE80211_STA_ASSOCIATED;
 		ieee80211_sta_send_apinfo(sdata, ifsta);
 		return;
 	}
@@ -1025,6 +1025,8 @@ EXPORT_SYMBOL(ieee80211_rssi_changed);
 void ieee80211_sta_rx_notify(struct ieee80211_sub_if_data *sdata,
 			     struct ieee80211_hdr *hdr)
 {
+	struct ieee80211_local *local = sdata->local;
+
 	/*
 	 * We can postpone the sta.timer whenever receiving unicast frames
 	 * from AP because we know that the connection is working both ways
@@ -1033,7 +1035,8 @@ void ieee80211_sta_rx_notify(struct ieee80211_sub_if_data *sdata,
 	 * data idle periods for sending the periodical probe request to
 	 * the AP.
 	 */
-	if (!is_multicast_ether_addr(hdr->addr1))
+	if (!is_multicast_ether_addr(hdr->addr1) &&
+	    !(local->hw.flags & IEEE80211_HW_BEACON_FILTER))
 		mod_timer(&sdata->u.sta.timer,
 			  jiffies + IEEE80211_MONITORING_INTERVAL);
 }
@@ -1045,6 +1048,12 @@ void ieee80211_beacon_loss_work(struct work_struct *work)
 			     u.sta.beacon_loss_work);
 	struct ieee80211_if_sta *ifsta = &sdata->u.sta;
 	struct ieee80211_local *local = sdata->local;
+
+	if (ifsta->state != IEEE80211_STA_MLME_ASSOCIATED) {
+		printk(KERN_DEBUG "%s reports beacon loss when not "
+		       "associated\n", sdata->dev->name);
+		return;
+	}
 
 	printk(KERN_DEBUG "%s: driver reports beacon loss from AP %pM "
 	       "- sending probe request\n", sdata->dev->name,
@@ -1112,8 +1121,7 @@ static void ieee80211_associated(struct ieee80211_sub_if_data *sdata,
 	 * Beacon filtering is only enabled with power save and then the
 	 * stack should not check for beacon loss.
 	 */
-	if (!((local->hw.flags & IEEE80211_HW_BEACON_FILTER) &&
-	      (local->hw.conf.flags & IEEE80211_CONF_PS)) &&
+	if (!(local->hw.flags & IEEE80211_HW_BEACON_FILTER) &&
 	    time_after(jiffies,
 		       ifsta->last_beacon + IEEE80211_MONITORING_INTERVAL)) {
 		printk(KERN_DEBUG "%s: beacon loss from AP %pM "
@@ -1123,11 +1131,6 @@ static void ieee80211_associated(struct ieee80211_sub_if_data *sdata,
 		send_probe = true;
 		goto unlock;
 
-	}
-
-	if (time_after(jiffies, sta->last_rx + IEEE80211_PROBE_IDLE_TIME)) {
-		ifsta->flags |= IEEE80211_STA_PROBEREQ_POLL;
-		send_probe = true;
 	}
 
  unlock:
@@ -1148,7 +1151,7 @@ static void ieee80211_associated(struct ieee80211_sub_if_data *sdata,
 	if (disassoc)
 		ieee80211_set_disassoc(sdata, ifsta, true, true,
 					WLAN_REASON_PREV_AUTH_NOT_VALID);
-	else
+	else if (!(local->hw.flags & IEEE80211_HW_BEACON_FILTER))
 		mod_timer(&ifsta->timer, jiffies +
 				      IEEE80211_MONITORING_INTERVAL);
 }

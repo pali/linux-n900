@@ -249,6 +249,8 @@ struct isp_bufs {
 	int done;
 	/* Wait for this many hs_vs before anything else. */
 	int wait_hs_vs;
+	/* Ignore statistic's interrupts until first good hs_vs. */
+	int wait_stats;
 };
 
 /**
@@ -361,7 +363,7 @@ struct isp_device {
 	struct iommu *iommu;
 };
 
-void omap34xx_isp_hist_dma_done(struct device *dev);
+void isp_hist_dma_done(struct device *dev);
 
 void isp_flush(struct device *dev);
 

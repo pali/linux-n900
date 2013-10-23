@@ -294,7 +294,7 @@ static void isp_enable_interrupts(struct device *dev, int is_raw)
 	u32 irq0enable;
 
 	irq0enable = IRQ0ENABLE_CCDC_LSC_PREF_ERR_IRQ
-		| IRQ0ENABLE_CCDC_VD0_IRQ
+		| IRQ0ENABLE_CCDC_VD0_IRQ | IRQ0ENABLE_HS_VS_IRQ
 		| IRQ0ENABLE_CSIA_IRQ
 		| IRQ0ENABLE_CSIB_IRQ | IRQ0ENABLE_HIST_DONE_IRQ
 		| IRQ0ENABLE_H3A_AWB_DONE_IRQ | IRQ0ENABLE_H3A_AF_DONE_IRQ
@@ -711,7 +711,7 @@ int isp_configure_interface(struct device *dev,
 }
 EXPORT_SYMBOL(isp_configure_interface);
 
-void omap34xx_isp_hist_dma_done(struct device *dev)
+void isp_hist_dma_done(struct device *dev)
 {
 	struct isp_device *isp = dev_get_drvdata(dev);
 	struct isp_irq *irqdis = &isp->irq;
@@ -734,7 +734,7 @@ void omap34xx_isp_hist_dma_done(struct device *dev)
 static void isp_buf_process(struct device *dev, struct isp_bufs *bufs);
 
 /**
- * omap34xx_isp_isr - Interrupt Service Routine for Camera ISP module.
+ * isp_isr - Interrupt Service Routine for Camera ISP module.
  * @irq: Not used currently.
  * @ispirq_disp: Pointer to the object that is passed while request_irq is
  *               called. This is the isp->irq object containing info on the
@@ -745,7 +745,7 @@ static void isp_buf_process(struct device *dev, struct isp_bufs *bufs);
  * Returns IRQ_HANDLED when IRQ was correctly handled, or IRQ_NONE when the
  * IRQ wasn't handled.
  **/
-static irqreturn_t omap34xx_isp_isr(int irq, void *_pdev)
+static irqreturn_t isp_isr(int irq, void *_pdev)
 {
 	struct device *dev = &((struct platform_device *)_pdev)->dev;
 	struct isp_device *isp = dev_get_drvdata(dev);
@@ -755,7 +755,7 @@ static irqreturn_t omap34xx_isp_isr(int irq, void *_pdev)
 	unsigned long flags;
 	u32 irqstatus = 0;
 	u32 sbl_pcr;
-	int wait_hs_vs = 0;
+	int wait_hs_vs;
 	int ret;
 
 	if (isp->running == ISP_STOPPED)
@@ -773,6 +773,8 @@ static irqreturn_t omap34xx_isp_isr(int irq, void *_pdev)
 	wait_hs_vs = bufs->wait_hs_vs;
 	if (irqstatus & CCDC_VD0 && bufs->wait_hs_vs)
 		bufs->wait_hs_vs--;
+	if (irqstatus & HS_VS && bufs->wait_stats && !bufs->wait_hs_vs)
+		bufs->wait_stats = 0;
 	/*
 	 * We need to wait for the first HS_VS interrupt from CCDC.
 	 * Otherwise our frame (and everything else) might be bad.
@@ -783,12 +785,18 @@ static irqreturn_t omap34xx_isp_isr(int irq, void *_pdev)
 		 * Enable preview for the first time. We just have
 		 * missed the start-of-frame so we can do it now.
 		 */
-		if (irqstatus & CCDC_VD0 &&
-		    !RAW_CAPTURE(isp) &&
-		    !(isp_reg_readl(dev, OMAP3_ISP_IOMEM_PREV, ISPPRV_PCR) &
-		      (ISPPRV_PCR_BUSY | ISPPRV_PCR_EN))) {
-			isppreview_config_shadow_registers(&isp->isp_prev);
-			isppreview_enable(&isp->isp_prev, 1);
+		if (irqstatus & CCDC_VD0) {
+			isp_af_try_enable(&isp->isp_af);
+			isph3a_aewb_try_enable(&isp->isp_h3a);
+			isp_hist_try_enable(&isp->isp_hist);
+			if (!RAW_CAPTURE(isp) &&
+			    !(isp_reg_readl(dev, OMAP3_ISP_IOMEM_PREV,
+					    ISPPRV_PCR) &
+			      (ISPPRV_PCR_BUSY | ISPPRV_PCR_EN))) {
+				isppreview_config_shadow_registers(
+								&isp->isp_prev);
+				isppreview_enable(&isp->isp_prev, 1);
+			}
 		}
 	default:
 		/*
@@ -811,6 +819,13 @@ static irqreturn_t omap34xx_isp_isr(int irq, void *_pdev)
 
 		goto out_ignore_buff;
 	case 0:
+		if (bufs->wait_stats) {
+			if (irqstatus & (H3A_AWB_DONE | H3A_AF_DONE))
+				irqstatus &= ~(H3A_AWB_DONE | H3A_AF_DONE);
+			if (irqstatus & HIST_DONE)
+				isp_hist_mark_invalid_buf(&isp->isp_hist);
+		}
+
 		break;
 	}
 
@@ -965,7 +980,6 @@ static irqreturn_t omap34xx_isp_isr(int irq, void *_pdev)
 				     "busy.\n");
 			/* current and next buffer might have invalid data */
 			isp_hist_mark_invalid_buf(&isp->isp_hist);
-			irqstatus &= ~HIST_DONE;
 			ret = HIST_NO_BUF;
 		}
 		if (ret != HIST_BUF_WAITING_DMA)
@@ -974,7 +988,7 @@ static irqreturn_t omap34xx_isp_isr(int irq, void *_pdev)
 			irqstatus &= ~HIST_DONE;
 	}
 
-	if (irqdis->isp_callbk[CBK_CATCHALL]) {
+	if (irqdis->isp_callbk[CBK_CATCHALL] && irqstatus) {
 		irqdis->isp_callbk[CBK_CATCHALL](
 			irqstatus,
 			irqdis->isp_callbk_arg1[CBK_CATCHALL],
@@ -1123,6 +1137,11 @@ static int __isp_disable_modules(struct device *dev, int suspend)
 		isp_af_enable(&isp->isp_af, 0);
 		isph3a_aewb_enable(&isp->isp_h3a, 0);
 		isp_hist_enable(&isp->isp_hist, 0);
+
+		/* FIXME: find me a better interface */
+		isp->isp_af.config.af_config = 0;
+		isp->isp_h3a.aewb_config_local.aewb_enable = 0;
+		isp->isp_hist.config.enable = 0;
 	}
 	ispresizer_enable(&isp->isp_res, 0);
 	isppreview_enable(&isp->isp_prev, 0);
@@ -1424,6 +1443,7 @@ static void isp_buf_init(struct device *dev)
 	bufs->queue = 0;
 	bufs->done = 0;
 	bufs->wait_hs_vs = isp->config->wait_hs_vs;
+	bufs->wait_stats = bufs->wait_hs_vs;
 	for (sg = 0; sg < NUM_BUFS; sg++) {
 		if (bufs->buf[sg].vb) {
 			bufs->buf[sg].vb->state = VIDEOBUF_ERROR;
@@ -1528,11 +1548,9 @@ int isp_buf_queue(struct device *dev, struct videobuf_buffer *vb,
 		 * receiving a frame.
 		 */
 		bufs->wait_hs_vs++;
+		bufs->wait_stats = 1;
 		isp_enable_interrupts(dev, RAW_CAPTURE(isp));
 		isp_set_buf(dev, buf);
-		isp_af_try_enable(&isp->isp_af);
-		isph3a_aewb_try_enable(&isp->isp_h3a);
-		isp_hist_try_enable(&isp->isp_hist);
 		ispccdc_enable(&isp->isp_ccdc, 1);
 	}
 
@@ -1814,48 +1832,48 @@ int isp_handle_private(struct device *dev, int cmd, void *arg)
 
 	switch (cmd) {
 	case VIDIOC_PRIVATE_ISP_CCDC_CFG:
-		rval = omap34xx_isp_ccdc_config(&isp->isp_ccdc, arg);
+		rval = ispccdc_config(&isp->isp_ccdc, arg);
 		break;
 	case VIDIOC_PRIVATE_ISP_PRV_CFG:
-		rval = omap34xx_isp_preview_config(&isp->isp_prev, arg);
+		rval = isppreview_config(&isp->isp_prev, arg);
 		break;
 	case VIDIOC_PRIVATE_ISP_AEWB_CFG: {
 		struct isph3a_aewb_config *params;
 		params = (struct isph3a_aewb_config *)arg;
-		rval = omap34xx_isph3a_aewb_config(&isp->isp_h3a, params);
+		rval = isph3a_aewb_config(&isp->isp_h3a, params);
 	}
 		break;
 	case VIDIOC_PRIVATE_ISP_AEWB_REQ: {
 		struct isph3a_aewb_data *data;
 		data = (struct isph3a_aewb_data *)arg;
-		rval = omap34xx_isph3a_aewb_request_statistics(&isp->isp_h3a,
+		rval = isph3a_aewb_request_statistics(&isp->isp_h3a,
 							       data);
 	}
 		break;
 	case VIDIOC_PRIVATE_ISP_HIST_CFG: {
 		struct isp_hist_config *params;
 		params = (struct isp_hist_config *)arg;
-		rval = omap34xx_isp_hist_config(&isp->isp_hist, params);
+		rval = isp_hist_config(&isp->isp_hist, params);
 	}
 		break;
 	case VIDIOC_PRIVATE_ISP_HIST_REQ: {
 		struct isp_hist_data *data;
 		data = (struct isp_hist_data *)arg;
-		rval = omap34xx_isp_hist_request_statistics(&isp->isp_hist,
+		rval = isp_hist_request_statistics(&isp->isp_hist,
 							    data);
 	}
 		break;
 	case VIDIOC_PRIVATE_ISP_AF_CFG: {
 		struct af_configuration *params;
 		params = (struct af_configuration *)arg;
-		rval = omap34xx_isp_af_config(&isp->isp_af, params);
+		rval = isp_af_config(&isp->isp_af, params);
 
 	}
 		break;
 	case VIDIOC_PRIVATE_ISP_AF_REQ: {
 		struct isp_af_data *data;
 		data = (struct isp_af_data *)arg;
-		rval = omap34xx_isp_af_request_statistics(&isp->isp_af, data);
+		rval = isp_af_request_statistics(&isp->isp_af, data);
 	}
 		break;
 	default:
@@ -2029,7 +2047,7 @@ static void isp_save_ctx(struct device *dev)
 	ispccdc_save_context(dev);
 	if (isp->iommu)
 		iommu_save_ctx(isp->iommu);
-	isphist_save_context(dev);
+	isp_hist_save_context(dev);
 	isph3a_save_context(dev);
 	isppreview_save_context(dev);
 	ispresizer_save_context(dev);
@@ -2049,7 +2067,7 @@ static void isp_restore_ctx(struct device *dev)
 	ispccdc_restore_context(dev);
 	if (isp->iommu)
 		iommu_restore_ctx(isp->iommu);
-	isphist_restore_context(dev);
+	isp_hist_restore_context(dev);
 	isph3a_restore_context(dev);
 	isppreview_restore_context(dev);
 	ispresizer_restore_context(dev);
@@ -2389,7 +2407,7 @@ static int isp_probe(struct platform_device *pdev)
 		goto out_clk_get_l3_ick;
 	}
 
-	if (request_irq(isp->irq_num, omap34xx_isp_isr, IRQF_SHARED,
+	if (request_irq(isp->irq_num, isp_isr, IRQF_SHARED,
 			"Omap 3 Camera ISP", pdev)) {
 		dev_err(isp->dev, "could not install isr\n");
 		ret_err = -EINVAL;

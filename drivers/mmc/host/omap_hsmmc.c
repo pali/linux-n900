@@ -1058,9 +1058,9 @@ static void omap_hsmmc_request(struct mmc_host *mmc, struct mmc_request *req)
 					;
 				host->reqs_blocked += 1;
 			}
-			req->cmd->error = -EBADF;
+			req->cmd->error = -ENODEV;
 			if (req->data)
-				req->data->error = -EBADF;
+				req->data->error = -ENODEV;
 			enable_irq(host->irq);
 			mmc_request_done(mmc, req);
 			return;

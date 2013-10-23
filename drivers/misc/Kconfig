@@ -523,5 +523,6 @@ source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/ssi/Kconfig"
 source "drivers/misc/mcsaab/Kconfig"
 source "drivers/misc/cmt-speech/Kconfig"
+source "drivers/misc/ssi-char/Kconfig"
 
 endif # MISC_DEVICES

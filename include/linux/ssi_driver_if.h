@@ -31,6 +31,10 @@
 /* The number of ports handled by the driver. (MAX:2) */
 #define SSI_MAX_PORTS		1
 
+#define SSI_MAX_FRAME_SIZE	0x1f
+#define SSI_MAX_RX_TIMEOUT	0x1ff
+#define SSI_MAX_TX_DIVISOR	0x7f
+
 #define ANY_SSI_CONTROLLER	-1
 #define ANY_CHANNEL		-1
 #define CHANNEL(channel)	(1 << (channel))
@@ -42,6 +46,7 @@ enum {
 	SSI_EVENT_POST_SPEED_CHANGE,
 	SSI_EVENT_CAWAKE_UP,
 	SSI_EVENT_CAWAKE_DOWN,
+	SSI_EVENT_SSR_DATAAVAILABLE,
 };
 
 enum {
@@ -52,6 +57,10 @@ enum {
 	SSI_IOCTL_FLUSH_RX,
 	SSI_IOCTL_FLUSH_TX,
 	SSI_IOCTL_CAWAKE,
+	SSI_IOCTL_SET_RX,
+	SSI_IOCTL_GET_RX,
+	SSI_IOCTL_SET_TX,
+	SSI_IOCTL_GET_TX,
 	SSI_IOCTL_TX_CH_FULL,
 	SSI_IOCTL_CH_DATAACCEPT,
 };
@@ -142,6 +151,7 @@ int ssi_write(struct ssi_device *dev, u32 *data, unsigned int count);
 void ssi_write_cancel(struct ssi_device *dev);
 int ssi_read(struct ssi_device *dev, u32 *data, unsigned int w_count);
 void ssi_read_cancel(struct ssi_device *dev);
+int ssi_poll(struct ssi_device *dev);
 int ssi_ioctl(struct ssi_device *dev, unsigned int command, void *arg);
 void ssi_close(struct ssi_device *dev);
 void ssi_set_read_cb(struct ssi_device *dev,

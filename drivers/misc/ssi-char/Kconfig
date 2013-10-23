@@ -1,0 +1,18 @@
+#
+# OMAP SSI kernel configuration
+#
+
+config SSI_CHAR
+	tristate "SSI character driver"
+	depends on OMAP_SSI
+	---help---
+	  If you say Y here, you will enable the CMT character driver.
+	  This driver provides a simple character device interface for
+	  serial communication with the cellular modem over the SSI bus.
+
+config SSI_CHAR_DEBUG
+	bool "Debug CMT character driver"
+	depends on SSI_CHAR && DEBUG_KERNEL
+	default n
+	---help---
+	  Enable the debug information in the CMT character driver.

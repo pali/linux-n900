@@ -83,7 +83,14 @@ static void mmc_blk_put(struct mmc_blk_data *md)
 	mutex_lock(&open_lock);
 	md->usage--;
 	if (md->usage == 0) {
+		int devmaj = MAJOR(disk_devt(md->disk));
 		int devidx = MINOR(disk_devt(md->disk)) >> MMC_SHIFT;
+
+		if (!devmaj)
+			devidx = md->disk->first_minor >> MMC_SHIFT;
+
+		blk_cleanup_queue(md->queue.queue);
+
 		__clear_bit(devidx, dev_use);
 
 		put_disk(md->disk);
@@ -312,6 +319,15 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 
 		mmc_wait_for_req(card->host, &brq.mrq);
 
+		/* Give up early if the card has gone away */
+		if (brq.cmd.error == -ENODEV || brq.data.error == -ENODEV || brq.stop.error == -ENODEV) {
+			req->cmd_flags |= REQ_QUIET;
+			spin_lock_irq(&md->lock);
+			ret = __blk_end_request(req, -EIO, blk_rq_cur_bytes(req));
+			spin_unlock_irq(&md->lock);
+			break;
+		}
+
 		mmc_queue_bounce_post(mq);
 
 		/*
@@ -363,6 +379,11 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 				cmd.arg = card->rca << 16;
 				cmd.flags = MMC_RSP_R1 | MMC_CMD_AC;
 				err = mmc_wait_for_cmd(card->host, &cmd, 5);
+				if (err == -ENODEV) {
+					/* Card was removed so quiet errors */
+					req->cmd_flags |= REQ_QUIET;
+					goto cmd_err;
+				}
 				if (err) {
 					printk(KERN_ERR "%s: error %d requesting status\n",
 					       req->rq_disk->disk_name, err);
@@ -583,8 +604,11 @@ static int mmc_blk_probe(struct mmc_card *card)
 		return PTR_ERR(md);
 
 	err = mmc_blk_set_blksize(md, card);
-	if (err)
-		goto out;
+	if (err) {
+		mmc_cleanup_queue(&md->queue);
+		mmc_blk_put(md);
+		return err;
+	}
 
 	string_get_size((u64)get_capacity(md->disk) << 9, STRING_UNITS_2,
 			cap_str, sizeof(cap_str));
@@ -595,11 +619,6 @@ static int mmc_blk_probe(struct mmc_card *card)
 	mmc_set_drvdata(card, md);
 	add_disk(md->disk);
 	return 0;
-
- out:
-	mmc_blk_put(md);
-
-	return err;
 }
 
 static void mmc_blk_remove(struct mmc_card *card)

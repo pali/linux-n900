@@ -1,9 +1,11 @@
 /*
- * drivers/media/video/smia-sensor.h
+ * ssi-char.h
  *
- * Copyright (C) 2008,2009 Nokia Corporation
+ * Part of the SSI character device driver.
  *
- * Contact: Tuukka Toivonen <tuukka.o.toivonen@nokia.com>
+ * Copyright (C) 2009 Nokia Corporation. All rights reserved.
+ *
+ * Contact: Andras Domokos <andras.domokos@nokia.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -18,25 +20,17 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
  * 02110-1301 USA
- *
  */
 
-#ifndef SMIA_SENSOR_H
-#define SMIA_SENSOR_H
 
-#include <media/v4l2-int-device.h>
+#ifndef _SSI_CHAR_H
+#define _SSI_CHAR_H
 
-#define SMIA_SENSOR_NAME	"smia-sensor"
-#define SMIA_SENSOR_I2C_ADDR	(0x20 >> 1)
+#include "ssi-if.h"
 
-struct smia_sensor_platform_data {
-	int (*g_priv)(struct v4l2_int_device *s, void *priv);
-	int (*configure_interface)(struct v4l2_int_device *s,
-				   int width, int height);
-	int (*set_xclk)(struct v4l2_int_device *s, int hz);
-	int (*power_on)(struct v4l2_int_device *s);
-	int (*power_off)(struct v4l2_int_device *s);
-};
+/* how many char devices would be created at most */
+#define SSI_MAX_CHAR_DEVS	8
 
+void if_notify(int ch, struct ssi_event *ev);
 
-#endif /* SMIA_SENSOR_H */
+#endif /* _SSI_CHAR_H */

@@ -59,6 +59,9 @@ enum {
 	RX51_JACK_TVOUT,	/* stereo output with tv-out */
 };
 
+static int hp_lim = 63;
+module_param(hp_lim, int, 0);
+
 static int rx51_new_hw_audio;
 static int rx51_spk_func;
 static int rx51_jack_func;
@@ -563,7 +566,15 @@ enum {
 static int rx51_ext_info_volsw(struct snd_kcontrol *kcontrol,
 			       struct snd_ctl_elem_info *uinfo)
 {
+	int ext_api = (kcontrol->private_value >> 26) & 0x0f;
 	int max = (kcontrol->private_value >> 16) & 0xff;
+
+	if (ext_api == RX51_EXT_API_TPA6130)
+		if (hp_lim != max && hp_lim >= 2 && hp_lim <= 63) {
+			kcontrol->private_value &= ~(0xff << 16);
+			kcontrol->private_value |= (hp_lim << 16);
+			max = hp_lim;
+		}
 
 	if (max == 1)
 		uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;

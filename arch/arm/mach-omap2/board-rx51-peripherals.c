@@ -415,8 +415,16 @@ static struct twl4030_gpio_platform_data rx51_gpio_data = {
 static struct twl4030_ins sleep_on_seq[] = {
 /*
  * Turn off everything.
+#define MSG_BROADCAST(devgrp, grp, type, type2, state) \
+	( (devgrp) << 13 | 1 << 12 | (grp) << 9 | (type2) << 7 \
+	| (type) << 4 | (state))
+#define MSG_SINGULAR(devgrp, id, state) \
+	((devgrp) << 13 | 0 << 12 | (id) << 4 | (state))
+	0x14 - Corresponds to 500uSec
  */
-	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_ALL, 1, 0, RES_STATE_SLEEP), 2},
+	{MSG_SINGULAR(DEV_GRP_NULL, RES_HFCLKOUT, RES_STATE_SLEEP), 0x14},
+	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_ALL, 4, 1, RES_STATE_SLEEP), 2},
+	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_ALL, 4, 2, RES_STATE_SLEEP), 2},
 };
 
 static struct twl4030_script sleep_on_script = {
@@ -433,7 +441,10 @@ static struct twl4030_ins wakeup_seq[] = {
 /*
  * Reenable everything.
  */
-	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_ALL, 1, 0, RES_STATE_ACTIVE), 2},
+	/* 0x32= 2.25 max(32khz) delay */
+	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_ALL, 1, 2, RES_STATE_ACTIVE), 0x32},
+	{MSG_SINGULAR(DEV_GRP_NULL, RES_HFCLKOUT, RES_STATE_ACTIVE), 1},
+	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_ALL, 1, 1, RES_STATE_ACTIVE), 2},
 };
 
 static struct twl4030_script wakeup_script = {
@@ -461,14 +472,10 @@ static struct twl4030_ins wrst_seq[] = {
  * Enable sysclk output.
  * Reenable twl4030.
  */
-	{MSG_SINGULAR(DEV_GRP_NULL, RES_RESET, RES_STATE_OFF), 2},
-	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_ALL, 0, 1, RES_STATE_ACTIVE),
-		0x13},
-	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_PP, 0, 3, RES_STATE_OFF), 0x13},
-	{MSG_SINGULAR(DEV_GRP_NULL, RES_VDD1, RES_STATE_WRST), 0x13},
-	{MSG_SINGULAR(DEV_GRP_NULL, RES_VDD2, RES_STATE_WRST), 0x13},
-	{MSG_SINGULAR(DEV_GRP_NULL, RES_VPLL1, RES_STATE_WRST), 0x35},
-	{MSG_SINGULAR(DEV_GRP_P3, RES_HFCLKOUT, RES_STATE_ACTIVE), 2},
+	{MSG_SINGULAR(DEV_GRP_NULL, RES_RESET, RES_STATE_OFF), 1},
+	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_ALL, 0, 2, RES_STATE_WRST), 1},
+	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_PP, 0, 3, RES_STATE_OFF), 0x34},
+	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_ALL, 0, 1, RES_STATE_WRST), 1},
 	{MSG_SINGULAR(DEV_GRP_NULL, RES_RESET, RES_STATE_ACTIVE), 2},
 };
 
@@ -490,54 +497,31 @@ static struct twl4030_script *twl4030_scripts[] = {
 
 static struct twl4030_resconfig twl4030_rconfig[] = {
 
-	{ .resource = RES_VDD1, .devgroup = -1, .type = 1, .type2 = -1,
-		.remap = 0 },
-	{ .resource = RES_VDD2, .devgroup = -1, .type = 1, .type2 = -1,
-		.remap = 0 },
-	{ .resource = RES_VPLL1, .devgroup = -1, .type = 1, .type2 = -1,
-		.remap = 0 },
-	{ .resource = RES_VPLL2, .devgroup = -1, .type = -1, .type2 = 3,
-		.remap = -1 },
-	{ .resource = RES_VAUX1, .devgroup = -1, .type = -1, .type2 = 3,
-		.remap = -1 },
-	{ .resource = RES_VAUX2, .devgroup = -1, .type = -1, .type2 = 3,
-		.remap = -1 },
-	{ .resource = RES_VAUX3, .devgroup = -1, .type = -1, .type2 = 3,
-		.remap = -1 },
-	{ .resource = RES_VAUX4, .devgroup = -1, .type = -1, .type2 = 3,
-		.remap = -1 },
-	{ .resource = RES_VMMC1, .devgroup = -1, .type = -1, .type2 = 3,
-		.remap = -1 },
-	{ .resource = RES_VMMC2, .devgroup = -1, .type = -1, .type2 = 3,
-		.remap = -1 },
-	{ .resource = RES_VDAC, .devgroup = -1, .type = -1, .type2 = 3,
-		.remap = -1 },
-	{ .resource = RES_VSIM, .devgroup = -1, .type = -1, .type2 = 3,
-		.remap = -1 },
-	{ .resource = RES_VINTANA1, .devgroup = DEV_GRP_P1 | DEV_GRP_P3,
-		.type = -1, .type2 = -1, .remap = -1 },
-	{ .resource = RES_VINTANA2, .devgroup = DEV_GRP_P1 | DEV_GRP_P3,
-		.type = 1, .type2 = -1, .remap = -1 },
-	{ .resource = RES_VINTDIG, .devgroup = DEV_GRP_P1 | DEV_GRP_P3,
-		.type = -1, .type2 = -1, .remap = -1 },
-	{ .resource = RES_VIO, .devgroup = DEV_GRP_P3,
-		.type = 1, .type2 = -1, .remap = -1 },
-	{ .resource = RES_CLKEN, .devgroup = DEV_GRP_P1 | DEV_GRP_P3,
-		.type = 1, .type2 = -1 , .remap = -1 },
-	{ .resource = RES_REGEN, .devgroup = DEV_GRP_P1 | DEV_GRP_P3,
-		.type = 1, .type2 = -1, .remap = -1 },
-	{ .resource = RES_NRES_PWRON, .devgroup = DEV_GRP_P1 | DEV_GRP_P3,
-		.type = 1, .type2 = -1, .remap = -1 },
-	{ .resource = RES_SYSEN, .devgroup = DEV_GRP_P1 | DEV_GRP_P3,
-		.type = 1, .type2 = -1, .remap = -1 },
-	{ .resource = RES_HFCLKOUT, .devgroup = DEV_GRP_P3, .type = 1,
-		.type2 = -1, .remap = -1 },
-	{ .resource = RES_32KCLKOUT, .devgroup = -1, .type = 1, .type2 = -1,
-		.remap = -1 },
-	{ .resource = RES_RESET, .devgroup = -1, .type = 1, .type2 = -1,
-		.remap = -1 },
-	{ .resource = RES_Main_Ref, .devgroup = -1, .type = 1, .type2 = -1,
-		.remap = -1 },
+	/* Default p1*/
+	{ .resource = RES_VDD1,		.devgroup = DEV_GRP_P1 | DEV_GRP_P3,	.type = 4, .type2 =  1, .remap =  0 },
+	{ .resource = RES_VDD2,		.devgroup = DEV_GRP_P1 | DEV_GRP_P3,	.type = 3, .type2 =  1, .remap =  0 },
+	{ .resource = RES_VPLL1,	.devgroup = DEV_GRP_P1 | DEV_GRP_P3,	.type = 3, .type2 =  1, .remap =  0 },
+	{ .resource = RES_VPLL2,	.devgroup = -1,				.type = 0, .type2 =  3, .remap =  8 },
+	{ .resource = RES_VAUX1,	.devgroup = -1,				.type = 0, .type2 =  3, .remap =  8 },
+	{ .resource = RES_VAUX2,	.devgroup = -1,				.type = 0, .type2 =  3, .remap =  8 },
+	{ .resource = RES_VAUX3,	.devgroup = -1,				.type = 0, .type2 =  3, .remap =  8 },
+	{ .resource = RES_VAUX4,	.devgroup = -1,				.type = 0, .type2 =  3, .remap =  8 },
+	{ .resource = RES_VMMC1,	.devgroup = -1,				.type = 0, .type2 =  3, .remap =  8 },
+	{ .resource = RES_VMMC2,	.devgroup = -1,				.type = 0, .type2 =  3, .remap =  8 },
+	{ .resource = RES_VDAC,		.devgroup = -1,				.type = 0, .type2 =  3, .remap =  8 },
+	{ .resource = RES_VSIM,		.devgroup = -1,				.type = 0, .type2 =  3, .remap =  8 },
+	{ .resource = RES_VINTANA1,	.devgroup = DEV_GRP_P1 | DEV_GRP_P3,	.type = 1, .type2 =  2, .remap =  8 },
+	{ .resource = RES_VINTANA2,	.devgroup = DEV_GRP_P1 | DEV_GRP_P3,	.type = 0, .type2 =  2, .remap =  8 },
+	{ .resource = RES_VINTDIG,	.devgroup = DEV_GRP_P1 | DEV_GRP_P3,	.type = 1, .type2 =  2, .remap =  8 },
+	{ .resource = RES_VIO,		.devgroup = DEV_GRP_P1 | DEV_GRP_P3,	.type = 2, .type2 =  2, .remap =  8 },
+	{ .resource = RES_CLKEN,	.devgroup = DEV_GRP_P1 | DEV_GRP_P3,	.type = 3, .type2 =  2, .remap =  8 },
+	{ .resource = RES_REGEN,	.devgroup = DEV_GRP_P1 | DEV_GRP_P3,	.type = 2, .type2 =  1, .remap =  8 },
+	{ .resource = RES_NRES_PWRON,	.devgroup = DEV_GRP_P1 | DEV_GRP_P3,	.type = 0, .type2 =  1, .remap =  8 },
+	{ .resource = RES_SYSEN,	.devgroup = DEV_GRP_P1 | DEV_GRP_P3,	.type = 6, .type2 =  1, .remap =  8 },
+	{ .resource = RES_HFCLKOUT,	.devgroup = DEV_GRP_P1 | DEV_GRP_P3,	.type = 0, .type2 =  1, .remap =  8 },
+	{ .resource = RES_32KCLKOUT,	.devgroup = DEV_GRP_P1 | DEV_GRP_P2 | DEV_GRP_P3,	.type = 0, .type2 =  0, .remap =  8 },
+	{ .resource = RES_RESET,	.devgroup = DEV_GRP_P1 | DEV_GRP_P2 | DEV_GRP_P3,	.type = 6, .type2 =  0, .remap =  8 },
+	{ .resource = RES_Main_Ref,	.devgroup = DEV_GRP_P1 | DEV_GRP_P2 | DEV_GRP_P3,	.type = 0, .type2 =  0, .remap =  8 },
 	{ 0, 0},
 };
 

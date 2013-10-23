@@ -91,9 +91,9 @@ static void mmc_request(struct request_queue *q)
 	int ret;
 
 	if (!mq) {
-		printk(KERN_ERR "MMC: killing requests for dead queue\n");
 		while ((req = elv_next_request(q)) != NULL) {
 			do {
+				req->cmd_flags |= REQ_QUIET;
 				ret = __blk_end_request(req, -EIO,
 							blk_rq_cur_bytes(req));
 			} while (ret);
@@ -228,16 +228,17 @@ void mmc_cleanup_queue(struct mmc_queue *mq)
 	struct request_queue *q = mq->queue;
 	unsigned long flags;
 
-	/* Mark that we should start throwing out stragglers */
-	spin_lock_irqsave(q->queue_lock, flags);
-	q->queuedata = NULL;
-	spin_unlock_irqrestore(q->queue_lock, flags);
-
 	/* Make sure the queue isn't suspended, as that will deadlock */
 	mmc_queue_resume(mq);
 
 	/* Then terminate our worker thread */
 	kthread_stop(mq->thread);
+
+	/* Empty the queue */
+	spin_lock_irqsave(q->queue_lock, flags);
+	q->queuedata = NULL;
+	blk_start_queue(q);
+	spin_unlock_irqrestore(q->queue_lock, flags);
 
  	if (mq->bounce_sg)
  		kfree(mq->bounce_sg);
@@ -249,8 +250,6 @@ void mmc_cleanup_queue(struct mmc_queue *mq)
 	if (mq->bounce_buf)
 		kfree(mq->bounce_buf);
 	mq->bounce_buf = NULL;
-
-	blk_cleanup_queue(mq->queue);
 
 	mq->card = NULL;
 }

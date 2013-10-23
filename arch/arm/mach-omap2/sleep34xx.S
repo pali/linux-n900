@@ -40,6 +40,7 @@
 #define PM_PREPWSTST_MPU_V	OMAP34XX_PRM_REGADDR(MPU_MOD, \
 				OMAP3430_PM_PREPWSTST)
 #define CM_IDLEST1_CORE_V	IO_ADDRESS(OMAP3430_CM_BASE + 0x220)
+#define CM_IDLEST_CKGEN_V	IO_ADDRESS(OMAP3430_CM_BASE + 0x520)
 
 /*
  * This is the physical address of the register as specified
@@ -703,28 +704,61 @@ skip_l2_inval:
 
 /* Make sure SDRC accesses are ok */
 wait_sdrc_ok:
+
+/* DPLL3 must be locked before accessing the SDRC. Maybe the HW ensures this. */
+	ldr	r4, cm_idlest_ckgen
+wait_dpll3_lock:
+	ldr	r5, [r4]
+	tst	r5, #1
+	beq	wait_dpll3_lock
+
         ldr     r4, cm_idlest1_core
+wait_sdrc_ready:
         ldr     r5, [r4]
-        and     r5, r5, #0x2
-        cmp     r5, #0
-        bne     wait_sdrc_ok
+        tst     r5, #0x2
+        bne     wait_sdrc_ready
+	/* allow DLL powerdown upon hw idle req */
         ldr     r4, sdrc_power
         ldr     r5, [r4]
         bic     r5, r5, #0x40
         str     r5, [r4]
-wait_dll_lock:
-        /* Is dll in lock mode? */
+is_dll_in_lock_mode:
         ldr     r4, sdrc_dlla_ctrl
         ldr     r5, [r4]
         tst     r5, #0x4
         bxne    lr
         /* wait till dll locks */
+wait_dll_lock_timed:
+	ldr	r4, wait_dll_lock_counter
+	add	r4, r4, #1
+	str	r4, wait_dll_lock_counter
         ldr     r4, sdrc_dlla_status
+        mov     r6, #8 			/* Wait 20uS for lock */
+wait_dll_lock:
+        subs    r6, r6, #0x1
+        beq     kick_dll
         ldr     r5, [r4]
         and     r5, r5, #0x4
         cmp     r5, #0x4
         bne     wait_dll_lock
         bx      lr
+
+        /* disable/reenable DLL if locked */
+kick_dll:
+	ldr     r4, sdrc_dlla_ctrl	/* get dlla addr */
+	ldr     r5, [r4]		/* grab value */
+	mov	r6, r5			/* save value */
+	bic	r6, #(1<<3)		/* disable dll */
+	str	r6, [r4]
+	dsb
+	orr	r6, r6, #(1<<3)		/* enable dll */
+	str	r6, [r4]
+	dsb
+	str	r5, [r4]		/* restore old value */
+	ldr	r4, kick_counter
+	add	r4, r4, #1
+	str	r4, kick_counter
+	b 	wait_dll_lock_timed
 
 phys_offset:
 	.word	PHYS_OFFSET
@@ -732,6 +766,8 @@ page_offset:
 	.word	PAGE_OFFSET
 cm_idlest1_core:
 	.word	CM_IDLEST1_CORE_V
+cm_idlest_ckgen:
+	.word	CM_IDLEST_CKGEN_V
 sdrc_dlla_status:
 	.word	SDRC_DLLA_STATUS_V
 sdrc_dlla_ctrl:
@@ -766,5 +802,10 @@ cache_pred_disable_mask:
 	.word	0xFFFFE7FB
 control_stat:
 	.word	CONTROL_STAT
+	/* these 2 words need to be at the end !!! */
+kick_counter:
+	.word	0
+wait_dll_lock_counter:
+	.word	0
 ENTRY(omap34xx_cpu_suspend_sz)
 	.word	. - omap34xx_cpu_suspend

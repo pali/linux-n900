@@ -131,9 +131,8 @@ void isp_af_suspend(struct isp_af_device *);
 void isp_af_resume(struct isp_af_device *);
 int isp_af_busy(struct isp_af_device *);
 void isp_af_config_registers(struct isp_af_device *isp_af);
-int omap34xx_isp_af_request_statistics(struct isp_af_device *,
-				       struct isp_af_data *afdata);
-int omap34xx_isp_af_config(struct isp_af_device *,
-			   struct af_configuration *afconfig);
+int isp_af_request_statistics(struct isp_af_device *,
+			      struct isp_af_data *afdata);
+int isp_af_config(struct isp_af_device *, struct af_configuration *afconfig);
 
 #endif	/* OMAP_ISP_AF_H */

@@ -777,10 +777,11 @@ static int et8ek8_ioctl_s_power(struct v4l2_int_device *s,
 				enum v4l2_power new_state)
 {
 	struct et8ek8_sensor *sensor = s->priv;
+	enum v4l2_power old_state = sensor->power;
 	int rval = 0;
 
 	/* If we are already in this mode, do nothing */
-	if (sensor->power == new_state)
+	if (old_state == new_state)
 		return 0;
 
 	/* Disable power if so requested (it was enabled) */
@@ -796,7 +797,7 @@ static int et8ek8_ioctl_s_power(struct v4l2_int_device *s,
 	/* Either STANDBY or ON requested */
 
 	/* Enable power and move to standby if it was off */
-	if (sensor->power == V4L2_POWER_OFF) {
+	if (old_state == V4L2_POWER_OFF) {
 		rval = et8ek8_power_on(s);
 		if (rval)
 			goto out;
@@ -806,10 +807,11 @@ static int et8ek8_ioctl_s_power(struct v4l2_int_device *s,
 
 	if (new_state == V4L2_POWER_ON) {
 		/* Standby -> streaming */
+		sensor->power = V4L2_POWER_ON;
 		rval = et8ek8_configure(s);
 		if (rval) {
 			et8ek8_stream_off(s);
-			if (sensor->power == V4L2_POWER_OFF)
+			if (old_state == V4L2_POWER_OFF)
 				et8ek8_power_off(s);
 			goto out;
 		}
@@ -820,9 +822,7 @@ static int et8ek8_ioctl_s_power(struct v4l2_int_device *s,
 	}
 
 out:
-	if (rval == 0)
-		sensor->power = new_state;
-
+	sensor->power = (rval == 0) ? new_state : old_state;
 	return rval;
 }
 

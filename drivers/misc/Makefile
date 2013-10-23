@@ -38,3 +38,5 @@ obj-$(CONFIG_C2PORT)		+= c2port/
 obj-$(CONFIG_OMAP_SSI)		+= ssi/
 obj-$(CONFIG_SSI_MCSAAB_IMP)	+= mcsaab/
 obj-$(CONFIG_SSI_CMT_SPEECH)	+= cmt-speech/
+obj-$(CONFIG_SSI_CHAR)     += ssi-char/
+obj-$(CONFIG_PANIC_INFO_BUFF)	+= panic_info_buff.o

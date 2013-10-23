@@ -36,6 +36,12 @@
 #define MMCHS_SYSSTATUS			0x0014
 #define MMCHS_SYSSTATUS_RESETDONE	(1 << 0)
 
+#define OMAP343X_PADCONF_MMC2_CMD	(OMAP2_CONTROL_PADCONFS + 0x12A)
+#define OMAP343X_PADCONF_MMC2_DAT0	(OMAP2_CONTROL_PADCONFS + 0x12C)
+#define OMAP343X_PADCONF_MMC2_DAT2	(OMAP2_CONTROL_PADCONFS + 0x130)
+#define OMAP343X_PADCONF_MMC2_DAT4	(OMAP2_CONTROL_PADCONFS + 0x134)
+#define OMAP343X_PADCONF_MMC2_DAT6	(OMAP2_CONTROL_PADCONFS + 0x138)
+
 static struct platform_device dummy_pdev = {
 	.dev = {
 		.bus = &platform_bus_type,
@@ -599,6 +605,14 @@ static int twl_mmc2_set_power(struct device *dev, int slot, int power_on, int vd
 	 * transceiver is used, DAT3..7 are muxed as transceiver control pins.
 	 */
 	if (power_on) {
+		if (!cpu_is_omap2430()) {
+			/* Pull up */
+			omap_ctrl_writew(    0x118, OMAP343X_PADCONF_MMC2_CMD);
+			omap_ctrl_writel(0x1180118, OMAP343X_PADCONF_MMC2_DAT0);
+			omap_ctrl_writel(0x1180118, OMAP343X_PADCONF_MMC2_DAT2);
+			omap_ctrl_writel(0x1180118, OMAP343X_PADCONF_MMC2_DAT4);
+			omap_ctrl_writel(0x1180118, OMAP343X_PADCONF_MMC2_DAT6);
+		}
 		if (mmc->slots[0].internal_clock) {
 			u32 reg;
 
@@ -608,6 +622,14 @@ static int twl_mmc2_set_power(struct device *dev, int slot, int power_on, int vd
 		}
 		ret = twl_mmc_set_voltage(c, vdd);
 	} else {
+		if (!cpu_is_omap2430()) {
+			/* Pull down */
+			omap_ctrl_writew(    0x108, OMAP343X_PADCONF_MMC2_CMD);
+			omap_ctrl_writel(0x1080108, OMAP343X_PADCONF_MMC2_DAT0);
+			omap_ctrl_writel(0x1080108, OMAP343X_PADCONF_MMC2_DAT2);
+			omap_ctrl_writel(0x1080108, OMAP343X_PADCONF_MMC2_DAT4);
+			omap_ctrl_writel(0x1080108, OMAP343X_PADCONF_MMC2_DAT6);
+		}
 		ret = twl_mmc_set_voltage(c, 0);
 	}
 
@@ -649,12 +671,14 @@ static int twl_mmc2_set_sleep(struct device *dev, int slot, int sleep, int vdd,
 		return twl_mmc_regulator_set_mode(c->twl_vmmc_dev_grp, sleep);
 
 	if (cardsleep) {
+		struct twl_mmc_controller *c = &hsmmc[1];
+
 		/* VCC can be turned off if card is asleep */
 		c->vsim_18v = 0;
 		if (sleep)
-			err = twl_mmc2_set_power(dev, slot, 0, 0);
+			err = twl_mmc_set_voltage(c, 0);
 		else
-			err = twl_mmc2_set_power(dev, slot, 1, vdd);
+			err = twl_mmc_set_voltage(c, vdd);
 		c->vsim_18v = 1;
 	} else
 		err = twl_mmc_regulator_set_mode(c->twl_vmmc_dev_grp, sleep);

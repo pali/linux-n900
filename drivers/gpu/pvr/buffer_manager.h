@@ -138,6 +138,12 @@
 			 IMG_UINT32 ui32Offset, IMG_SYS_PHYADDR sSysAddr);
 
 	 IMG_BOOL
+	    BM_IsWrappedCheckSize(IMG_HANDLE hDevMemHeap,
+			 IMG_UINT32 ui32Offset,
+			 IMG_SYS_PHYADDR sSysAddr,
+			 IMG_UINT32 ui32ByteSize);
+
+	 IMG_BOOL
 	    BM_Wrap(IMG_HANDLE hDevMemHeap,
 		    IMG_UINT32 ui32Size,
 		    IMG_UINT32 ui32Offset,

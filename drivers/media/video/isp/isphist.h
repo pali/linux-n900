@@ -149,11 +149,11 @@ void isp_hist_mark_invalid_buf(struct isp_hist_device *isp_hist);
 void isp_hist_config_registers(struct isp_hist_device *isp_hist);
 void isp_hist_suspend(struct isp_hist_device *isp_hist);
 void isp_hist_resume(struct isp_hist_device *isp_hist);
-void isphist_save_context(struct device *dev);
-void isphist_restore_context(struct device *dev);
-int omap34xx_isp_hist_config(struct isp_hist_device *isp_hist,
-			     struct isp_hist_config *histcfg);
-int omap34xx_isp_hist_request_statistics(struct isp_hist_device *isp_hist,
-					 struct isp_hist_data *histdata);
+void isp_hist_save_context(struct device *dev);
+void isp_hist_restore_context(struct device *dev);
+int isp_hist_config(struct isp_hist_device *isp_hist,
+		    struct isp_hist_config *histcfg);
+int isp_hist_request_statistics(struct isp_hist_device *isp_hist,
+				struct isp_hist_data *histdata);
 
 #endif				/* OMAP_ISP_HIST */

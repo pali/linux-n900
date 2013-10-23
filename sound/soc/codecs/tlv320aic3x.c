@@ -51,6 +51,9 @@
 
 #define AIC3X_VERSION "0.2"
 
+static int hp_dac_lim = 9;
+module_param(hp_dac_lim, int, 0);
+
 /* codec private data */
 struct aic3x_priv {
 	unsigned int sysclk;
@@ -294,6 +297,40 @@ static DECLARE_TLV_DB_SCALE(hpout_tlv, 0, 100, 0);
  */
 static DECLARE_TLV_DB_SCALE(output_stage_tlv, -5900, 50, 1);
 
+#define SOC_DOUBLE_R_TLV_TLV320ALC3X(xname, reg_left, reg_right, xshift, xmax,\
+				 xinvert, tlv_array) \
+{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = (xname),\
+	.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |\
+		 SNDRV_CTL_ELEM_ACCESS_READWRITE,\
+	.tlv.p = (tlv_array), \
+	.info = tlv320alc3x_info_volsw, \
+	.get = snd_soc_get_volsw_2r,\
+	.put = snd_soc_put_volsw_2r,\
+	.private_value = (unsigned long)&(struct soc_mixer_control) \
+		{.reg = reg_left, .rreg = reg_right, .shift = xshift, \
+		.max = xmax, .invert = xinvert} }
+
+static int tlv320alc3x_info_volsw(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_info *uinfo)
+{
+	struct soc_mixer_control *mc =
+		(struct soc_mixer_control *)kcontrol->private_value;
+	int max = mc->max;
+
+	if (hp_dac_lim != max && hp_dac_lim >= 2 && hp_dac_lim <= 9)
+		max = hp_dac_lim;
+
+	if (max == 1)
+		uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
+	else
+		uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+
+	uinfo->count = 2;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = max;
+	return 0;
+}
+
 static const struct snd_kcontrol_new aic3x_snd_controls[] = {
 	/* Output */
 	SOC_DOUBLE_R_TLV("PCM Playback Volume",
@@ -327,8 +364,8 @@ static const struct snd_kcontrol_new aic3x_snd_controls[] = {
 			 0, 118, 1, output_stage_tlv),
 	SOC_DOUBLE_R("HP DAC Playback Switch", HPLOUT_CTRL, HPROUT_CTRL, 3,
 		     0x01, 0),
-	SOC_DOUBLE_R_TLV("HP DAC Output Volume", HPLOUT_CTRL, HPROUT_CTRL, 4,
-			 9, 0, hpout_tlv),
+	SOC_DOUBLE_R_TLV_TLV320ALC3X("HP DAC Output Volume", HPLOUT_CTRL,
+			 HPROUT_CTRL, 4, 9, 0, hpout_tlv),
 	SOC_DOUBLE_R_TLV("HP PGA Bypass Playback Volume",
 			 PGAL_2_HPLOUT_VOL, PGAR_2_HPROUT_VOL,
 			 0, 118, 1, output_stage_tlv),
@@ -341,8 +378,8 @@ static const struct snd_kcontrol_new aic3x_snd_controls[] = {
 			 0, 118, 1, output_stage_tlv),
 	SOC_DOUBLE_R("HPCOM DAC Playback Switch", HPLCOM_CTRL, HPRCOM_CTRL, 3,
 		     0x01, 0),
-	SOC_DOUBLE_R_TLV("HPCOM DAC Output Volume", HPLCOM_CTRL, HPRCOM_CTRL,
-			 4, 9, 0, hpout_tlv),
+	SOC_DOUBLE_R_TLV_TLV320ALC3X("HPCOM DAC Output Volume", HPLCOM_CTRL,
+			 HPRCOM_CTRL, 4, 9, 0, hpout_tlv),
 	SOC_DOUBLE_R_TLV("HPCOM PGA Bypass Playback Volume",
 			 PGAL_2_HPLCOM_VOL, PGAR_2_HPRCOM_VOL,
 			 0, 118, 1, output_stage_tlv),

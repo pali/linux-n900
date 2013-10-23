@@ -229,6 +229,7 @@ void isp_hist_config_registers(struct isp_hist_device *isp_hist)
 	isp_hist_dma_config(isp_hist);
 
 	isp_hist->update = 0;
+	isp_hist->stat.config_counter++;
 	spin_unlock_irqrestore(&isp_hist->lock, irqflags);
 
 	isp_hist_print_status(isp_hist);
@@ -251,7 +252,7 @@ static void isp_hist_dma_cb(int lch, u16 ch_status, void *data)
 		isp_reg_and(dev, OMAP3_ISP_IOMEM_HIST, ISPHIST_CNT,
 			    ~ISPHIST_CNT_CLR_EN);
 		if (!ret)
-			omap34xx_isp_hist_dma_done(dev);
+			isp_hist_dma_done(dev);
 	}
 	isp_hist->waiting_dma = 0;
 }
@@ -568,8 +569,8 @@ static void isp_hist_update_params(struct isp_hist_device *isp_hist,
  *
  * Returns 0 on success configuration.
  **/
-int omap34xx_isp_hist_config(struct isp_hist_device *isp_hist,
-			     struct isp_hist_config *histcfg)
+int isp_hist_config(struct isp_hist_device *isp_hist,
+		    struct isp_hist_config *histcfg)
 {
 	struct device *dev = to_device(isp_hist);
 	unsigned long irqflags;
@@ -632,15 +633,15 @@ int omap34xx_isp_hist_config(struct isp_hist_device *isp_hist,
 }
 
 /**
- * omap34xx_isp_hist_request_statistics - Request statistics in Histogram.
+ * isp_hist_request_statistics - Request statistics in Histogram.
  * @histdata: Pointer to data structure.
  *
  * This API allows the user to request for histogram statistics.
  *
  * Returns 0 on successful request.
  **/
-int omap34xx_isp_hist_request_statistics(struct isp_hist_device *isp_hist,
-					 struct isp_hist_data *histdata)
+int isp_hist_request_statistics(struct isp_hist_device *isp_hist,
+				struct isp_hist_data *histdata)
 {
 	struct device *dev = to_device(isp_hist);
 	struct ispstat_buffer *buf;
@@ -718,17 +719,17 @@ void isp_hist_cleanup(struct device *dev)
 }
 
 /**
- * isphist_save_context - Saves the values of the histogram module registers.
+ * isp_hist_save_context - Saves the values of the histogram module registers.
  **/
-void isphist_save_context(struct device *dev)
+void isp_hist_save_context(struct device *dev)
 {
 	isp_save_context(dev, isphist_reg_list);
 }
 
 /**
- * isphist_restore_context - Restores the values of the histogram module regs.
+ * isp_hist_restore_context - Restores the values of the histogram module regs.
  **/
-void isphist_restore_context(struct device *dev)
+void isp_hist_restore_context(struct device *dev)
 {
 	isp_restore_context(dev, isphist_reg_list);
 }

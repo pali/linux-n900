@@ -1,9 +1,11 @@
 /*
- * drivers/media/video/smia-sensor.h
+ * ssi-char-debug.h
  *
- * Copyright (C) 2008,2009 Nokia Corporation
+ * Part of the SSI character driver. Debugging related definitions.
  *
- * Contact: Tuukka Toivonen <tuukka.o.toivonen@nokia.com>
+ * Copyright (C) 2009 Nokia Corporation. All rights reserved.
+ *
+ * Contact: Andras Domokos <andras.domokos@nokia.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -18,25 +20,20 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
  * 02110-1301 USA
- *
  */
 
-#ifndef SMIA_SENSOR_H
-#define SMIA_SENSOR_H
 
-#include <media/v4l2-int-device.h>
+#ifndef _SSI_CHAR_DEBUG_H
+#define _SSI_CHAR_DEBUG_H
 
-#define SMIA_SENSOR_NAME	"smia-sensor"
-#define SMIA_SENSOR_I2C_ADDR	(0x20 >> 1)
+#ifdef CONFIG_SSI_CHAR_DEBUG
+#define DPRINTK(fmt, arg...) printk(KERN_DEBUG "%s(): " fmt, __func__, ##arg)
+#define DENTER()	printk(KERN_DEBUG "ENTER %s()\n", __func__)
+#define DLEAVE(a)	printk(KERN_DEBUG "LEAVE %s() %d\n", __func__, a)
+#else
+#define DPRINTK(fmt, arg...)	while (0)
+#define DENTER()		while (0)
+#define DLEAVE(a)		while (0)
+#endif
 
-struct smia_sensor_platform_data {
-	int (*g_priv)(struct v4l2_int_device *s, void *priv);
-	int (*configure_interface)(struct v4l2_int_device *s,
-				   int width, int height);
-	int (*set_xclk)(struct v4l2_int_device *s, int hz);
-	int (*power_on)(struct v4l2_int_device *s);
-	int (*power_off)(struct v4l2_int_device *s);
-};
-
-
-#endif /* SMIA_SENSOR_H */
+#endif /* _SSI_CHAR_DEBUG_H */

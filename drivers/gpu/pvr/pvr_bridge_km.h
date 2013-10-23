@@ -186,6 +186,13 @@
 
 	 IMG_IMPORT
 	    PVRSRV_ERROR IMG_CALLCONV
+	    PVRSRVIsWrappedExtMemoryKM(IMG_HANDLE hDevCookie,
+						  PVRSRV_PER_PROCESS_DATA *psPerProc,
+						  IMG_UINT32 *pui32ByteSize,
+						  IMG_VOID **pvLinAddr);
+
+	 IMG_IMPORT
+	    PVRSRV_ERROR IMG_CALLCONV
 	    PVRSRVUnwrapExtMemoryKM(PVRSRV_KERNEL_MEM_INFO * psMemInfo);
 
 	 IMG_IMPORT
