@@ -78,6 +78,17 @@ enum omap_color_mode {
 	OMAP_DSS_COLOR_RGBA32	= 1 << 12, /* RGBA32 */
 	OMAP_DSS_COLOR_RGBX32	= 1 << 13, /* RGBx32 */
 
+	OMAP_DSS_COLOR_GFX_OMAP2 =
+		OMAP_DSS_COLOR_CLUT1 | OMAP_DSS_COLOR_CLUT2 |
+		OMAP_DSS_COLOR_CLUT4 | OMAP_DSS_COLOR_CLUT8 |
+		OMAP_DSS_COLOR_RGB12U | OMAP_DSS_COLOR_RGB16 |
+		OMAP_DSS_COLOR_RGB24U | OMAP_DSS_COLOR_RGB24P,
+
+	OMAP_DSS_COLOR_VID_OMAP2 =
+		OMAP_DSS_COLOR_RGB16 | OMAP_DSS_COLOR_RGB24U |
+		OMAP_DSS_COLOR_RGB24P | OMAP_DSS_COLOR_YUV2 |
+		OMAP_DSS_COLOR_UYVY,
+
 	OMAP_DSS_COLOR_GFX_OMAP3 =
 		OMAP_DSS_COLOR_CLUT1 | OMAP_DSS_COLOR_CLUT2 |
 		OMAP_DSS_COLOR_CLUT4 | OMAP_DSS_COLOR_CLUT8 |
@@ -86,12 +97,17 @@ enum omap_color_mode {
 		OMAP_DSS_COLOR_RGB24P | OMAP_DSS_COLOR_ARGB32 |
 		OMAP_DSS_COLOR_RGBA32 | OMAP_DSS_COLOR_RGBX32,
 
-	OMAP_DSS_COLOR_VID_OMAP3 =
+	OMAP_DSS_COLOR_VID1_OMAP3 =
+		OMAP_DSS_COLOR_RGB12U | OMAP_DSS_COLOR_RGB16 |
+		OMAP_DSS_COLOR_RGB24U | OMAP_DSS_COLOR_RGB24P |
+		OMAP_DSS_COLOR_YUV2 | OMAP_DSS_COLOR_UYVY,
+
+	OMAP_DSS_COLOR_VID2_OMAP3 =
 		OMAP_DSS_COLOR_RGB12U | OMAP_DSS_COLOR_ARGB16 |
 		OMAP_DSS_COLOR_RGB16 | OMAP_DSS_COLOR_RGB24U |
-		OMAP_DSS_COLOR_RGB24P | OMAP_DSS_COLOR_ARGB32 |
-		OMAP_DSS_COLOR_RGBA32 | OMAP_DSS_COLOR_RGBX32 |
-		OMAP_DSS_COLOR_YUV2 | OMAP_DSS_COLOR_UYVY,
+		OMAP_DSS_COLOR_RGB24P | OMAP_DSS_COLOR_YUV2 |
+		OMAP_DSS_COLOR_UYVY | OMAP_DSS_COLOR_ARGB32 |
+		OMAP_DSS_COLOR_RGBA32 | OMAP_DSS_COLOR_RGBX32,
 };
 
 enum omap_lcd_display_type {
@@ -191,6 +207,8 @@ struct omap_dss_display_config {
 
 		struct {
 			u8 datapairs;
+			unsigned pad_off_pe : 1; /* pull pads if disabled */
+			unsigned pad_off_pu : 1; /* pull up */
 		} sdi;
 
 		struct {
@@ -200,7 +218,11 @@ struct omap_dss_display_config {
 			u8 data1_pol;
 			u8 data2_lane;
 			u8 data2_pol;
+			unsigned long lp_clk_hz;
 			unsigned long ddr_clk_hz;
+
+			bool ext_te;
+			u8 ext_te_gpio;
 		} dsi;
 
 		struct {
@@ -234,9 +256,14 @@ struct device;
 
 /* Board specific data */
 struct  omap_dss_board_info {
-	unsigned (*get_last_off_on_transaction_id)(struct device *dev);
+	int (*get_last_off_on_transaction_id)(struct device *dev);
+	void (*set_min_bus_tput)(struct device *dev, u8 agent_id, unsigned long r);
 	int (*dsi_power_up)(void);
 	void (*dsi_power_down)(void);
+	struct {
+		u16 low;
+		u16 high;
+	} fifo_thresholds[3];
 	int num_displays;
 	struct omap_dss_display_config *displays[];
 };
@@ -256,6 +283,7 @@ struct omap_ctrl {
 			     u16 x, u16 y, u16 w, u16 h);
 
 	int (*enable_te)(struct omap_display *display, bool enable);
+	int (*wait_for_te)(struct omap_display *display);
 
 	u8 (*get_rotate)(struct omap_display *display);
 	int (*set_rotate)(struct omap_display *display, u8 rotate);
@@ -341,6 +369,19 @@ enum omap_dss_overlay_managers {
 
 struct omap_overlay_manager;
 
+enum omap_dss_rotation_type {
+	OMAP_DSS_ROT_DMA = 0,
+	OMAP_DSS_ROT_VRFB = 1,
+};
+
+/* clockwise rotation angle */
+enum omap_dss_rotation_angle {
+	OMAP_DSS_ROT_0   = 0,
+	OMAP_DSS_ROT_90  = 1,
+	OMAP_DSS_ROT_180 = 2,
+	OMAP_DSS_ROT_270 = 3,
+};
+
 struct omap_overlay_info {
 	bool enabled;
 
@@ -351,12 +392,16 @@ struct omap_overlay_info {
 	u16 height;
 	enum omap_color_mode color_mode;
 	u8 rotation;
+	enum omap_dss_rotation_type rotation_type;
 	bool mirror;
 
 	u16 pos_x;
 	u16 pos_y;
 	u16 out_width;	/* if 0, out_width == width */
 	u16 out_height;	/* if 0, out_height == height */
+	u8 global_alpha;
+	u16 fifo_threshold_low;
+	u16 fifo_threshold_high;
 };
 
 enum omap_overlay_caps {
@@ -408,11 +453,19 @@ struct omap_overlay_manager {
 	int (*apply)(struct omap_overlay_manager *mgr);
 
 	void (*set_default_color)(struct omap_overlay_manager *mgr, u32 color);
-	void (*set_trans_key)(struct omap_overlay_manager *mgr,
+	u32 (*get_default_color)(struct omap_overlay_manager *mgr);
+	bool (*get_alpha_blending_status)(struct omap_overlay_manager *mgr);
+	bool (*get_trans_key_status)(struct omap_overlay_manager *mgr);
+	void (*get_trans_key_type_and_value)(struct omap_overlay_manager *mgr,
+		enum omap_dss_color_key_type *type,
+		u32 *trans_key);
+	void (*set_trans_key_type_and_value)(struct omap_overlay_manager *mgr,
 		enum omap_dss_color_key_type type,
 		u32 trans_key);
 	void (*enable_trans_key)(struct omap_overlay_manager *mgr,
 		bool enable);
+	void (*enable_alpha_blending)(struct omap_overlay_manager *mgr,
+			bool enable);
 };
 
 enum omap_display_caps {
@@ -426,7 +479,8 @@ enum omap_dss_update_mode {
 };
 
 enum omap_dss_display_state {
-	OMAP_DSS_DISPLAY_DISABLED = 0,
+	OMAP_DSS_DISPLAY_UNINITIALIZED = 0,
+	OMAP_DSS_DISPLAY_DISABLED,
 	OMAP_DSS_DISPLAY_ACTIVE,
 	OMAP_DSS_DISPLAY_SUSPENDED,
 };
@@ -494,6 +548,9 @@ struct omap_display {
 			u16 x, u16 y, u16 w, u16 h);
 
 	void (*configure_overlay)(struct omap_overlay *overlay);
+
+	int (*set_wss)(struct omap_display *display, u32 wss);
+	u32 (*get_wss)(struct omap_display *display);
 };
 
 int omap_dss_get_num_displays(void);
@@ -521,5 +578,11 @@ void omap_dispc_set_plane_ba0(enum omap_channel, enum omap_plane plane, u32 padd
 int omap_dispc_wait_for_irq_timeout(u32 irqmask, unsigned long timeout);
 int omap_dispc_wait_for_irq_interruptible_timeout(u32 irqmask,
 		unsigned long timeout);
+
+void omap_dss_maximize_min_bus_tput(void);
+void omap_dss_update_min_bus_tput(void);
+
+void omap_dss_lock(void);
+void omap_dss_unlock(void);
 
 #endif

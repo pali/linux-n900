@@ -97,7 +97,6 @@ void hci_h4p_bcm_parse_fw_event(struct hci_h4p_info *info, struct sk_buff *skb)
 		}
 	}
 
-	hci_h4p_enable_tx(info);
 	skb_queue_tail(&info->txq, fw_skb);
 	spin_lock_irqsave(&info->lock, flags);
 	hci_h4p_outb(info, UART_IER, hci_h4p_inb(info, UART_IER) |
@@ -124,9 +123,15 @@ int hci_h4p_bcm_send_fw(struct hci_h4p_info *info,
 		return -ENODATA;
 
 	NBT_DBG_FW("Sending commands\n");
+
+	/*
+	 * Disable smart-idle as UART TX interrupts
+	 * are not wake-up capable
+	 */
+	hci_h4p_smart_idle(info, 0);
+
 	/* Check if this is bd_address packet */
 	init_completion(&info->fw_completion);
-	hci_h4p_enable_tx(info);
 	skb_queue_tail(&info->txq, skb);
 	spin_lock_irqsave(&info->lock, flags);
 	hci_h4p_outb(info, UART_IER, hci_h4p_inb(info, UART_IER) |
@@ -150,11 +155,6 @@ int hci_h4p_bcm_send_fw(struct hci_h4p_info *info,
 	hci_h4p_set_auto_ctsrts(info, 0, UART_EFR_RTS);
 	hci_h4p_set_rts(info, 0);
 	hci_h4p_change_speed(info, BC4_MAX_BAUD_RATE);
-	if (hci_h4p_wait_for_cts(info, 1, 100)) {
-		dev_err(info->dev,
-			"cts didn't go down after final speed change\n");
-		return -ETIMEDOUT;
-	}
 	hci_h4p_set_auto_ctsrts(info, 1, UART_EFR_RTS);
 
 	return 0;

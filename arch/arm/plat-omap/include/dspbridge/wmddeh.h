@@ -61,4 +61,6 @@
 
 	extern void WMD_DEH_Notify(struct DEH_MGR *hDehMgr,
 				   u32 ulEventMask, u32 dwErrInfo);
+
+	extern void WMD_DEH_ReleaseDummyMem(void);
 #endif				/* WMDDEH_ */

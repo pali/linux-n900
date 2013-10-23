@@ -188,7 +188,7 @@ DSP_STATUS CLK_Enable(IN enum SERVICES_ClkId clk_id)
 	struct clk *pClk;
 
 	DBC_Require(clk_id < SERVICESCLK_NOT_DEFINED);
-       GT_2trace(CLK_debugMask, GT_6CLASS, "CLK_Enable: CLK %s, "
+	GT_2trace(CLK_debugMask, GT_6CLASS, "CLK_Enable: CLK %s, "
 		"CLK dev id = %d\n", SERVICES_Clks[clk_id].clk_name,
 		SERVICES_Clks[clk_id].id);
 
@@ -197,18 +197,16 @@ DSP_STATUS CLK_Enable(IN enum SERVICES_ClkId clk_id)
 		if (clk_enable(pClk) == 0x0) {
 			/* Success ? */
 		} else {
-		       GT_2trace(CLK_debugMask, GT_7CLASS,
-				 "CLK_Enable: failed to Enable CLK %s, "
-				 "CLK dev id = %d\n",
-				 SERVICES_Clks[clk_id].clk_name,
-				 SERVICES_Clks[clk_id].id);
+			pr_err("CLK_Enable: failed to Enable CLK %s, "
+					"CLK dev id = %d\n",
+					SERVICES_Clks[clk_id].clk_name,
+					SERVICES_Clks[clk_id].id);
 			status = DSP_EFAIL;
 		}
 	} else {
-	       GT_2trace(CLK_debugMask, GT_7CLASS,
-			 "CLK_Enable: failed to get CLK %s, CLK dev id = %d\n",
-			 SERVICES_Clks[clk_id].clk_name,
-			 SERVICES_Clks[clk_id].id);
+		pr_err("CLK_Enable: failed to get CLK %s, CLK dev id = %d\n",
+					SERVICES_Clks[clk_id].clk_name,
+					SERVICES_Clks[clk_id].id);
 		status = DSP_EFAIL;
 	}
 	/* The SSI module need to configured not to have the Forced idle for
@@ -236,7 +234,7 @@ DSP_STATUS CLK_Set_32KHz(IN enum SERVICES_ClkId clk_id)
 	pClkParent =  SERVICES_Clks[sys_32k_id].clk_handle;
 
 	DBC_Require(clk_id < SERVICESCLK_NOT_DEFINED);
-       GT_2trace(CLK_debugMask, GT_6CLASS, "CLK_Set_32KHz: CLK %s, "
+	GT_2trace(CLK_debugMask, GT_6CLASS, "CLK_Set_32KHz: CLK %s, "
 		"CLK dev id = %d is setting to 32KHz \n",
 		SERVICES_Clks[clk_id].clk_name,
 		SERVICES_Clks[clk_id].id);
@@ -266,7 +264,7 @@ DSP_STATUS CLK_Disable(IN enum SERVICES_ClkId clk_id)
 	s32 clkUseCnt;
 
 	DBC_Require(clk_id < SERVICESCLK_NOT_DEFINED);
-       GT_2trace(CLK_debugMask, GT_6CLASS, "CLK_Disable: CLK %s, "
+	GT_2trace(CLK_debugMask, GT_6CLASS, "CLK_Disable: CLK %s, "
 		"CLK dev id = %d\n", SERVICES_Clks[clk_id].clk_name,
 		SERVICES_Clks[clk_id].id);
 
@@ -274,16 +272,16 @@ DSP_STATUS CLK_Disable(IN enum SERVICES_ClkId clk_id)
 
 	clkUseCnt = CLK_Get_UseCnt(clk_id);
 	if (clkUseCnt == -1) {
-	       GT_2trace(CLK_debugMask, GT_7CLASS, "CLK_Disable: failed to "
-			"get CLK Use count for CLK %s, CLK dev id = %d\n",
-			SERVICES_Clks[clk_id].clk_name,
-			SERVICES_Clks[clk_id].id);
+		pr_err("CLK_Disable: failed to get CLK Use count for CLK %s,"
+				"CLK dev id = %d\n",
+				SERVICES_Clks[clk_id].clk_name,
+				SERVICES_Clks[clk_id].id);
 	} else if (clkUseCnt == 0) {
-	       GT_2trace(CLK_debugMask, GT_7CLASS, "CLK_Disable: CLK %s, "
-			"CLK dev id= %d is already disabled\n",
-			SERVICES_Clks[clk_id].clk_name,
-			SERVICES_Clks[clk_id].id);
-		 return status;
+		GT_2trace(CLK_debugMask, GT_4CLASS, "CLK_Disable: CLK %s,"
+				"CLK dev id= %d is already disabled\n",
+				SERVICES_Clks[clk_id].clk_name,
+				SERVICES_Clks[clk_id].id);
+		return status;
 	}
 	if (clk_id == SERVICESCLK_ssi_ick)
 		SSI_Clk_Prepare(false);
@@ -291,10 +289,10 @@ DSP_STATUS CLK_Disable(IN enum SERVICES_ClkId clk_id)
 		if (pClk) {
 			clk_disable(pClk);
 		} else {
-		       GT_2trace(CLK_debugMask, GT_7CLASS, "CLK_Disable: "
-				"failed to get CLK %s, CLK dev id = %d\n",
-				SERVICES_Clks[clk_id].clk_name,
-				SERVICES_Clks[clk_id].id);
+			pr_err("CLK_Disable: failed to get CLK %s,"
+					"CLK dev id = %d\n",
+					SERVICES_Clks[clk_id].clk_name,
+					SERVICES_Clks[clk_id].id);
 			status = DSP_EFAIL;
 		}
 	return status;
@@ -316,7 +314,7 @@ DSP_STATUS CLK_GetRate(IN enum SERVICES_ClkId clk_id, u32 *speedKhz)
 	DBC_Require(clk_id < SERVICESCLK_NOT_DEFINED);
 	*speedKhz = 0x0;
 
-       GT_2trace(CLK_debugMask, GT_7CLASS, "CLK_GetRate: CLK %s, "
+	GT_2trace(CLK_debugMask, GT_7CLASS, "CLK_GetRate: CLK %s, "
 		"CLK dev Id = %d \n", SERVICES_Clks[clk_id].clk_name,
 		SERVICES_Clks[clk_id].id);
 	pClk = SERVICES_Clks[clk_id].clk_handle;
@@ -327,7 +325,7 @@ DSP_STATUS CLK_GetRate(IN enum SERVICES_ClkId clk_id, u32 *speedKhz)
 			  "CLK_GetRate: clkSpeedHz = %d , "
 			 "speedinKhz=%d\n", clkSpeedHz, *speedKhz);
 	} else {
-	       GT_2trace(CLK_debugMask, GT_7CLASS,
+		GT_2trace(CLK_debugMask, GT_7CLASS,
 			 "CLK_GetRate: failed to get CLK %s, "
 			 "CLK dev Id = %d\n", SERVICES_Clks[clk_id].clk_name,
 			 SERVICES_Clks[clk_id].id);
@@ -348,7 +346,7 @@ s32 CLK_Get_UseCnt(IN enum SERVICES_ClkId clk_id)
 	if (pClk) {
 		useCount =  pClk->usecount; /* FIXME: usecount shouldn't be used */
 	} else {
-	       GT_2trace(CLK_debugMask, GT_7CLASS,
+		GT_2trace(CLK_debugMask, GT_7CLASS,
 			 "CLK_GetRate: failed to get CLK %s, "
 			 "CLK dev Id = %d\n", SERVICES_Clks[clk_id].clk_name,
 			 SERVICES_Clks[clk_id].id);
@@ -362,14 +360,15 @@ void SSI_Clk_Prepare(bool FLAG)
 	u32 ssi_sysconfig;
 	ssi_sysconfig = __raw_readl((SSI_BASE) + 0x10);
 
-
 	if (FLAG) {
 		/* Set Autoidle, SIDLEMode to smart idle, and MIDLEmode to
-		 * no idle */
+		 * no idle
+		 */
 		ssi_sysconfig = 0x1011;
 	} else {
 		/* Set Autoidle, SIDLEMode to forced idle, and MIDLEmode to
-		 * forced idle*/
+		 * forced idle
+		 */
 		ssi_sysconfig = 0x1;
 	}
 	__raw_writel((u32)ssi_sysconfig, SSI_BASE + 0x10);

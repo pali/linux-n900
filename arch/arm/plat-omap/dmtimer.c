@@ -319,6 +319,7 @@ static void omap_dm_timer_reset(struct omap_dm_timer *timer)
 	l = omap_dm_timer_read_reg(timer, OMAP_TIMER_OCP_CFG_REG);
 	l |= 0x02 << 3;  /* Set to smart-idle mode */
 	l |= 0x2 << 8;   /* Set clock activity to perserve f-clock on idle */
+	l |= 0x1 << 0;   /* Set autoidle */
 
 	/*
 	 * Enable wake-up on OMAP2 CPUs.

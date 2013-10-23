@@ -218,7 +218,7 @@ static void udf_bitmap_free_blocks(struct super_block *sb,
 	} while (overflow);
 
 error_return:
-	sb->s_dirt = 1;
+	mark_sb_dirty(sb);
 	if (sbi->s_lvid_bh)
 		mark_buffer_dirty(sbi->s_lvid_bh);
 	mutex_unlock(&sbi->s_alloc_mutex);
@@ -279,7 +279,7 @@ static int udf_bitmap_prealloc_blocks(struct super_block *sb,
 out:
 	if (udf_add_free_space(sbi, partition, -alloc_count))
 		mark_buffer_dirty(sbi->s_lvid_bh);
-	sb->s_dirt = 1;
+	mark_sb_dirty(sb);
 	mutex_unlock(&sbi->s_alloc_mutex);
 	return alloc_count;
 }
@@ -411,7 +411,7 @@ got_block:
 
 	if (udf_add_free_space(sbi, partition, -1))
 		mark_buffer_dirty(sbi->s_lvid_bh);
-	sb->s_dirt = 1;
+	mark_sb_dirty(sb);
 	mutex_unlock(&sbi->s_alloc_mutex);
 	*err = 0;
 	return newblock;
@@ -653,7 +653,7 @@ static void udf_table_free_blocks(struct super_block *sb,
 	brelse(oepos.bh);
 
 error_return:
-	sb->s_dirt = 1;
+	mark_sb_dirty(sb);
 	mutex_unlock(&sbi->s_alloc_mutex);
 	return;
 }
@@ -720,7 +720,7 @@ static int udf_table_prealloc_blocks(struct super_block *sb,
 
 	if (alloc_count && udf_add_free_space(sbi, partition, -alloc_count)) {
 		mark_buffer_dirty(sbi->s_lvid_bh);
-		sb->s_dirt = 1;
+		mark_sb_dirty(sb);
 	}
 	mutex_unlock(&sbi->s_alloc_mutex);
 	return alloc_count;
@@ -822,7 +822,7 @@ static int udf_table_new_block(struct super_block *sb,
 	if (udf_add_free_space(sbi, partition, -1))
 		mark_buffer_dirty(sbi->s_lvid_bh);
 
-	sb->s_dirt = 1;
+	mark_sb_dirty(sb);
 	mutex_unlock(&sbi->s_alloc_mutex);
 	*err = 0;
 	return newblock;

@@ -25,6 +25,7 @@
 #include <mach/isp_user.h>
 
 #include "isph3a.h"
+#include "ispstat.h"
 
 #define AF_MAJOR_NUMBER			0
 #define ISPAF_NAME			"OMAPISP_AF"
@@ -66,6 +67,8 @@
 #define AF_MED_EN			(1 << 2)
 #define AF_ALAW_EN			(1 << 1)
 #define AF_EN				(1 << 0)
+#define AF_PCR_MASK			(FVMODE | RGBPOS | MED_TH | \
+					 AF_MED_EN | AF_ALAW_EN)
 
 /*
  * AFPAX1 fields
@@ -107,84 +110,29 @@
 #define AF_UPDATEXS_LENSPOS		(1 << 2)
 
 /**
- * struct isp_af_buffer - AF frame stats buffer.
- * @virt_addr: Virtual address to mmap the buffer.
- * @phy_addr: Physical address of the buffer.
- * @addr_align: Virtual Address 32 bytes aligned.
- * @ispmmu_addr: Address of the buffer mapped by the ISPMMU.
- * @mmap_addr: Mapped memory area of buffer. For userspace access.
- * @locked: 1 - Buffer locked from write. 0 - Buffer can be overwritten.
- * @frame_num: Frame number from which the statistics are taken.
- * @lens_position: Lens position currently set in the DW9710 Coil motor driver.
- * @next: Pointer to link next buffer.
- */
-struct isp_af_buffer {
-	unsigned long virt_addr;
-	unsigned long phy_addr;
-	unsigned long addr_align;
-	unsigned long ispmmu_addr;
-	unsigned long mmap_addr;
-
-	u8 locked;
-	u16 frame_num;
-	u32 config_counter;
-	struct isp_af_xtrastats xtrastats;
-	struct isp_af_buffer *next;
-};
-
-/**
  * struct isp_af_status - AF status.
- * @initialized: 1 - Buffers initialized.
  * @update: 1 - Update registers.
- * @stats_req: 1 - Future stats requested.
- * @stats_done: 1 - Stats ready for user.
- * @frame_req: Number of frame requested for statistics.
- * @af_buff: Array of statistics buffers to access.
- * @stats_buf_size: Statistics buffer size.
- * @curr_cfg_buf_size: Current user configured stats buff size.
- * @min_buf_size: Minimum statisitics buffer size.
- * @frame_count: Frame Count.
- * @stats_wait: Wait primitive for locking/unlocking the stats request.
- * @buffer_lock: Spinlock for statistics buffers access.
  */
 struct isp_af_device {
-	u8 initialized;
 	u8 update;
-	u8 stats_req;
-	u8 stats_done;
-	u16 frame_req;
-
-	struct isp_af_buffer af_buff[H3A_MAX_BUFF];
-	unsigned int active_buffer;
-	unsigned int stats_buf_size;
-	unsigned int min_buf_size;
-	unsigned int curr_cfg_buf_size;
-	struct isp_af_buffer *active_buff;
-
-	int pm_state;
-	u32 frame_count;
-	wait_queue_head_t stats_wait;
-	atomic_t config_counter;
-	spinlock_t buffer_lock;		/* For stats buffers read/write sync */
-	struct device *dev;
-	int camnotify;
-
+	u8 buf_err;
+	int enabled;
+	struct ispstat stat;
 	struct af_configuration config; /*Device configuration structure */
-	int size_paxel;         /*Paxel size in bytes */
+	struct ispstat_buffer *buf_next;
+	spinlock_t *lock;
 };
 
-int isp_af_check_paxel(struct isp_af_device *);
-int isp_af_check_iir(struct isp_af_device *);
-int isp_af_register_setup(struct isp_af_device *);
-int isp_af_enable(struct isp_af_device *, int);
+int isp_af_buf_process(struct isp_af_device *isp_af);
+void isp_af_enable(struct isp_af_device *, int);
+void isp_af_try_enable(struct isp_af_device *isp_af);
 void isp_af_suspend(struct isp_af_device *);
 void isp_af_resume(struct isp_af_device *);
 int isp_af_busy(struct isp_af_device *);
-void isp_af_notify(struct isp_af_device *, int notify);
-int isp_af_request_statistics(struct isp_af_device *,
-			      struct isp_af_data *afdata);
-int isp_af_configure(struct isp_af_device *, struct af_configuration *afconfig);
-void isp_af_set_address(struct isp_af_device *, unsigned long);
-void isp_af_setxtrastats(struct isp_af_device *,
-			 struct isp_af_xtrastats *xtrastats, u8 updateflag);
+void isp_af_config_registers(struct isp_af_device *isp_af);
+int omap34xx_isp_af_request_statistics(struct isp_af_device *,
+				       struct isp_af_data *afdata);
+int omap34xx_isp_af_config(struct isp_af_device *,
+			   struct af_configuration *afconfig);
+
 #endif	/* OMAP_ISP_AF_H */

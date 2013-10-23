@@ -29,7 +29,8 @@
 #ifndef __ASM_ARCH_OMAP_USB_MUSB_H
 #define __ASM_ARCH_OMAP_USB_MUSB_H
 
-extern void usb_musb_init(void);
+struct musb_board_data;
+extern void usb_musb_init(struct musb_board_data *);
 
 #endif /* __ASM_ARCH_OMAP_USB_MUSB_H */
 

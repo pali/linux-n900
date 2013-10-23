@@ -2924,7 +2924,7 @@ static int ext3_do_update_inode(handle_t *handle,
 				ext3_update_dynamic_rev(sb);
 				EXT3_SET_RO_COMPAT_FEATURE(sb,
 					EXT3_FEATURE_RO_COMPAT_LARGE_FILE);
-				sb->s_dirt = 1;
+				mark_sb_dirty(sb);
 				handle->h_sync = 1;
 				err = ext3_journal_dirty_metadata(handle,
 						EXT3_SB(sb)->s_sbh);

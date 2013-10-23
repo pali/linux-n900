@@ -367,7 +367,7 @@ static enum omap_dss_update_mode dpi_display_get_update_mode(
 		OMAP_DSS_UPDATE_DISABLED;
 }
 
-void dpi_init_display(struct omap_display *display)
+int dpi_init_display(struct omap_display *display)
 {
 	DSSDBG("DPI init_display\n");
 
@@ -380,6 +380,8 @@ void dpi_init_display(struct omap_display *display)
 	display->get_timings = dpi_get_timings;
 	display->set_update_mode = dpi_display_set_update_mode;
 	display->get_update_mode = dpi_display_get_update_mode;
+
+	return 0;
 }
 
 int dpi_init(void)

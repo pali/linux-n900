@@ -1246,7 +1246,7 @@ get_rq:
 		blk_plug_device(q);
 	add_request(q, req);
 out:
-	if (sync)
+	if (sync || (blk_queue_nonrot(q) && rq_data_dir(req) == READ))
 		__generic_unplug_device(q);
 	spin_unlock_irq(q->queue_lock);
 	return 0;

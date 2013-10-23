@@ -57,6 +57,12 @@ struct omap_mmc_platform_data {
 	int (*suspend)(struct device *dev, int slot);
 	int (*resume)(struct device *dev, int slot);
 
+	/* Return context loss count due to PM states changing */
+	int (*get_context_loss_count)(struct device *dev);
+
+	/* set/drop DVFS/PM constraints */
+	void (*set_pm_constraints)(struct device *dev, int on);
+
 	u64 dma_mask;
 
 	struct omap_mmc_slot_data {
@@ -77,6 +83,13 @@ struct omap_mmc_platform_data {
 
 		/* use the internal clock */
 		unsigned internal_clock:1;
+
+		/* Try to sleep or power off when possible */
+		unsigned power_saving:1;
+
+		/* MMC host capabilities */
+		unsigned long caps;
+
 		s16 power_pin;
 
 		int switch_pin;			/* gpio (card detect) */
@@ -85,6 +98,8 @@ struct omap_mmc_platform_data {
 		int (* set_bus_mode)(struct device *dev, int slot, int bus_mode);
 		int (* set_power)(struct device *dev, int slot, int power_on, int vdd);
 		int (* get_ro)(struct device *dev, int slot);
+		int (*set_sleep)(struct device *dev, int slot, int sleep,
+				 int vdd, int cardsleep);
 
 		/* return MMC cover switch state, can be NULL if not supported.
 		 *

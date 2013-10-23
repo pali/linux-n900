@@ -22,6 +22,8 @@
 #ifndef __OMAPFB_H
 #define __OMAPFB_H
 
+#include <linux/fb.h>
+
 #include <asm/ioctl.h>
 #include <asm/types.h>
 
@@ -50,6 +52,8 @@
 #define OMAPFB_QUERY_MEM	OMAP_IOW(56, struct omapfb_mem_info)
 #define OMAPFB_WAITFORVSYNC	OMAP_IO(57)
 #define OMAPFB_MEMORY_READ	OMAP_IOR(58, struct omapfb_memory_read)
+#define OMAPFB_GET_OVERLAY_COLORMODE	OMAP_IOR(59, struct omapfb_ovl_colormode)
+#define OMAPFB_GET_VRAM_INFO	OMAP_IOR(61, struct omapfb_vram_info)
 
 #define OMAPFB_CAPS_GENERIC_MASK	0x00000fff
 #define OMAPFB_CAPS_LCDC_MASK		0x00fff000
@@ -182,11 +186,28 @@ struct omapfb_memory_read {
 	void __user *buffer;
 };
 
+struct omapfb_ovl_colormode {
+	__u8 overlay_idx;
+	__u8 mode_idx;
+	__u32 bits_per_pixel;
+	__u32 nonstd;
+	struct fb_bitfield red;
+	struct fb_bitfield green;
+	struct fb_bitfield blue;
+	struct fb_bitfield transp;
+};
+
+struct omapfb_vram_info {
+	__u32 total;
+	__u32 free;
+	__u32 largest_free_block;
+	__u32 reserved[5];
+};
+
 #ifdef __KERNEL__
 
 #include <linux/completion.h>
 #include <linux/interrupt.h>
-#include <linux/fb.h>
 #include <linux/mutex.h>
 
 #include <mach/board.h>

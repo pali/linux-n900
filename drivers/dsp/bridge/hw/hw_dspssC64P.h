@@ -41,7 +41,7 @@
 
 #define HW_DSP_IDLEBOOT_ADDR   0x007E0000
 
-	extern HW_STATUS HW_DSPSS_BootModeSet(const u32 baseAddress,
+	extern HW_STATUS HW_DSPSS_BootModeSet(const void __iomem *baseAddress,
 					enum HW_DSPSYSC_BootMode_t bootMode,
 					const u32 bootAddress);
 

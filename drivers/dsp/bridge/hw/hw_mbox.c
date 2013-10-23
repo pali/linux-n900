@@ -33,10 +33,12 @@
 /* width in bits of MBOX Id */
 #define HW_MBOX_ID_WIDTH	   2
 
-struct MAILBOX_CONTEXT mboxsetting = {0x4, 0x1, 0x1};
+struct MAILBOX_CONTEXT mboxsetting = {
+	.sysconfig = 2 << 3 | 1, /* SMART/AUTO-IDLE */
+};
 
 /* Saves the mailbox context */
-HW_STATUS HW_MBOX_saveSettings(u32 baseAddress)
+HW_STATUS HW_MBOX_saveSettings(void __iomem *baseAddress)
 {
 	HW_STATUS status = RET_OK;
 
@@ -50,7 +52,7 @@ HW_STATUS HW_MBOX_saveSettings(u32 baseAddress)
 }
 
 /* Restores the mailbox context */
-HW_STATUS HW_MBOX_restoreSettings(u32 baseAddress)
+HW_STATUS HW_MBOX_restoreSettings(void __iomem *baseAddress)
 {
 	 HW_STATUS status = RET_OK;
 	/* Restor IRQ enable status */
@@ -65,8 +67,8 @@ HW_STATUS HW_MBOX_restoreSettings(u32 baseAddress)
 
 /* Reads a u32 from the sub module message box Specified. if there are no
  * messages in the mailbox then and error is returned. */
-HW_STATUS HW_MBOX_MsgRead(const u32 baseAddress, const HW_MBOX_Id_t mailBoxId,
-				u32 *const pReadValue)
+HW_STATUS HW_MBOX_MsgRead(const void __iomem *baseAddress,
+	const HW_MBOX_Id_t mailBoxId, u32 *const pReadValue)
 {
 	HW_STATUS status = RET_OK;
 
@@ -86,8 +88,8 @@ HW_STATUS HW_MBOX_MsgRead(const u32 baseAddress, const HW_MBOX_Id_t mailBoxId,
 }
 
 /* Writes a u32 from the sub module message box Specified. */
-HW_STATUS HW_MBOX_MsgWrite(const u32 baseAddress, const HW_MBOX_Id_t mailBoxId,
-			const u32 writeValue)
+HW_STATUS HW_MBOX_MsgWrite(const void __iomem *baseAddress,
+	const HW_MBOX_Id_t mailBoxId, const u32 writeValue)
 {
 	HW_STATUS status = RET_OK;
 
@@ -105,8 +107,8 @@ HW_STATUS HW_MBOX_MsgWrite(const u32 baseAddress, const HW_MBOX_Id_t mailBoxId,
 }
 
 /* Gets number of messages in a specified mailbox. */
-HW_STATUS HW_MBOX_NumMsgGet(const u32 baseAddress, const HW_MBOX_Id_t mailBoxId,
-				u32 *const pNumMsg)
+HW_STATUS HW_MBOX_NumMsgGet(const void __iomem *baseAddress,
+	const HW_MBOX_Id_t mailBoxId, u32 *const pNumMsg)
 {
 	HW_STATUS status = RET_OK;
 
@@ -127,7 +129,7 @@ HW_STATUS HW_MBOX_NumMsgGet(const u32 baseAddress, const HW_MBOX_Id_t mailBoxId,
 }
 
 /* Enables the specified IRQ. */
-HW_STATUS HW_MBOX_EventEnable(const u32	baseAddress,
+HW_STATUS HW_MBOX_EventEnable(const void __iomem *baseAddress,
 				const HW_MBOX_Id_t mailBoxId,
 				const HW_MBOX_UserId_t userId,
 				const u32 events)
@@ -167,7 +169,7 @@ HW_STATUS HW_MBOX_EventEnable(const u32	baseAddress,
 }
 
 /* Disables the specified IRQ. */
-HW_STATUS HW_MBOX_EventDisable(const u32 baseAddress,
+HW_STATUS HW_MBOX_EventDisable(const void __iomem *baseAddress,
 				const HW_MBOX_Id_t mailBoxId,
 				const HW_MBOX_UserId_t userId,
 				const u32 events)
@@ -201,8 +203,9 @@ HW_STATUS HW_MBOX_EventDisable(const u32 baseAddress,
 }
 
 /* Sets the status of the specified IRQ. */
-HW_STATUS HW_MBOX_EventAck(const u32 baseAddress, const HW_MBOX_Id_t mailBoxId,
-			const HW_MBOX_UserId_t userId, const u32 event)
+HW_STATUS HW_MBOX_EventAck(const void __iomem *baseAddress,
+	const HW_MBOX_Id_t mailBoxId, const HW_MBOX_UserId_t userId,
+	const u32 event)
 {
 	HW_STATUS status = RET_OK;
 	u32 irqStatusReg;

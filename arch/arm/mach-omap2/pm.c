@@ -215,7 +215,7 @@ void omap2_allow_sleep(void)
 	BUG_ON(i < 0);
 }
 
-unsigned get_last_off_on_transaction_id(struct device *dev)
+int get_last_off_on_transaction_id(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct omapdev *odev = omapdev_find_pdev(pdev);
@@ -224,7 +224,7 @@ unsigned get_last_off_on_transaction_id(struct device *dev)
 	if (odev) {
 		pwrdm = omapdev_get_pwrdm(odev);
 		if (pwrdm)
-			return pwrdm->state_counter[0];
+			return pwrdm->state_counter[0] & INT_MAX;
 	}
 
 	return 0;

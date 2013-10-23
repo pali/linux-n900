@@ -72,6 +72,12 @@ IMG_IMPORT
 IMG_VOID PVRSRVPowerUnlock(IMG_UINT32	ui32CallerID);
 
 IMG_IMPORT
+IMG_VOID PVRSRVDvfsLock(IMG_VOID);
+
+IMG_IMPORT
+IMG_VOID PVRSRVDvfsUnlock(IMG_VOID);
+
+IMG_IMPORT
 PVRSRV_ERROR PVRSRVSetDevicePowerStateKM(IMG_UINT32			ui32DeviceIndex,
 										 PVR_POWER_STATE	eNewPowerState,
 										 IMG_UINT32			ui32CallerID,
@@ -102,7 +108,7 @@ IMG_IMPORT
 IMG_BOOL PVRSRVIsDevicePowered(IMG_UINT32 ui32DeviceIndex);
 
 IMG_IMPORT
-IMG_VOID PVRSRVDevicePreClockSpeedChange(IMG_UINT32	ui32DeviceIndex,
+PVRSRV_ERROR PVRSRVDevicePreClockSpeedChange(IMG_UINT32	ui32DeviceIndex,
 										 IMG_BOOL	bIdleDevice,
 										 IMG_VOID	*pvInfo);
 

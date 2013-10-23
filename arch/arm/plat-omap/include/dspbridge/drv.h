@@ -180,8 +180,9 @@ struct PROCESS_CONTEXT{
 	* (To maintain a linked list of process contexts) */
 	struct PROCESS_CONTEXT *next;
 
-	/* Processor info to which the process is related */
-	DSP_HPROCESSOR hProcessor;
+	/* List of Processors */
+	struct list_head processor_list;
+	spinlock_t proc_list_lock;
 
 	/* DSP Node resources */
 	struct NODE_RES_OBJECT *pNodeList;

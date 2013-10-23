@@ -34,8 +34,6 @@
 
 #include "omapfb.h"
 
-#define DSS1_COMPAT_PANEL
-
 static ssize_t show_rotate_type(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -44,6 +42,45 @@ static ssize_t show_rotate_type(struct device *dev,
 
 	return snprintf(buf, PAGE_SIZE, "%d\n", ofbi->rotation_type);
 }
+
+static ssize_t store_rotate_type(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct omapfb_info *ofbi = FB2OFB(fbi);
+	struct omapfb2_device *fbdev = ofbi->fbdev;
+	enum omap_dss_rotation_type rot_type;
+	int r;
+
+	rot_type = simple_strtoul(buf, NULL, 0);
+
+	if (rot_type != OMAP_DSS_ROT_DMA && rot_type != OMAP_DSS_ROT_VRFB)
+		return -EINVAL;
+
+	omapfb_lock(fbdev);
+
+	r = 0;
+	if (rot_type == ofbi->rotation_type)
+		goto out;
+
+	if (ofbi->region.size) {
+		r = -EBUSY;
+		goto out;
+	}
+
+	ofbi->rotation_type = rot_type;
+
+	/*
+	 * Since the VRAM for this FB is not allocated at the moment we don't need to
+	 * do any further parameter checking at this point.
+	 */
+out:
+	omapfb_unlock(fbdev);
+
+	return r ? r : count;
+}
+
 
 static ssize_t show_mirror(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -146,6 +183,7 @@ static ssize_t store_overlays(struct device *dev, struct device_attribute *attr,
 	struct omap_overlay *ovl;
 	int num_ovls, r, i;
 	int len;
+	bool added = false;
 
 	num_ovls = 0;
 
@@ -221,8 +259,10 @@ static ssize_t store_overlays(struct device *dev, struct device_attribute *attr,
 		if (ovl->manager)
 			ovl->manager->apply(ovl->manager);
 
-		for (t = i + 1; t < ofbi->num_overlays; t++)
+		for (t = i + 1; t < ofbi->num_overlays; t++) {
+			ofbi->rotation[t-1] = ofbi->rotation[t];
 			ofbi->overlays[t-1] = ofbi->overlays[t];
+		}
 
 		ofbi->num_overlays--;
 		i--;
@@ -244,18 +284,100 @@ static ssize_t store_overlays(struct device *dev, struct device_attribute *attr,
 
 		if (found)
 			continue;
-
+		ofbi->rotation[ofbi->num_overlays] = 0;
 		ofbi->overlays[ofbi->num_overlays++] = ovl;
 
-		r = omapfb_apply_changes(fbi, 1);
+		added = true;
+	}
+
+	if (added) {
+		r = omapfb_apply_changes(fbi, 0);
+		if (r)
+			goto out;
+	}
+
+	r = count;
+out:
+	omapfb_unlock(fbdev);
+
+	return r;
+}
+
+static ssize_t show_overlays_rotate(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct omapfb_info *ofbi = FB2OFB(fbi);
+	ssize_t l = 0;
+	int t;
+
+	for (t = 0; t < ofbi->num_overlays; t++) {
+		l += snprintf(buf + l, PAGE_SIZE - l, "%s%d",
+				t == 0 ? "" : ",", ofbi->rotation[t]);
+	}
+
+	l += snprintf(buf + l, PAGE_SIZE - l, "\n");
+
+	return l;
+}
+
+static ssize_t store_overlays_rotate(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct omapfb_info *ofbi = FB2OFB(fbi);
+	struct omapfb2_device *fbdev = ofbi->fbdev;
+	int num_ovls = 0, r, i;
+	int len;
+	bool changed = false;
+	u8 rotation[OMAPFB_MAX_OVL_PER_FB];
+
+	len = strlen(buf);
+	if (buf[len - 1] == '\n')
+		len = len - 1;
+
+	omapfb_lock(fbdev);
+
+	if (len > 0) {
+		char *p = (char *)buf;
+
+		while (p < buf + len) {
+			int rot;
+
+			if (num_ovls == ofbi->num_overlays) {
+				r = -EINVAL;
+				goto out;
+			}
+
+			rot = simple_strtoul(p, &p, 0);
+			if (rot < 0 || rot > 3) {
+				r = -EINVAL;
+				goto out;
+			}
+
+			if (ofbi->rotation[num_ovls] != rot)
+				changed = true;
+
+			rotation[num_ovls++] = rot;
+
+			p++;
+		}
+	}
+
+	if (num_ovls != ofbi->num_overlays) {
+		r = -EINVAL;
+		goto out;
+	}
+
+	if (changed) {
+		for (i = 0; i < num_ovls; ++i)
+			ofbi->rotation[i] = rotation[i];
+
+		r = omapfb_apply_changes(fbi, 0);
 		if (r)
 			goto out;
 
-		if (ovl->manager) {
-			r = ovl->manager->apply(ovl->manager);
-			if (r)
-				goto out;
-		}
+		/* FIXME error handling? */
 	}
 
 	r = count;
@@ -329,52 +451,18 @@ static ssize_t show_virt(struct device *dev,
 }
 
 static struct device_attribute omapfb_attrs[] = {
-	__ATTR(rotate_type, S_IRUGO, show_rotate_type, NULL),
+	__ATTR(rotate_type, S_IRUGO | S_IWUSR, show_rotate_type, store_rotate_type),
 	__ATTR(mirror, S_IRUGO | S_IWUSR, show_mirror, store_mirror),
 	__ATTR(size, S_IRUGO | S_IWUSR, show_size, store_size),
 	__ATTR(overlays, S_IRUGO | S_IWUSR, show_overlays, store_overlays),
+	__ATTR(overlays_rotate, S_IRUGO | S_IWUSR, show_overlays_rotate, store_overlays_rotate),
 	__ATTR(phys_addr, S_IRUGO, show_phys, NULL),
 	__ATTR(virt_addr, S_IRUGO, show_virt, NULL),
 };
 
-#ifdef DSS1_COMPAT_PANEL
-/* panel sysfs entries */
-static ssize_t omapfb_show_panel_name(struct device *dev,
-				      struct device_attribute *attr, char *buf)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct omapfb2_device *fbdev = platform_get_drvdata(pdev);
-	const char *panel_name;
-
-	if (fbdev->num_displays < 1 || fbdev->displays[0] == NULL ||
-	    fbdev->displays[0]->panel == NULL) {
-		return -ENODEV;
-	}
-	/* Strip the leading 'panel-' string */
-	panel_name = fbdev->displays[0]->panel->name;
-	if (strncmp(panel_name, "panel-", 6) == 0)
-		panel_name += 6;
-
-	return snprintf(buf, PAGE_SIZE, "%s\n", panel_name);
-}
-
-static struct device_attribute dev_attr_panel_name =
-	__ATTR(name, 0444, omapfb_show_panel_name, NULL);
-
-static struct attribute *panel_attrs[] = {
-	&dev_attr_panel_name.attr,
-	NULL,
-};
-
-static struct attribute_group panel_attr_group = {
-	.name  = "panel",
-	.attrs = panel_attrs,
-};
-#endif	/* DSS1_COMPAT_PANEL */
-
 int omapfb_create_sysfs(struct omapfb2_device *fbdev)
 {
-	int i, t;
+	int i;
 	int r;
 
 	DBG("create sysfs for fbs\n");
@@ -390,17 +478,6 @@ int omapfb_create_sysfs(struct omapfb2_device *fbdev)
 			}
 		}
 	}
-#ifdef DSS1_COMPAT_PANEL
-	r = sysfs_create_group(&fbdev->dev->kobj, &panel_attr_group);
-	if (r) {
-		dev_err(fbdev->dev, "failed to create compat sysfs clk file\n");
-		for (i = 0; i < fbdev->num_fbs; i++) {
-			for (t = 0; t < ARRAY_SIZE(omapfb_attrs); t++)
-				device_remove_file(fbdev->fbs[i]->dev,
-						&omapfb_attrs[t]);
-		}
-	}
-#endif	/* DSS1_COMPAT_PANEL */
 
 	return 0;
 }
@@ -410,9 +487,6 @@ void omapfb_remove_sysfs(struct omapfb2_device *fbdev)
 	int i, t;
 
 	DBG("remove sysfs for fbs\n");
-#ifdef DSS1_COMPAT_PANEL
-	sysfs_remove_group(&fbdev->dev->kobj, &panel_attr_group);
-#endif
 	for (i = 0; i < fbdev->num_fbs; i++) {
 		for (t = 0; t < ARRAY_SIZE(omapfb_attrs); t++)
 			device_remove_file(fbdev->fbs[i]->dev,

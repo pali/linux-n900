@@ -35,15 +35,10 @@ extern DSP_STATUS DRV_ProcUpdatestate(HANDLE pCtxt,
 
 extern DSP_STATUS DRV_ProcSetPID(HANDLE pCtxt, s32 hProcess);
 
-extern DSP_STATUS DRV_GetProcContext(u32 phProcess,
-				struct DRV_OBJECT *hDrvObject,
-				HANDLE hPCtxt, DSP_HNODE hNode,
-				u32 pMapAddr);
-
 extern DSP_STATUS DRV_RemoveAllResources(HANDLE pPctxt);
 
 extern DSP_STATUS DRV_RemoveProcContext(struct DRV_OBJECT *hDRVObject,
-				     HANDLE hPCtxt, HANDLE hProcess);
+				     HANDLE hPCtxt);
 
 extern DSP_STATUS DRV_GetNodeResElement(HANDLE hNode, HANDLE nodeRes,
 					HANDLE pCtxt);

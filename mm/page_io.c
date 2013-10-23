@@ -20,7 +20,8 @@
 #include <asm/pgtable.h>
 
 static struct bio *get_swap_bio(gfp_t gfp_flags, pgoff_t index,
-				struct page *page, bio_end_io_t end_io)
+				struct page *page, bio_end_io_t end_io,
+				unsigned long rw)
 {
 	struct bio *bio;
 
@@ -30,8 +31,9 @@ static struct bio *get_swap_bio(gfp_t gfp_flags, pgoff_t index,
 		swp_entry_t entry = { .val = index, };
 
 		sis = get_swap_info_struct(swp_type(entry));
-		bio->bi_sector = map_swap_page(sis, swp_offset(entry)) *
-					(PAGE_SIZE >> 9);
+		bio->bi_sector =
+			map_swap_page(sis, swp_offset(entry), rw & WRITE) *
+			(PAGE_SIZE >> 9);
 		bio->bi_bdev = sis->bdev;
 		bio->bi_io_vec[0].bv_page = page;
 		bio->bi_io_vec[0].bv_len = PAGE_SIZE;
@@ -103,7 +105,7 @@ int swap_writepage(struct page *page, struct writeback_control *wbc)
 		goto out;
 	}
 	bio = get_swap_bio(GFP_NOIO, page_private(page), page,
-				end_swap_bio_write);
+				end_swap_bio_write, rw);
 	if (bio == NULL) {
 		set_page_dirty(page);
 		unlock_page(page);
@@ -128,7 +130,7 @@ int swap_readpage(struct file *file, struct page *page)
 	BUG_ON(!PageLocked(page));
 	BUG_ON(PageUptodate(page));
 	bio = get_swap_bio(GFP_KERNEL, page_private(page), page,
-				end_swap_bio_read);
+				end_swap_bio_read, 0);
 	if (bio == NULL) {
 		unlock_page(page);
 		ret = -ENOMEM;

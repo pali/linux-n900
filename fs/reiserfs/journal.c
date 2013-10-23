@@ -3251,7 +3251,7 @@ int journal_mark_dirty(struct reiserfs_transaction_handle *th,
 			       th->t_trans_id, journal->j_trans_id);
 	}
 
-	p_s_sb->s_dirt = 1;
+	mark_sb_dirty(p_s_sb);
 
 	prepared = test_clear_buffer_journal_prepared(bh);
 	clear_buffer_journal_restore_dirty(bh);
@@ -3545,7 +3545,7 @@ int reiserfs_flush_old_commits(struct super_block *p_s_sb)
 			do_journal_end(&th, p_s_sb, 1, COMMIT_NOW | WAIT);
 		}
 	}
-	return p_s_sb->s_dirt;
+	return is_sb_dirty(p_s_sb);
 }
 
 /*
@@ -3974,7 +3974,7 @@ static int do_journal_end(struct reiserfs_transaction_handle *th,
 	 ** it tells us if we should continue with the journal_end, or just return
 	 */
 	if (!check_journal_end(th, p_s_sb, nblocks, flags)) {
-		p_s_sb->s_dirt = 1;
+		mark_sb_dirty(p_s_sb);
 		wake_queued_writers(p_s_sb);
 		reiserfs_async_progress_wait(p_s_sb);
 		goto out;

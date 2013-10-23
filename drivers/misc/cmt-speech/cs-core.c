@@ -45,7 +45,7 @@
 #include "cs-core.h"
 #include "cs-ssi.h"
 
-#define CS_MMAP_SIZE	4096
+#define CS_MMAP_SIZE	PAGE_SIZE
 
 struct char_queue {
 	struct list_head	list;
@@ -319,8 +319,7 @@ static int cs_char_open(struct inode *inode, struct file *file)
 		goto out;
 	}
 
-	cs_char_data.mmap_base  = (unsigned long)
-				kmalloc(CS_MMAP_SIZE, GFP_ATOMIC);
+	cs_char_data.mmap_base = get_zeroed_page(GFP_ATOMIC);
 	if (!cs_char_data.mmap_base) {
 		pr_err("CS_SSI: Shared memory allocation failed.\n");
 		ret = -ENOMEM;
@@ -351,7 +350,7 @@ static int cs_char_release(struct inode *inode, struct file *file)
 
 	spin_lock_bh(&cs_char_data.lock);
 
-	kfree((void *)cs_char_data.mmap_base);
+	free_page(cs_char_data.mmap_base);
 	cs_char_data.mmap_base = 0;
 	cs_char_data.mmap_size = 0;
 	cs_char_data.opened = 0;

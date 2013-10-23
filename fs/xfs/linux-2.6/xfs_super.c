@@ -1162,7 +1162,7 @@ xfs_fs_write_super(
 {
 	if (!(sb->s_flags & MS_RDONLY))
 		xfs_sync(XFS_M(sb), SYNC_FSDATA);
-	sb->s_dirt = 0;
+	mark_sb_clean(sb);
 }
 
 STATIC int
@@ -1200,7 +1200,7 @@ xfs_fs_sync_super(
 		flags = SYNC_FSDATA;
 
 	error = xfs_sync(mp, flags);
-	sb->s_dirt = 0;
+	mark_sb_clean(sb);
 
 	if (unlikely(laptop_mode)) {
 		int	prev_sync_seq = mp->m_sync_seq;
@@ -1749,7 +1749,7 @@ xfs_fs_fill_super(
 
 	XFS_SEND_MOUNT(mp, DM_RIGHT_NULL, args->mtpt, args->fsname);
 
-	sb->s_dirt = 1;
+	mark_sb_dirty(sb);
 	sb->s_magic = XFS_SB_MAGIC;
 	sb->s_blocksize = mp->m_sb.sb_blocksize;
 	sb->s_blocksize_bits = ffs(sb->s_blocksize) - 1;

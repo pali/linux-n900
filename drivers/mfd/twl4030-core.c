@@ -362,7 +362,7 @@ EXPORT_SYMBOL(twl4030_i2c_read);
 int twl4030_i2c_write_u8(u8 mod_no, u8 value, u8 reg)
 {
 
-	/* 2 bytes offset 1 contains the data offset 0 is used by i2c_write */
+	/* 2 bytes: offset 1 contains the data, offset 0 is used by i2c_write */
 	u8 temp_buffer[2] = { 0 };
 	/* offset 1 contains the data */
 	temp_buffer[1] = value;
@@ -786,7 +786,7 @@ twl4030_probe(struct i2c_client *client, const struct i2c_device_id *id)
 			twl->client = i2c_new_dummy(client->adapter,
 					twl->address);
 			if (!twl->client) {
-				dev_err(&twl->client->dev,
+				dev_err(&client->dev,
 					"can't attach client %d\n", i);
 				status = -ENOMEM;
 				goto fail;

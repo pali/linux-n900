@@ -854,6 +854,9 @@ PVRSRV_ERROR PVRSRVRegisterCmdProcListKM(IMG_UINT32		ui32DevIndex,
 		PVR_DPF((PVR_DBG_ERROR,"PVRSRVRegisterCmdProcListKM: Failed to alloc CC data"));
 		goto ErrorExit;
 	}
+	/* clear the list to ensure that we don't try to access uninitialised pointer
+	 * in the 'error' execution path */
+	OSMemSet(psSysData->ppsCmdCompleteData[ui32DevIndex], 0x00, ui32AllocSize);
 
 	for (i=0; i<ui32CmdCount; i++)
 	{
@@ -886,6 +889,7 @@ PVRSRV_ERROR PVRSRVRegisterCmdProcListKM(IMG_UINT32		ui32DevIndex,
 		psCmdCompleteData->psSrcSync = (PVRSRV_SYNC_OBJECT*)
 										(((IMG_UINT32)psCmdCompleteData->psDstSync) 
 										+ (sizeof(PVRSRV_SYNC_OBJECT) * ui32MaxSyncsPerCmd[i][0]));
+		psCmdCompleteData->ui32AllocSize = ui32AllocSize;
 	}
 
 	return PVRSRV_OK;
@@ -900,16 +904,23 @@ ErrorExit:
 		{
 			if (psSysData->ppsCmdCompleteData[ui32DevIndex][i] != IMG_NULL)
 			{
-				OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP, 0, psSysData->ppsCmdCompleteData[ui32DevIndex][i], IMG_NULL);
+				psCmdCompleteData = psSysData->ppsCmdCompleteData[ui32DevIndex][i];
+				OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP,
+						psCmdCompleteData->ui32AllocSize,
+						psCmdCompleteData, IMG_NULL);
 			}
 		}
 
-		OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP, 0, psSysData->ppsCmdCompleteData[ui32DevIndex], IMG_NULL);
+		OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP,
+				ui32CmdCount * sizeof(COMMAND_COMPLETE_DATA *),
+				psSysData->ppsCmdCompleteData[ui32DevIndex], IMG_NULL);
 	}
 
 	if(psSysData->ppfnCmdProcList[ui32DevIndex] != IMG_NULL)
 	{
-		OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP, 0, psSysData->ppfnCmdProcList[ui32DevIndex], IMG_NULL);
+		OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP,
+				ui32CmdCount * sizeof(PFN_CMD_PROC),
+				psSysData->ppfnCmdProcList[ui32DevIndex], IMG_NULL);
 	}
 	
 	return eError;
@@ -948,18 +959,26 @@ PVRSRV_ERROR PVRSRVRemoveCmdProcListKM(IMG_UINT32 ui32DevIndex,
 			
 			if(psSysData->ppsCmdCompleteData[ui32DevIndex][i] != IMG_NULL)
 			{
-				OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP, 0, psSysData->ppsCmdCompleteData[ui32DevIndex][i], IMG_NULL);
+				COMMAND_COMPLETE_DATA *psCmdCompleteData =
+					psSysData->ppsCmdCompleteData[ui32DevIndex][i];
+				OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP,
+						psCmdCompleteData->ui32AllocSize,
+						psCmdCompleteData, IMG_NULL);
 			}
 		}
 
 		
-		OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP, 0, psSysData->ppsCmdCompleteData[ui32DevIndex], IMG_NULL);
+		OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP,
+				ui32CmdCount * sizeof(COMMAND_COMPLETE_DATA *),
+				psSysData->ppsCmdCompleteData[ui32DevIndex], IMG_NULL);
 	}
 
 	
 	if(psSysData->ppfnCmdProcList[ui32DevIndex] != IMG_NULL)
 	{
-		OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP, 0, psSysData->ppfnCmdProcList[ui32DevIndex], IMG_NULL);
+		OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP,
+				ui32CmdCount * sizeof(PFN_CMD_PROC),
+				psSysData->ppfnCmdProcList[ui32DevIndex], IMG_NULL);
 	}
 
 	return PVRSRV_OK;

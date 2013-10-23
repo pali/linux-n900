@@ -28,14 +28,14 @@
 #define ISPPRV_BRIGHT_STEP		0x1
 #define ISPPRV_BRIGHT_DEF		0x0
 #define ISPPRV_BRIGHT_LOW		0x0
-#define ISPPRV_BRIGHT_HIGH		0xF
-#define ISPPRV_BRIGHT_UNITS		0x7
+#define ISPPRV_BRIGHT_HIGH		0xFF
+#define ISPPRV_BRIGHT_UNITS		0x1
 
 #define ISPPRV_CONTRAST_STEP		0x1
-#define ISPPRV_CONTRAST_DEF		0x4
+#define ISPPRV_CONTRAST_DEF		0x10
 #define ISPPRV_CONTRAST_LOW		0x0
-#define ISPPRV_CONTRAST_HIGH		0xF
-#define ISPPRV_CONTRAST_UNITS		0x4
+#define ISPPRV_CONTRAST_HIGH		0xFF
+#define ISPPRV_CONTRAST_UNITS		0x1
 
 #define NO_AVE				0x0
 #define AVE_2_PIX			0x1
@@ -162,7 +162,6 @@ struct prev_darkfrm_params {
 /**
  * struct prev_params - Structure for all configuration
  * @features: Set of features enabled.
- * @pix_fmt: Output pixel format.
  * @cfa: CFA coefficients.
  * @csup: Chroma suppression coefficients.
  * @ytable: Pointer to Luma enhancement coefficients.
@@ -212,6 +211,8 @@ struct prev_params {
  * @red_gamma: Pointer to red gamma correction table.
  * @green_gamma: Pointer to green gamma correction table.
  * @blue_gamma: Pointer to blue gamma correction table.
+ * @prev_cfa: Pointer to color filter array configuration.
+ * @prev_wbal: Pointer to colour and digital gain configuration.
  */
 struct isptables_update {
 	u16 update;
@@ -221,11 +222,12 @@ struct isptables_update {
 	u32 *red_gamma;
 	u32 *green_gamma;
 	u32 *blue_gamma;
+	struct ispprev_cfa *prev_cfa;
+	struct ispprev_wbal *prev_wbal;
 };
 
 /**
  * struct isp_prev_device - Structure for storing ISP Preview module information
- * @prev_inuse: Flag to determine if CCDC has been reserved or not (0 or 1).
  * @prevout_w: Preview output width.
  * @prevout_h: Preview output height.
  * @previn_w: Preview input width.
@@ -244,21 +246,14 @@ struct isptables_update {
  * @contrast: Contrast in preview module.
  * @color: Color effect in preview module.
  * @cfafmt: Color Filter Array (CFA) Format.
- * @ispprev_mutex: Mutex for isp preview.
+ * @wbal_update: Update digital and colour gains in Previewer
  *
  * This structure is used to store the OMAP ISP Preview module Information.
  */
 struct isp_prev_device {
-	int pm_state;
-	u8 prev_inuse;
-	u32 prevout_w;
-	u32 prevout_h;
-	u32 previn_w;
-	u32 previn_h;
-	enum preview_input prev_inpfmt;
-	enum preview_output prev_outfmt;
 	u8 update_color_matrix;
 	u8 update_rgb_blending;
+	u8 update_rgb_to_ycbcr;
 	u8 hmed_en;
 	u8 nf_en;
 	u8 dcor_en;
@@ -268,20 +263,21 @@ struct isp_prev_device {
 	u8 rg_update;
 	u8 gg_update;
 	u8 bg_update;
+	u8 cfa_update;
 	u8 nf_enable;
 	u8 nf_update;
+	u8 wbal_update;
 	u8 fmtavg;
 	u8 brightness;
 	u8 contrast;
 	enum v4l2_colorfx color;
 	enum cfa_fmt cfafmt;
-	struct mutex ispprev_mutex; /* For checking/modifying prev_inuse */
 	struct ispprev_nf prev_nf_t;
-	struct prev_params *prev_params;
-	struct prev_params *params;
+	struct prev_params params;
+	int shadow_update;
 	u32 sph;
 	u32 slv;
-	struct device *dev;
+	spinlock_t lock;
 };
 
 void isppreview_config_shadow_registers(struct isp_prev_device *isp_prev);
@@ -291,8 +287,7 @@ int isppreview_request(struct isp_prev_device *isp_prev);
 int isppreview_free(struct isp_prev_device *isp_prev);
 
 int isppreview_config_datapath(struct isp_prev_device *isp_prev,
-			       enum preview_input input,
-			       enum preview_output output);
+			       struct isp_pipeline *pipe);
 
 void isppreview_config_ycpos(struct isp_prev_device *isp_prev,
 			     enum preview_ycpos_mode mode);
@@ -327,7 +322,7 @@ void isppreview_config_dcor(struct isp_prev_device *isp_prev,
 
 
 void isppreview_config_cfa(struct isp_prev_device *isp_prev,
-			   struct ispprev_cfa);
+			   struct ispprev_cfa *cfa);
 
 void isppreview_config_gammacorrn(struct isp_prev_device *isp_prev,
 				  struct ispprev_gtable);
@@ -384,11 +379,11 @@ void isppreview_query_brightness(struct isp_prev_device *isp_prev,
 void isppreview_config_yc_range(struct isp_prev_device *isp_prev,
 				struct ispprev_yclimit yclimit);
 
-int isppreview_try_size(struct isp_prev_device *isp_prev, u32 input_w,
-			u32 input_h, u32 *output_w, u32 *output_h);
+int isppreview_try_pipeline(struct isp_prev_device *isp_prev,
+			    struct isp_pipeline *pipe);
 
-int isppreview_config_size(struct isp_prev_device *isp_prev, u32 input_w,
-			   u32 input_h, u32 output_w, u32 output_h);
+int isppreview_s_pipeline(struct isp_prev_device *isp_prev,
+			  struct isp_pipeline *pipe);
 
 int isppreview_config_inlineoffset(struct isp_prev_device *isp_prev,
 				   u32 offset);
@@ -407,15 +402,10 @@ int isppreview_set_darkaddr(struct isp_prev_device *isp_prev, u32 addr);
 
 void isppreview_enable(struct isp_prev_device *isp_prev, int enable);
 
-void isppreview_suspend(struct isp_prev_device *isp_prev);
-
-void isppreview_resume(struct isp_prev_device *isp_prev);
-
 int isppreview_busy(struct isp_prev_device *isp_prev);
 
-struct prev_params *isppreview_get_config(struct isp_prev_device *isp_prev);
-
-void isppreview_print_status(struct isp_prev_device *isp_prev);
+void isppreview_print_status(struct isp_prev_device *isp_prev,
+			     struct isp_pipeline *pipe);
 
 #ifndef CONFIG_ARCH_OMAP3410
 void isppreview_save_context(struct device *dev);
@@ -431,9 +421,6 @@ static inline void isppreview_restore_context(struct device *dev) {}
 
 int omap34xx_isp_preview_config(struct isp_prev_device *isp_prev,
 				void *userspace_add);
-
-int omap34xx_isp_tables_update(struct isp_prev_device *isp_prev,
-			       struct isptables_update *isptables_struct);
 
 void isppreview_set_skip(struct isp_prev_device *isp_prev, u32 h, u32 v);
 

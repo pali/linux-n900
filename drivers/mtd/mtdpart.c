@@ -18,6 +18,7 @@
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
 #include <linux/mtd/compatmac.h>
+#include <linux/seq_file.h>
 
 /* Our partition linked list */
 static LIST_HEAD(mtd_partitions);
@@ -54,6 +55,8 @@ static int part_read(struct mtd_info *mtd, loff_t from, size_t len,
 		len = 0;
 	else if (from + len > mtd->size)
 		len = mtd->size - from;
+	mtd->read_cnt += 1;
+	mtd->read_sz += len;
 	res = part->master->read(part->master, from + part->offset,
 				   len, retlen, buf);
 	if (unlikely(res)) {
@@ -73,6 +76,7 @@ static int part_point(struct mtd_info *mtd, loff_t from, size_t len,
 		len = 0;
 	else if (from + len > mtd->size)
 		len = mtd->size - from;
+	mtd->other_cnt += 1;
 	return part->master->point (part->master, from + part->offset,
 				    len, retlen, virt, phys);
 }
@@ -81,6 +85,7 @@ static void part_unpoint(struct mtd_info *mtd, loff_t from, size_t len)
 {
 	struct mtd_part *part = PART(mtd);
 
+	mtd->other_cnt += 1;
 	part->master->unpoint(part->master, from + part->offset, len);
 }
 
@@ -94,6 +99,7 @@ static int part_read_oob(struct mtd_info *mtd, loff_t from,
 		return -EINVAL;
 	if (ops->datbuf && from + ops->len > mtd->size)
 		return -EINVAL;
+	mtd->other_cnt += 1;
 	res = part->master->read_oob(part->master, from + part->offset, ops);
 
 	if (unlikely(res)) {
@@ -109,6 +115,7 @@ static int part_read_user_prot_reg(struct mtd_info *mtd, loff_t from,
 		size_t len, size_t *retlen, u_char *buf)
 {
 	struct mtd_part *part = PART(mtd);
+	mtd->other_cnt += 1;
 	return part->master->read_user_prot_reg(part->master, from,
 					len, retlen, buf);
 }
@@ -117,6 +124,7 @@ static int part_get_user_prot_info(struct mtd_info *mtd,
 		struct otp_info *buf, size_t len)
 {
 	struct mtd_part *part = PART(mtd);
+	mtd->other_cnt += 1;
 	return part->master->get_user_prot_info(part->master, buf, len);
 }
 
@@ -124,6 +132,7 @@ static int part_read_fact_prot_reg(struct mtd_info *mtd, loff_t from,
 		size_t len, size_t *retlen, u_char *buf)
 {
 	struct mtd_part *part = PART(mtd);
+	mtd->other_cnt += 1;
 	return part->master->read_fact_prot_reg(part->master, from,
 					len, retlen, buf);
 }
@@ -132,6 +141,7 @@ static int part_get_fact_prot_info(struct mtd_info *mtd, struct otp_info *buf,
 		size_t len)
 {
 	struct mtd_part *part = PART(mtd);
+	mtd->other_cnt += 1;
 	return part->master->get_fact_prot_info(part->master, buf, len);
 }
 
@@ -145,6 +155,8 @@ static int part_write(struct mtd_info *mtd, loff_t to, size_t len,
 		len = 0;
 	else if (to + len > mtd->size)
 		len = mtd->size - to;
+	mtd->write_cnt += 1;
+	mtd->write_sz += len;
 	return part->master->write(part->master, to + part->offset,
 				    len, retlen, buf);
 }
@@ -159,6 +171,8 @@ static int part_panic_write(struct mtd_info *mtd, loff_t to, size_t len,
 		len = 0;
 	else if (to + len > mtd->size)
 		len = mtd->size - to;
+	mtd->write_cnt += 1;
+	mtd->write_sz += len;
 	return part->master->panic_write(part->master, to + part->offset,
 				    len, retlen, buf);
 }
@@ -175,6 +189,7 @@ static int part_write_oob(struct mtd_info *mtd, loff_t to,
 		return -EINVAL;
 	if (ops->datbuf && to + ops->len > mtd->size)
 		return -EINVAL;
+	mtd->other_cnt += 1;
 	return part->master->write_oob(part->master, to + part->offset, ops);
 }
 
@@ -182,6 +197,7 @@ static int part_write_user_prot_reg(struct mtd_info *mtd, loff_t from,
 		size_t len, size_t *retlen, u_char *buf)
 {
 	struct mtd_part *part = PART(mtd);
+	mtd->other_cnt += 1;
 	return part->master->write_user_prot_reg(part->master, from,
 					len, retlen, buf);
 }
@@ -190,6 +206,7 @@ static int part_lock_user_prot_reg(struct mtd_info *mtd, loff_t from,
 		size_t len)
 {
 	struct mtd_part *part = PART(mtd);
+	mtd->other_cnt += 1;
 	return part->master->lock_user_prot_reg(part->master, from, len);
 }
 
@@ -197,8 +214,13 @@ static int part_writev(struct mtd_info *mtd, const struct kvec *vecs,
 		unsigned long count, loff_t to, size_t *retlen)
 {
 	struct mtd_part *part = PART(mtd);
+	unsigned long i;
 	if (!(mtd->flags & MTD_WRITEABLE))
 		return -EROFS;
+	for (i = 0; i < count; i++) {
+		mtd->write_cnt += 1;
+		mtd->write_sz += vecs[i].iov_len;
+	}
 	return part->master->writev(part->master, vecs, count,
 					to + part->offset, retlen);
 }
@@ -212,6 +234,8 @@ static int part_erase(struct mtd_info *mtd, struct erase_info *instr)
 	if (instr->addr >= mtd->size)
 		return -EINVAL;
 	instr->addr += part->offset;
+	mtd->erase_cnt += 1;
+	mtd->erase_sz += instr->len;
 	ret = part->master->erase(part->master, instr);
 	if (ret) {
 		if (instr->fail_addr != MTD_FAIL_ADDR_UNKNOWN)
@@ -240,6 +264,7 @@ static int part_lock(struct mtd_info *mtd, loff_t ofs, size_t len)
 	struct mtd_part *part = PART(mtd);
 	if ((len + ofs) > mtd->size)
 		return -EINVAL;
+	mtd->other_cnt += 1;
 	return part->master->lock(part->master, ofs + part->offset, len);
 }
 
@@ -248,6 +273,7 @@ static int part_unlock(struct mtd_info *mtd, loff_t ofs, size_t len)
 	struct mtd_part *part = PART(mtd);
 	if ((len + ofs) > mtd->size)
 		return -EINVAL;
+	mtd->other_cnt += 1;
 	return part->master->unlock(part->master, ofs + part->offset, len);
 }
 
@@ -287,6 +313,7 @@ static int part_block_markbad(struct mtd_info *mtd, loff_t ofs)
 		return -EROFS;
 	if (ofs >= mtd->size)
 		return -EINVAL;
+	mtd->other_cnt += 1;
 	ofs += part->offset;
 	res = part->master->block_markbad(part->master, ofs);
 	if (!res)
@@ -581,3 +608,32 @@ int parse_mtd_partitions(struct mtd_info *master, const char **types,
 	return ret;
 }
 EXPORT_SYMBOL_GPL(parse_mtd_partitions);
+
+void mtd_diskstats(struct seq_file *seqf)
+{
+	struct mtd_part *part;
+
+	list_for_each_entry(part, &mtd_partitions, list) {
+		struct mtd_info *mtd = &part->mtd;
+
+		seq_printf(seqf, "%4d %7d %s %u %u %u "
+			   "%u %u %u %u %u %u %u %u %u %u %u\n",
+			   MTD_CHAR_MAJOR, mtd->index << 1,
+			   mtd->name,
+			   mtd->read_cnt,
+			   0, /* reads merged */
+			   mtd->read_sz >> 9,
+			   0, /* read time */
+			   mtd->write_cnt,
+			   0, /* writes merged */
+			   mtd->write_sz >> 9,
+			   0, /* write time */
+			   0, /* I/Os in progress */
+			   0, /* I/O time */
+			   0, /* weighted I/O time */
+			   mtd->erase_cnt,
+			   mtd->erase_sz,
+			   mtd->other_cnt
+			);
+	}
+}

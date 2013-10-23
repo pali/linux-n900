@@ -628,7 +628,8 @@ DSP_STATUS COD_OpenBase(struct COD_MANAGER *hMgr, IN char *pszCoffPath,
 	} else {
 		/* hang onto the library for subsequent sym table usage */
 		hMgr->baseLib = lib;
-               strncpy(hMgr->szZLFile, pszCoffPath, COD_MAXPATHLENGTH);
+		strncpy(hMgr->szZLFile, pszCoffPath, COD_MAXPATHLENGTH - 1);
+		hMgr->szZLFile[COD_MAXPATHLENGTH - 1] = '\0';
 	}
 
 	return status;

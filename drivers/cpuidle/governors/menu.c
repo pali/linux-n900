@@ -13,6 +13,7 @@
 #include <linux/ktime.h>
 #include <linux/hrtimer.h>
 #include <linux/tick.h>
+#include <mach/pm.h>
 
 #define BREAK_FUZZ	4	/* 4 us */
 
@@ -36,6 +37,8 @@ static int menu_select(struct cpuidle_device *dev)
 	struct menu_device *data = &__get_cpu_var(menu_devices);
 	int latency_req = pm_qos_requirement(PM_QOS_CPU_DMA_LATENCY);
 	int i;
+	int device_not_idle;
+	struct timespec t;
 
 	/* Special case when user has set very strict latency requirement */
 	if (unlikely(latency_req == 0)) {
@@ -44,8 +47,11 @@ static int menu_select(struct cpuidle_device *dev)
 	}
 
 	/* determine the expected residency time */
+	t = ktime_to_timespec(tick_nohz_get_sleep_length());
 	data->expected_us =
-		(u32) ktime_to_ns(tick_nohz_get_sleep_length()) / 1000;
+		t.tv_sec * USEC_PER_SEC + t.tv_nsec / NSEC_PER_USEC;
+
+	device_not_idle = !pm_check_idle();
 
 	/* find the deepest idle state that satisfies our constraints */
 	for (i = CPUIDLE_DRIVER_STATE_START + 1; i < dev->state_count; i++) {
@@ -53,7 +59,8 @@ static int menu_select(struct cpuidle_device *dev)
 
 		if (s->target_residency > data->expected_us)
 			break;
-		if (s->target_residency > data->predicted_us)
+		if (device_not_idle &&
+		    s->target_residency > data->predicted_us)
 			break;
 		if (s->exit_latency > latency_req)
 			break;

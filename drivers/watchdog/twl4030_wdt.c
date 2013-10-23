@@ -28,6 +28,13 @@
 #include <linux/uaccess.h>
 #include <linux/i2c/twl4030.h>
 
+#define TWL4030_WDT_ENABLE_POWEROFF_ON_SUSPEND 1
+
+
+#ifdef TWL4030_WDT_ENABLE_POWEROFF_ON_SUSPEND
+#include <linux/debugfs.h>
+#endif
+
 #define TWL4030_WATCHDOG_CFG_REG_OFFS	0x3
 
 static int nowayout = WATCHDOG_NOWAYOUT;
@@ -35,8 +42,10 @@ module_param(nowayout, int, 0);
 MODULE_PARM_DESC(nowayout, "Watchdog cannot be stopped once started "
 	"(default=" __MODULE_STRING(WATCHDOG_NOWAYOUT) ")");
 
-#define	TWL4030_WDT_STATE_OPEN_BIT	0x1
-#define TWL4030_WDT_STATE_OPEN		0x1
+
+
+#define	TWL4030_WDT_STATE_OPEN_BIT	0x0
+#define TWL4030_WDT_STATE_OPEN		(1 << TWL4030_WDT_STATE_OPEN_BIT)
 #define TWL4030_WDT_STATE_ACTIVE	0x8
 
 static struct platform_device *twl4030_wdt_dev;
@@ -45,6 +54,9 @@ struct twl4030_wdt {
 	struct miscdevice	miscdev;
 	int			timer_margin;
 	unsigned long		state;
+#ifdef TWL4030_WDT_ENABLE_POWEROFF_ON_SUSPEND
+	u8			poweroff_on_suspend;
+#endif
 };
 
 static int twl4030_wdt_write(unsigned char val)
@@ -78,6 +90,10 @@ static int twl4030_wdt_set_timeout(struct twl4030_wdt *wdt, int timeout)
 	wdt->timer_margin = timeout;
 	return twl4030_wdt_ping(wdt);
 }
+
+#ifdef TWL4030_WDT_ENABLE_POWEROFF_ON_SUSPEND
+static struct dentry *twl4030_wdt_debugfs;
+#endif
 
 static ssize_t twl4030_wdt_write_fop(struct file *file,
 		const char __user *data, size_t len, loff_t *ppos)
@@ -166,6 +182,11 @@ static int twl4030_wdt_release(struct inode *inode, struct file *file)
 static int twl4030_wdt_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	struct twl4030_wdt *wdt = platform_get_drvdata(pdev);
+#ifdef TWL4030_WDT_ENABLE_POWEROFF_ON_SUSPEND
+	if (wdt->poweroff_on_suspend > 0 && wdt->poweroff_on_suspend < 31)
+		return twl4030_wdt_write(wdt->poweroff_on_suspend + 1);
+#endif
+
 	return (wdt->state & TWL4030_WDT_STATE_ACTIVE) ?
 		twl4030_wdt_disable(wdt) : 0;
 }
@@ -219,6 +240,12 @@ static int __devinit twl4030_wdt_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, wdt);
 
+#ifdef TWL4030_WDT_ENABLE_POWEROFF_ON_SUSPEND
+	twl4030_wdt_debugfs = debugfs_create_dir("twl4030_wdt", NULL);
+	if (!IS_ERR(twl4030_wdt_debugfs) && twl4030_wdt_debugfs)
+		debugfs_create_u8("poweroff_on_suspend", 0644,
+			twl4030_wdt_debugfs, &wdt->poweroff_on_suspend);
+#endif
 	twl4030_wdt_dev = pdev;
 	return 0;
 }
@@ -230,6 +257,11 @@ static int __devexit twl4030_wdt_remove(struct platform_device *pdev)
 	if (wdt->state & TWL4030_WDT_STATE_ACTIVE)
 		if (twl4030_wdt_disable(wdt))
 			return -EFAULT;
+#ifdef TWL4030_WDT_ENABLE_POWEROFF_ON_SUSPEND
+	if (!IS_ERR(twl4030_wdt_debugfs) && twl4030_wdt_debugfs)
+		debugfs_remove_recursive(twl4030_wdt_debugfs);
+#endif
+
 
 	misc_deregister(&wdt->miscdev);
 

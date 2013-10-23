@@ -75,6 +75,7 @@
 #define LP5523_ENABLE			0x40
 #define LP5523_AUTO_INC			0x40
 #define LP5523_PWR_SAVE			0x20
+#define LP5523_PWM_PWR_SAVE		0x04
 #define LP5523_CP_1			0x08
 #define LP5523_CP_1_5			0x10
 #define LP5523_CP_AUTO			0x18
@@ -224,7 +225,8 @@ static int lp5523_configure(struct i2c_client *client)
 
 	ret |= lp5523_write(client, LP5523_REG_CONFIG,
 			    LP5523_AUTO_INC | LP5523_PWR_SAVE |
-			    LP5523_CP_AUTO | LP5523_INT_CLK);
+			    LP5523_CP_AUTO | LP5523_AUTO_CLK |
+			    LP5523_PWM_PWR_SAVE);
 
 	/* turn on all leds */
 	ret |= lp5523_write(client, LP5523_REG_ENABLE_LEDS_MSB, 0x01);
@@ -347,43 +349,34 @@ static int lp5523_run_program(struct lp5523_engine *engine)
 	struct lp5523_chip *chip = engine_to_lp5523(engine);
 	struct i2c_client *client = chip->client;
 	int ret;
-	u8 mask = engine->engine_mask;
-	u8 exec_state = 0;
-	u8 enable_reg;
 
-	ret = lp5523_read(client, LP5523_REG_ENABLE, &enable_reg);
+	ret = lp5523_write(client, LP5523_REG_ENABLE, LP5523_CMD_RUN | LP5523_ENABLE);
 	if (ret)
 		goto fail;
 
-	enable_reg &= ~mask;
-	exec_state = mask & LP5523_CMD_RUN;
-	enable_reg |= exec_state;
-
-	ret |= lp5523_write(client, LP5523_REG_ENABLE, enable_reg);
-
-	/* set mode to run for this channel */
-	ret |= lp5523_set_engine_mode(engine, LP5523_CMD_RUN);
+	ret = lp5523_set_engine_mode(engine, LP5523_CMD_RUN);
 fail:
 	return ret;
 }
 
 static int lp5523_mux_parse(const char *buf, u16 *mux, size_t len)
 {
-	char c;
-	int i = 0;
-	int ret;
-	unsigned tmp;
-	u16 tmp_mux = 0;;
-	while ((i < len - 1) && (i < LP5523_LEDS)) {
-		/* two sscanfs because length option is not working for %x */
-		ret = sscanf(buf + i, "%c", &c);
-		ret = sscanf(&c, "%1x", &tmp);
-
-		if ((ret != 1) || (tmp > 1))
-			return -1;
-		if (tmp)
+	int i;
+	u16 tmp_mux = 0;
+	len = len < LP5523_LEDS ? len : LP5523_LEDS;
+	for (i = 0; i < len; i++) {
+		switch (buf[i]) {
+		case '1':
 			tmp_mux |= (1 << i);
-		i++;
+			break;
+		case '0':
+			break;
+		case '\n':
+			i = len;
+			break;
+		default:
+			return -1;
+		}
 	}
 	*mux = tmp_mux;
 
@@ -454,6 +447,8 @@ static ssize_t lp5523_selftest(struct device *dev,
 
 	for (i = 0; i < LP5523_LEDS; i++) {
 		lp5523_write(chip->client, LP5523_REG_LED_PWM_BASE + i, 0xff);
+		/* let current stabilize 2ms before measurements start */
+		msleep(2);
 		lp5523_write(chip->client,
 			     LP5523_REG_LED_TEST_CTRL,
 			     LP5523_EN_LEDTEST | i);
@@ -742,6 +737,7 @@ static int lp5523_set_mode(struct lp5523_engine *engine, u8 mode)
 
 	else if (mode == LP5523_CMD_LOAD) {
 
+		lp5523_set_engine_mode(engine, LP5523_CMD_DISABLED);
 		lp5523_set_engine_mode(engine, LP5523_CMD_LOAD);
 
 		if ((ret = sysfs_create_group(&dev->kobj, engine->attributes)))

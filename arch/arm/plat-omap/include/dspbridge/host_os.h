@@ -60,12 +60,6 @@
 #include <asm/cacheflush.h>
 #include <linux/dma-mapping.h>
 
-/*  ----------------------------------- Macros */
-
-#define SEEK_SET        0	/* Seek from beginning of file.  */
-#define SEEK_CUR        1	/* Seek from current position.  */
-#define SEEK_END        2	/* Seek from end of file.  */
-
 /* TODO -- Remove, once BP defines them */
 #define INT_MAIL_MPU_IRQ        26
 #define INT_DSP_MMU_IRQ        28

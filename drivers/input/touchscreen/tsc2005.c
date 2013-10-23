@@ -27,7 +27,6 @@
 #include <linux/input.h>
 #include <linux/interrupt.h>
 #include <linux/delay.h>
-#include <linux/gpio.h>
 #include <linux/spi/spi.h>
 
 #include <linux/spi/tsc2005.h>
@@ -194,7 +193,7 @@ struct tsc2005 {
 	char			phys[32];
 	struct timer_list	penup_timer;
 
-	/* ESD recovery via a hardware reset (GPIO) if the tsc2005
+	/* ESD recovery via a hardware reset if the tsc2005
 	 * doesn't respond after a configurable period (in ms) of
 	 * IRQ/SPI inactivity. If esd_timeout is 0, timer and work
 	 * fields are used.
@@ -202,7 +201,6 @@ struct tsc2005 {
 	u32			esd_timeout;
 	struct timer_list	esd_timer;
 	struct work_struct	esd_work;
-	s16			reset_gpio;
 
 	spinlock_t		lock;
 	struct mutex		mutex;
@@ -242,6 +240,8 @@ struct tsc2005 {
 	u8			disabled;
 	u8			disable_depth;
 	u8			spi_pending;
+
+	void (*set_reset)(bool enable);
 };
 
 static void tsc2005_cmd(struct tsc2005 *ts, u8 cmd)
@@ -434,18 +434,17 @@ out:
 	} else
 		ts->spi_pending = 0;
 
-	spin_unlock_irqrestore(&ts->lock, flags);
-
 	/* kick pen up timer - to make sure it expires again(!) */
 	if (ts->sample_sent) {
 		mod_timer(&ts->penup_timer,
 			  jiffies + msecs_to_jiffies(TSC2005_TS_PENUP_TIME));
 		/* Also kick the watchdog, as we still think we're alive */
-		if (ts->esd_timeout) {
+		if (ts->esd_timeout && ts->disable_depth == 0) {
 			unsigned long wdj = msecs_to_jiffies(ts->esd_timeout);
 			mod_timer(&ts->esd_timer, round_jiffies(jiffies+wdj));
 		}
 	}
+	spin_unlock_irqrestore(&ts->lock, flags);
 }
 
 /* This penup timer is very forgiving of delayed SPI reads. The
@@ -473,11 +472,13 @@ static void tsc2005_ts_penup_timer_handler(unsigned long data)
 static irqreturn_t tsc2005_ts_irq_handler(int irq, void *dev_id)
 {
 	struct tsc2005 *ts = dev_id;
+	if (ts->disable_depth)
+		goto out;
 
 	if (!ts->spi_pending) {
 		if (spi_async(ts->spi, &ts->read_msg)) {
 			dev_err(&ts->spi->dev, "ts: spi_async() failed");
-			return IRQ_HANDLED;
+			goto out;
 		}
 	}
 	/* By shifting in 1s we can never wrap */
@@ -494,6 +495,7 @@ static irqreturn_t tsc2005_ts_irq_handler(int irq, void *dev_id)
 		ts->penup_timer.expires = jiffies + pu;
 		add_timer(&ts->penup_timer);
 	}
+out:
 	return IRQ_HANDLED;
 }
 
@@ -569,17 +571,18 @@ static void tsc2005_disable(struct tsc2005 *ts)
 
 static void tsc2005_enable(struct tsc2005 *ts)
 {
-	if (--ts->disable_depth != 0)
-		return;
+	if (ts->disable_depth != 1)
+		goto out;
 
 	if (ts->esd_timeout) {
 		unsigned long wdj = msecs_to_jiffies(ts->esd_timeout);
 		ts->esd_timer.expires = round_jiffies(jiffies+wdj);
 		add_timer(&ts->esd_timer);
 	}
-	enable_irq(ts->spi->irq);
-
 	tsc2005_start_scan(ts);
+	enable_irq(ts->spi->irq);
+out:
+	--ts->disable_depth;
 }
 
 static ssize_t tsc2005_disable_show(struct device *dev,
@@ -619,6 +622,64 @@ out:
 static DEVICE_ATTR(disable_ts, 0664, tsc2005_disable_show,
 		   tsc2005_disable_store);
 
+static ssize_t tsc2005_ctrl_selftest_show(struct device *dev,
+					  struct device_attribute *attr,
+					  char *buf)
+{
+	u16 temp_high_orig, temp_high_test, temp_high;
+	unsigned int result = 1;
+	struct tsc2005 *ts = dev_get_drvdata(dev);
+
+	if (!ts->set_reset) {
+		dev_warn(&ts->spi->dev,
+			 "unable to selftest: reset not configured\n");
+		result = 0;
+		goto out;
+	}
+
+	mutex_lock(&ts->mutex);
+	tsc2005_disable(ts);
+
+	/* Test ctrl communications via temp high / low registers */
+	tsc2005_read(ts, TSC2005_REG_TEMP_HIGH, &temp_high_orig);
+
+	temp_high_test = (temp_high_orig - 1) & 0x0FFF;
+
+	tsc2005_write(ts, TSC2005_REG_TEMP_HIGH, temp_high_test);
+
+	tsc2005_read(ts, TSC2005_REG_TEMP_HIGH, &temp_high);
+
+	if (temp_high != temp_high_test) {
+		result = 0;
+		dev_warn(dev, "selftest failed: %d != %d\n",
+			 temp_high, temp_high_test);
+	}
+
+	/* HW Reset */
+	ts->set_reset(0);
+	msleep(1); /* only 10us required */
+	ts->set_reset(1);
+
+	tsc2005_enable(ts);
+
+	/* Test that reset really happened */
+	tsc2005_read(ts, TSC2005_REG_TEMP_HIGH, &temp_high);
+
+	if (temp_high != temp_high_orig) {
+		result = 0;
+		dev_warn(dev, "selftest failed after reset: "
+			 "%d != %d\n",
+			 temp_high, temp_high_orig);
+	}
+
+	mutex_unlock(&ts->mutex);
+
+out:
+	return sprintf(buf, "%u\n", result);
+}
+
+static DEVICE_ATTR(ts_ctrl_selftest, S_IRUGO, tsc2005_ctrl_selftest_show, NULL);
+
 static void tsc2005_esd_timer_handler(unsigned long data)
 {
 	struct tsc2005 *ts = (struct tsc2005 *)data;
@@ -651,14 +712,14 @@ static void tsc2005_rst_handler(struct work_struct *work)
 		/* If this timer kicked in, the penup timer, if ever active
 		 * at all, must have expired ages ago, so no need to del it.
 		 */
-		gpio_set_value(ts->reset_gpio, 0);
+		ts->set_reset(0);
 		if (ts->sample_sent) {
 			tsc2005_ts_update_pen_state(ts, 0, 0, 0);
 			ts->sample_sent = 0;
 		}
 		ts->spi_pending = 0;
 		msleep(1); /* only 10us required */
-		gpio_set_value(ts->reset_gpio, 1);
+		ts->set_reset(1);
 		tsc2005_start_scan(ts);
 	}
 	wdj = msecs_to_jiffies(ts->esd_timeout);
@@ -692,6 +753,8 @@ static int __devinit tsc2005_ts_init(struct tsc2005 *ts,
 	ts->p_max		= pdata->ts_pressure_max ? : MAX_12BIT;
 	ts->touch_pressure	= pdata->ts_touch_pressure ? : ts->p_max;
 	ts->fudge_p		= pdata->ts_pressure_fudge ? : 2;
+
+	ts->set_reset		= pdata->set_reset;
 
 	idev = input_allocate_device();
 	if (idev == NULL) {
@@ -737,15 +800,25 @@ static int __devinit tsc2005_ts_init(struct tsc2005 *ts,
 	}
 
 	/* We can tolerate these failing */
-	if (device_create_file(&ts->spi->dev, &dev_attr_pen_down));
-	if (device_create_file(&ts->spi->dev, &dev_attr_disable_ts));
+	r = device_create_file(&ts->spi->dev, &dev_attr_ts_ctrl_selftest);
+	if (r < 0)
+		dev_warn(&ts->spi->dev, "can't create sysfs file for %s: %d\n",
+			 dev_attr_ts_ctrl_selftest.attr.name, r);
+
+	r = device_create_file(&ts->spi->dev, &dev_attr_pen_down);
+	if (r < 0)
+		dev_warn(&ts->spi->dev, "can't create sysfs file for %s: %d\n",
+			 dev_attr_pen_down.attr.name, r);
+
+	r = device_create_file(&ts->spi->dev, &dev_attr_disable_ts);
+	if (r < 0)
+		dev_warn(&ts->spi->dev, "can't create sysfs file for %s: %d\n",
+			 dev_attr_disable_ts.attr.name, r);
 
 	/* Finally, configure and start the optional EDD watchdog. */
 	ts->esd_timeout = pdata->esd_timeout;
-	if (ts->esd_timeout) {
+	if (ts->esd_timeout && ts->set_reset) {
 		unsigned long wdj;
-		ts->reset_gpio = pdata->reset_gpio;
-		/* Presume the platform has already set up reset GPIO */
 		setup_timer(&ts->esd_timer, tsc2005_esd_timer_handler,
 			    (unsigned long)ts);
 		INIT_WORK(&ts->esd_work, tsc2005_rst_handler);
@@ -817,6 +890,7 @@ static int __devexit tsc2005_remove(struct spi_device *spi)
 
 	device_remove_file(&ts->spi->dev, &dev_attr_disable_ts);
 	device_remove_file(&ts->spi->dev, &dev_attr_pen_down);
+	device_remove_file(&ts->spi->dev, &dev_attr_ts_ctrl_selftest);
 
 	free_irq(ts->spi->irq, ts);
 	input_unregister_device(ts->idev);

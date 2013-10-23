@@ -164,6 +164,7 @@
 				 RDS_FLAG_SYNC_LOST | RDS_FLAG_PI_MATCH)
 
 #define BCM2048_DEFAULT_TIMEOUT		1500
+#define BCM2048_AUTO_SEARCH_TIMEOUT	3000
 
 
 #define BCM2048_FREQDEV_UNIT		10000
@@ -178,7 +179,7 @@
 #define BCM2048_DEFAULT_POWERING_DELAY	20
 #define BCM2048_DEFAULT_REGION		0x02
 #define BCM2048_DEFAULT_MUTE		0x01
-#define BCM2048_DEFAULT_RSSI_THRESHOLD	0x46
+#define BCM2048_DEFAULT_RSSI_THRESHOLD	0x64
 #define BCM2048_DEFAULT_RDS_WLINE	0x7E
 
 #define BCM2048_FM_SEARCH_INACTIVE	0x00
@@ -451,12 +452,10 @@ static int bcm2048_get_power_state(struct bcm2048_device *bdev)
 	return err;
 }
 
-static int bcm2048_set_rds(struct bcm2048_device *bdev, u8 rds_on)
+static int bcm2048_set_rds_no_lock(struct bcm2048_device *bdev, u8 rds_on)
 {
 	int err;
 	u8 flags;
-
-	mutex_lock(&bdev->mutex);
 
 	bdev->cache_fm_rds_system &= ~BCM2048_RDS_ON;
 
@@ -477,6 +476,30 @@ static int bcm2048_set_rds(struct bcm2048_device *bdev, u8 rds_on)
 	err = bcm2048_send_command(bdev, BCM2048_I2C_FM_RDS_SYSTEM,
 					bdev->cache_fm_rds_system);
 
+	return err;
+}
+
+static int bcm2048_get_rds_no_lock(struct bcm2048_device *bdev)
+{
+	int err;
+	u8 value;
+
+	err = bcm2048_recv_command(bdev, BCM2048_I2C_FM_RDS_SYSTEM, &value);
+
+	if (!err && (value & BCM2048_RDS_ON))
+		return BCM2048_ITEM_ENABLED;
+
+	return err;
+}
+
+static int bcm2048_set_rds(struct bcm2048_device *bdev, u8 rds_on)
+{
+	int err;
+
+	mutex_lock(&bdev->mutex);
+
+	err = bcm2048_set_rds_no_lock(bdev, rds_on);
+
 	mutex_unlock(&bdev->mutex);
 	return err;
 }
@@ -484,17 +507,12 @@ static int bcm2048_set_rds(struct bcm2048_device *bdev, u8 rds_on)
 static int bcm2048_get_rds(struct bcm2048_device *bdev)
 {
 	int err;
-	u8 value;
 
 	mutex_lock(&bdev->mutex);
 
-	err = bcm2048_recv_command(bdev, BCM2048_I2C_FM_RDS_SYSTEM, &value);
+	err = bcm2048_get_rds_no_lock(bdev);
 
 	mutex_unlock(&bdev->mutex);
-
-	if (!err && (value & BCM2048_RDS_ON))
-		return BCM2048_ITEM_ENABLED;
-
 	return err;
 }
 
@@ -699,7 +717,7 @@ static int bcm2048_set_region(struct bcm2048_device *bdev, u8 region)
 	int err;
 	u32 new_frequency = 0;
 
-	if (region > ARRAY_SIZE(region_configs))
+	if (region >= ARRAY_SIZE(region_configs))
 		return -EINVAL;
 
 	mutex_lock(&bdev->mutex);
@@ -923,7 +941,7 @@ static int bcm2048_get_fm_search_mode_direction(struct bcm2048_device *bdev)
 static int bcm2048_set_fm_search_tune_mode(struct bcm2048_device *bdev,
 						u8 mode)
 {
-	int err;
+	int err, timeout, restart_rds = 0;
 	u8 value, flags;
 
 	value = mode & BCM2048_FM_AUTO_SEARCH;
@@ -933,6 +951,20 @@ static int bcm2048_set_fm_search_tune_mode(struct bcm2048_device *bdev,
 
 	mutex_lock(&bdev->mutex);
 
+	/*
+	 * If RDS is enabled, and frequency is changed, RDS quits working.
+	 * Thus, always restart RDS if it's enabled. Moreover, RDS must
+	 * not be enabled while changing the frequency because it can
+	 * provide a race to the mutex from the workqueue handler if RDS
+	 * IRQ occurs while waiting for frequency changed IRQ.
+	 */
+	if (bcm2048_get_rds_no_lock(bdev)) {
+		err = bcm2048_set_rds_no_lock(bdev, 0);
+		if (err)
+			goto unlock;
+		restart_rds = 1;
+	}
+
 	err = bcm2048_send_command(bdev, BCM2048_I2C_FM_RDS_MASK0, flags);
 
 	if (err)
@@ -940,8 +972,13 @@ static int bcm2048_set_fm_search_tune_mode(struct bcm2048_device *bdev,
 
 	bcm2048_send_command(bdev, BCM2048_I2C_FM_SEARCH_TUNE_MODE, value);
 
+	if (mode != BCM2048_FM_AUTO_SEARCH_MODE)
+		timeout = BCM2048_DEFAULT_TIMEOUT;
+	else
+		timeout = BCM2048_AUTO_SEARCH_TIMEOUT;
+
 	if (!wait_for_completion_timeout(&bdev->compl,
-			msecs_to_jiffies(BCM2048_DEFAULT_TIMEOUT)))
+			msecs_to_jiffies(timeout)))
 			dev_err(&bdev->client->dev, "IRQ timeout.\n");
 
 	if (value)
@@ -949,7 +986,11 @@ static int bcm2048_set_fm_search_tune_mode(struct bcm2048_device *bdev,
 			err = -EIO;
 
 unlock:
+	if (restart_rds)
+		err |= bcm2048_set_rds_no_lock(bdev, 1);
+
 	mutex_unlock(&bdev->mutex);
+
 	return err;
 }
 
@@ -2154,7 +2195,8 @@ static int bcm2048_vidioc_querycap(struct file *file, void *priv,
 		sizeof(capability->card));
 	snprintf(capability->bus_info, 32, "I2C: 0x%X", bdev->client->addr);
 	capability->version = BCM2048_DRIVER_VERSION;
-	capability->capabilities = V4L2_CAP_TUNER | V4L2_CAP_RADIO;
+	capability->capabilities = V4L2_CAP_TUNER | V4L2_CAP_RADIO |
+					V4L2_CAP_HW_FREQ_SEEK;
 
 	return 0;
 }
@@ -2352,7 +2394,7 @@ static int bcm2048_vidioc_s_frequency(struct file *file, void *priv,
 		struct v4l2_frequency *freq)
 {
 	struct bcm2048_device *bdev = video_get_drvdata(video_devdata(file));
-	int err = 0, restart_rds = 0;
+	int err;
 
 	if (freq->type != V4L2_TUNER_RADIO)
 		return -EINVAL;
@@ -2360,15 +2402,27 @@ static int bcm2048_vidioc_s_frequency(struct file *file, void *priv,
 	if (!bdev->power_state)
 		return -ENODEV;
 
-	/* If RDS is enabled, and frequency is changed, RDS quits working */
-	if (bdev->rds_state) {
-		err |= bcm2048_set_rds(bdev, 0);
-		restart_rds = 1;
-	}
-	err |= bcm2048_set_fm_frequency(bdev, v4l2_to_dev(freq->frequency));
+	err = bcm2048_set_fm_frequency(bdev, v4l2_to_dev(freq->frequency));
 	err |= bcm2048_set_fm_search_tune_mode(bdev, BCM2048_FM_PRE_SET_MODE);
-	if (restart_rds)
-		err |= bcm2048_set_rds(bdev, 1);
+
+	return err;
+}
+
+static int bcm2048_vidioc_s_hw_freq_seek(struct file *file, void *priv,
+						struct v4l2_hw_freq_seek *seek)
+{
+	struct bcm2048_device *bdev = video_get_drvdata(video_devdata(file));
+	int err;
+
+	if (!bdev->power_state)
+		return -ENODEV;
+
+	if ((seek->tuner != 0) || (seek->type != V4L2_TUNER_RADIO))
+		return -EINVAL;
+
+	err = bcm2048_set_fm_search_mode_direction(bdev, seek->seek_upward);
+	err |= bcm2048_set_fm_search_tune_mode(bdev,
+			BCM2048_FM_AUTO_SEARCH_MODE);
 
 	return err;
 }
@@ -2386,6 +2440,7 @@ static struct v4l2_ioctl_ops bcm2048_ioctl_ops = {
 	.vidioc_s_tuner		= bcm2048_vidioc_s_tuner,
 	.vidioc_g_frequency	= bcm2048_vidioc_g_frequency,
 	.vidioc_s_frequency	= bcm2048_vidioc_s_frequency,
+	.vidioc_s_hw_freq_seek  = bcm2048_vidioc_s_hw_freq_seek,
 };
 
 /*

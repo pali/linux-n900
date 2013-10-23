@@ -280,7 +280,8 @@ IMG_VOID PVRSRVResManDisconnect(PRESMAN_CONTEXT psResManContext,
 	}
 
 	
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psResManContext, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(RESMAN_CONTEXT),
+			psResManContext, IMG_NULL);
 
 
 	
@@ -549,7 +550,8 @@ static PVRSRV_ERROR FreeResourceByPtr(RESMAN_ITEM	*psItem,
 	ACQUIRE_SYNC_OBJ;
 
 	
-	if(OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psItem, IMG_NULL) != PVRSRV_OK)
+	if (OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(RESMAN_ITEM), psItem, IMG_NULL)
+			!= PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "FreeResourceByPtr: ERROR freeing resource list item memory"));
 		eError = PVRSRV_ERROR_GENERIC;

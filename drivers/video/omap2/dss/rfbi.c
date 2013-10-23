@@ -1290,7 +1290,7 @@ static void rfbi_display_disable(struct omap_display *display)
 			DISPC_IRQ_FRAMEDONE);
 }
 
-void rfbi_init_display(struct omap_display *display)
+int rfbi_init_display(struct omap_display *display)
 {
 	display->enable = rfbi_display_enable;
 	display->disable = rfbi_display_disable;
@@ -1301,4 +1301,6 @@ void rfbi_init_display(struct omap_display *display)
 	rfbi.display[display->hw_config.u.rfbi.channel] = display;
 
 	display->caps = OMAP_DSS_DISPLAY_CAP_MANUAL_UPDATE;
+
+	return 0;
 }

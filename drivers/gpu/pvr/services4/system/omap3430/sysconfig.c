@@ -37,6 +37,7 @@ SYS_DATA* gpsSysData = (SYS_DATA*)IMG_NULL;
 SYS_DATA  gsSysData;
 
 static SYS_SPECIFIC_DATA gsSysSpecificData;
+SYS_SPECIFIC_DATA *gpsSysSpecificData;
 
 static IMG_UINT32	gui32SGXDeviceID;
 static SGX_DEVICE_MAP	gsSGXDeviceMap;
@@ -174,13 +175,17 @@ PVRSRV_ERROR SysInitialise(IMG_VOID)
 	PVRSRV_ERROR 		eError;
 	PVRSRV_DEVICE_NODE	*psDeviceNode;
 	IMG_CPU_PHYADDR		TimerRegPhysBase;
+#if !defined(SGX_DYNAMIC_TIMING_INFO)
 	SGX_TIMING_INFORMATION*	psTimingInfo;
+#endif
 
 	gpsSysData = &gsSysData;
 	OSMemSet(gpsSysData, 0, sizeof(SYS_DATA));
 
-	gpsSysData->pvSysSpecificData = &gsSysSpecificData;
-	gsSysSpecificData.ui32SysSpecificData = 0;
+	gpsSysSpecificData =  &gsSysSpecificData;
+	OSMemSet(gpsSysSpecificData, 0, sizeof(SYS_SPECIFIC_DATA));
+
+	gpsSysData->pvSysSpecificData = gpsSysSpecificData;
 
 	eError = OSInitEnvData(&gpsSysData->pvEnvSpecificData);
 	if (eError != PVRSRV_OK)
@@ -213,7 +218,8 @@ PVRSRV_ERROR SysInitialise(IMG_VOID)
 		return eError;
 	}
 
-	TimerRegPhysBase.uiAddr = SYS_OMAP3430_GP11TIMER_REGS_SYS_PHYS_BASE;
+	TimerRegPhysBase.uiAddr =
+		SYS_OMAP3430_GP11TIMER_PHYS_BASE + SYS_OMAP3430_GPTIMER_REGS;
 	gpsSysData->pvSOCTimerRegisterKM = IMG_NULL;
 	gpsSysData->hSOCTimerRegisterOSMemHandle = 0;
 	OSReservePhys(TimerRegPhysBase,
@@ -222,13 +228,14 @@ PVRSRV_ERROR SysInitialise(IMG_VOID)
 				  (IMG_VOID **)&gpsSysData->pvSOCTimerRegisterKM,
 				  &gpsSysData->hSOCTimerRegisterOSMemHandle);
 
+#if !defined(SGX_DYNAMIC_TIMING_INFO)
 	
 	psTimingInfo = &gsSGXDeviceMap.sTimingInfo;
 	psTimingInfo->ui32CoreClockSpeed = SYS_SGX_CLOCK_SPEED;
 	psTimingInfo->ui32HWRecoveryFreq = SYS_SGX_HWRECOVERY_TIMEOUT_FREQ; 
 	psTimingInfo->ui32ActivePowManLatencyms = SYS_SGX_ACTIVE_POWER_LATENCY_MS; 
 	psTimingInfo->ui32uKernelFreq = SYS_SGX_PDS_TIMER_FREQ; 
-
+#endif
 	
 
 
@@ -304,7 +311,16 @@ PVRSRV_ERROR SysInitialise(IMG_VOID)
 	PDUMPINIT();
 	SYS_SPECIFIC_DATA_SET(&gsSysSpecificData, SYS_SPECIFIC_DATA_ENABLE_PDUMPINIT);
 
-	eError = EnableSystemClocks(gpsSysData, &gsSGXDeviceMap.sTimingInfo);
+	eError = InitSystemClocks(gpsSysData);
+	if (eError != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_ERROR,"SysInitialise: Failed to init system clocks (%d)", eError));
+		SysDeinitialise(gpsSysData);
+		gpsSysData = IMG_NULL;
+		return eError;
+	}
+
+	eError = EnableSystemClocks(gpsSysData);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR,"SysInitialise: Failed to Enable system clocks (%d)", eError));
@@ -313,6 +329,16 @@ PVRSRV_ERROR SysInitialise(IMG_VOID)
 		return eError;
 	}
 	SYS_SPECIFIC_DATA_SET(&gsSysSpecificData, SYS_SPECIFIC_DATA_ENABLE_SYSCLOCKS);
+
+	eError = OSInitPerf(gpsSysData);
+	if (eError != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_ERROR,"SysInitialise: Failed to init DVFS (%d)", eError));
+		SysDeinitialise(gpsSysData);
+		gpsSysData = IMG_NULL;
+		return eError;
+	}
+
 #if defined(SUPPORT_ACTIVE_POWER_MANAGEMENT)
 	eError = EnableSGXClocks(gpsSysData);
 	if (eError != PVRSRV_OK)
@@ -398,6 +424,8 @@ PVRSRV_ERROR SysFinalise(IMG_VOID)
 	DisableSGXClocks(gpsSysData);
 #endif	
 
+	gpsSysSpecificData->bSGXInitComplete = IMG_TRUE;
+
 	return eError;
 }
 
@@ -406,12 +434,10 @@ PVRSRV_ERROR SysDeinitialise (SYS_DATA *psSysData)
 {
 	PVRSRV_ERROR eError;
 	
-	SYS_SPECIFIC_DATA *psSysSpecData = (SYS_SPECIFIC_DATA *) psSysData->pvSysSpecificData;
-
 	PVR_UNREFERENCED_PARAMETER(psSysData);
 
 #if defined(SYS_USING_INTERRUPTS)
-	if (SYS_SPECIFIC_DATA_TEST(psSysSpecData, SYS_SPECIFIC_DATA_ENABLE_LISR))
+	if (SYS_SPECIFIC_DATA_TEST(gpsSysSpecificData, SYS_SPECIFIC_DATA_ENABLE_LISR))
 	{
 		eError = OSUninstallDeviceLISR(psSysData);
 		if (eError != PVRSRV_OK)
@@ -421,7 +447,7 @@ PVRSRV_ERROR SysDeinitialise (SYS_DATA *psSysData)
 		}
 	}
 
-	if (SYS_SPECIFIC_DATA_TEST(psSysSpecData, SYS_SPECIFIC_DATA_ENABLE_MISR))
+	if (SYS_SPECIFIC_DATA_TEST(gpsSysSpecificData, SYS_SPECIFIC_DATA_ENABLE_MISR))
 	{
 		eError = OSUninstallMISR(psSysData);
 		if (eError != PVRSRV_OK)
@@ -430,12 +456,18 @@ PVRSRV_ERROR SysDeinitialise (SYS_DATA *psSysData)
 			return eError;
 		}
 	}
-#endif 
+#endif
 
-	if (SYS_SPECIFIC_DATA_TEST(psSysSpecData, SYS_SPECIFIC_DATA_ENABLE_INITDEV))
+	eError = OSCleanupPerf(gpsSysSpecificData);
+	if (eError != PVRSRV_OK) {
+		PVR_DPF((PVR_DBG_ERROR, "SysDeinitialise: OSCleanupDvfs failed"));
+		return eError;
+	}
+
+	if (SYS_SPECIFIC_DATA_TEST(gpsSysSpecificData, SYS_SPECIFIC_DATA_ENABLE_INITDEV))
 	{
 #if defined(SUPPORT_ACTIVE_POWER_MANAGEMENT)
-		PVR_ASSERT(SYS_SPECIFIC_DATA_TEST(psSysSpecData, SYS_SPECIFIC_DATA_ENABLE_SYSCLOCKS));
+		PVR_ASSERT(SYS_SPECIFIC_DATA_TEST(gpsSysSpecificData, SYS_SPECIFIC_DATA_ENABLE_SYSCLOCKS));
 		
 		eError = EnableSGXClocks(gpsSysData);
 		if (eError != PVRSRV_OK)
@@ -454,14 +486,14 @@ PVRSRV_ERROR SysDeinitialise (SYS_DATA *psSysData)
 		}
 	}
 	
-	
-
-	if (SYS_SPECIFIC_DATA_TEST(psSysSpecData, SYS_SPECIFIC_DATA_ENABLE_SYSCLOCKS))
+	if (SYS_SPECIFIC_DATA_TEST(gpsSysSpecificData, SYS_SPECIFIC_DATA_ENABLE_SYSCLOCKS))
 	{
 		DisableSystemClocks(gpsSysData);
 	}
 
-	if (SYS_SPECIFIC_DATA_TEST(psSysSpecData, SYS_SPECIFIC_DATA_ENABLE_ENVDATA))
+	CleanupSystemClocks(gpsSysData);
+
+	if (SYS_SPECIFIC_DATA_TEST(gpsSysSpecificData, SYS_SPECIFIC_DATA_ENABLE_ENVDATA))
 	{	
 		eError = OSDeInitEnvData(gpsSysData->pvEnvSpecificData);
 		if (eError != PVRSRV_OK)
@@ -482,7 +514,7 @@ PVRSRV_ERROR SysDeinitialise (SYS_DATA *psSysData)
 	SysDeinitialiseCommon(gpsSysData);
 
 #if defined(NO_HARDWARE)
-	if(SYS_SPECIFIC_DATA_TEST(psSysSpecData, SYS_SPECIFIC_DATA_ENABLE_LOCATEDEV))
+	if (SYS_SPECIFIC_DATA_TEST(gpsSysSpecificData, SYS_SPECIFIC_DATA_ENABLE_LOCATEDEV))
 	{
 		
 		OSBaseFreeContigMemory(SYS_OMAP3430_SGX_REGS_SIZE, gsSGXRegsCPUVAddr, gsSGXDeviceMap.sRegsCpuPBase);
@@ -490,12 +522,14 @@ PVRSRV_ERROR SysDeinitialise (SYS_DATA *psSysData)
 #endif
 
 	
-	if(SYS_SPECIFIC_DATA_TEST(psSysSpecData, SYS_SPECIFIC_DATA_ENABLE_PDUMPINIT))
+	if (SYS_SPECIFIC_DATA_TEST(gpsSysSpecificData, SYS_SPECIFIC_DATA_ENABLE_PDUMPINIT))
 	{
 		PDUMPDEINIT();
 	}
 
-	psSysSpecData->ui32SysSpecificData = 0;
+	gpsSysSpecificData->ui32SysSpecificData = 0;
+	gpsSysSpecificData->bSGXInitComplete = IMG_FALSE;
+
 	gpsSysData = IMG_NULL;
 
 	return PVRSRV_OK;
@@ -664,7 +698,7 @@ PVRSRV_ERROR SysSystemPostPowerState(PVR_POWER_STATE eNewPowerState)
 
 		if (SYS_SPECIFIC_DATA_TEST(&gsSysSpecificData, SYS_SPECIFIC_DATA_PM_DISABLE_SYSCLOCKS))
 		{
-			eError = EnableSystemClocks(gpsSysData, &gsSGXDeviceMap.sTimingInfo);
+			eError = EnableSystemClocks(gpsSysData);
 			if (eError != PVRSRV_OK)
 			{
 				PVR_DPF((PVR_DBG_ERROR,"SysSystemPostPowerState: EnableSystemClocks failed (%d)", eError));

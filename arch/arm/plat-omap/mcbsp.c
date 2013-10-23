@@ -26,6 +26,9 @@
 
 #include <mach/dma.h>
 #include <mach/mcbsp.h>
+#ifdef CONFIG_ARCH_OMAP34XX
+#include "../mach-omap2/cm-regbits-34xx.h"
+#endif
 
 struct omap_mcbsp **mcbsp_ptr;
 int omap_mcbsp_count;
@@ -290,6 +293,29 @@ u16 omap_mcbsp_get_max_rx_threshold(unsigned int id)
 	return mcbsp->max_rx_thres;
 }
 EXPORT_SYMBOL(omap_mcbsp_get_max_rx_threshold);
+
+/*
+ * omap_mcbsp_get_dma_op_mode just return the current configured
+ * operating mode for the mcbsp channel
+ */
+int omap_mcbsp_get_dma_op_mode(unsigned int id)
+{
+	struct omap_mcbsp *mcbsp;
+	int dma_op_mode;
+
+	if (!omap_mcbsp_check_valid_id(id)) {
+		printk(KERN_ERR "%s: Invalid id (%u)\n", __func__, id + 1);
+		return -ENODEV;
+	}
+	mcbsp = id_to_mcbsp_ptr(id);
+
+	spin_lock_irq(&mcbsp->lock);
+	dma_op_mode = mcbsp->dma_op_mode;
+	spin_unlock_irq(&mcbsp->lock);
+
+	return dma_op_mode;
+}
+EXPORT_SYMBOL(omap_mcbsp_get_dma_op_mode);
 #endif
 
 /*
@@ -361,10 +387,19 @@ int omap_mcbsp_request(unsigned int id)
 	if (cpu_is_omap34xx()) {
 		syscon = OMAP_MCBSP_READ(mcbsp->io_base, SYSCON);
 		syscon &= ~(ENAWAKEUP | SIDLEMODE(0x03) | CLOCKACTIVITY(0x03));
-		syscon |= (ENAWAKEUP | SIDLEMODE(0x02) | CLOCKACTIVITY(0x02));
-		OMAP_MCBSP_WRITE(mcbsp->io_base, SYSCON, syscon);
 
-		OMAP_MCBSP_WRITE(mcbsp->io_base, WAKEUPEN, WAKEUPEN_ALL);
+		spin_lock_irq(&mcbsp->lock);
+		if (mcbsp->dma_op_mode == MCBSP_DMA_MODE_THRESHOLD) {
+			syscon |= (ENAWAKEUP | SIDLEMODE(0x02) |
+					CLOCKACTIVITY(0x02));
+			OMAP_MCBSP_WRITE(mcbsp->io_base, WAKEUPEN,
+					WAKEUPEN_ALL);
+		} else {
+			syscon |= SIDLEMODE(0x01);
+		}
+		spin_unlock_irq(&mcbsp->lock);
+
+		OMAP_MCBSP_WRITE(mcbsp->io_base, SYSCON, syscon);
 	}
 
 	/*
@@ -407,7 +442,7 @@ void omap_mcbsp_free(unsigned int id)
 	struct omap_mcbsp *mcbsp;
 	unsigned long flags;
 	int i;
-	u16 syscon, wakeupen;
+	u16 syscon;
 
 	if (!omap_mcbsp_check_valid_id(id)) {
 		printk(KERN_ERR "%s: Invalid id (%d)\n", __func__, id + 1);
@@ -424,11 +459,18 @@ void omap_mcbsp_free(unsigned int id)
 	if (cpu_is_omap34xx()) {
 		syscon = OMAP_MCBSP_READ(mcbsp->io_base, SYSCON);
 		syscon &= ~(ENAWAKEUP | SIDLEMODE(0x03) | CLOCKACTIVITY(0x03));
+		/*
+		 * HW bug workaround - If no_idle mode is taken, we need to
+		 * go to smart_idle before going to always_idle, or the
+		 * device will not hit retention anymore.
+		 */
+		syscon |= SIDLEMODE(0x02);
 		OMAP_MCBSP_WRITE(mcbsp->io_base, SYSCON, syscon);
 
-		wakeupen = OMAP_MCBSP_READ(mcbsp->io_base, WAKEUPEN);
-		wakeupen &= ~WAKEUPEN_ALL;
-		OMAP_MCBSP_WRITE(mcbsp->io_base, WAKEUPEN, wakeupen);
+		syscon &= ~(SIDLEMODE(0x03));
+		OMAP_MCBSP_WRITE(mcbsp->io_base, SYSCON, syscon);
+
+		OMAP_MCBSP_WRITE(mcbsp->io_base, WAKEUPEN, 0);
 	}
 
 	spin_lock_irqsave(&mcbsp->lock, flags);
@@ -461,11 +503,19 @@ static void omap_st_enable(struct omap_mcbsp *mcbsp)
 	struct omap_mcbsp_st_data *st_data;
 	void __iomem *io_base_mcbsp;
 	void __iomem *io_base_st;
-	u16 w;
+	unsigned int w;
 
 	io_base_mcbsp = mcbsp->io_base;
 	st_data = mcbsp->st_data;
 	io_base_st = st_data->io_base_st;
+
+	/*
+	 * Sidetone uses McBSP ICLK - which must not idle when sidetones
+	 * are enabled or sidetones start sounding ugly.
+	 */
+	w = cm_read_mod_reg(OMAP3430_PER_MOD, CM_AUTOIDLE);
+	w &= ~(mcbsp->id - 1);
+	cm_write_mod_reg(w, OMAP3430_PER_MOD, CM_AUTOIDLE);
 
 	/* Enable McBSP Sidetone */
 	w = OMAP_MCBSP_READ(io_base_mcbsp, SSELCR);
@@ -484,7 +534,7 @@ static void omap_st_disable(struct omap_mcbsp *mcbsp)
 	struct omap_mcbsp_st_data *st_data;
 	void __iomem *io_base_mcbsp;
 	void __iomem *io_base_st;
-	u16 w;
+	unsigned int w;
 
 	io_base_mcbsp = mcbsp->io_base;
 	st_data = mcbsp->st_data;
@@ -498,6 +548,23 @@ static void omap_st_disable(struct omap_mcbsp *mcbsp)
 
 	w = OMAP_MCBSP_READ(io_base_mcbsp, SSELCR);
 	OMAP_MCBSP_WRITE(io_base_mcbsp, SSELCR, w & ~(SIDETONEEN));
+
+	w = cm_read_mod_reg(OMAP3430_PER_MOD, CM_AUTOIDLE);
+	w |= (mcbsp->id - 1);
+	cm_write_mod_reg(w, OMAP3430_PER_MOD, CM_AUTOIDLE);
+}
+
+static void omap_st_enable_autoidle(struct omap_mcbsp *mcbsp)
+{
+	struct omap_mcbsp_st_data *st_data;
+	void __iomem *io_base_st;
+	unsigned int w;
+
+	st_data = mcbsp->st_data;
+	io_base_st = st_data->io_base_st;
+
+	w = OMAP_ST_READ(io_base_st, SYSCONFIG);
+	OMAP_ST_WRITE(io_base_st, SYSCONFIG, w | ST_AUTOIDLE);
 }
 
 static void omap_st_fir_write(struct omap_mcbsp *mcbsp, s16 *fir)
@@ -522,11 +589,16 @@ static void omap_st_fir_write(struct omap_mcbsp *mcbsp, s16 *fir)
 	for (i = 0; i < 128; i++)
 		OMAP_ST_WRITE(io_base, SFIRCR, fir[i]);
 
+	i = 0;
+
 	w = OMAP_ST_READ(io_base, SSELCR);
-	while (!(w & ST_COEFFWRDONE))
+	while (!(w & ST_COEFFWRDONE) && (++i < 1000))
 		w = OMAP_ST_READ(io_base, SSELCR);
 
 	OMAP_ST_WRITE(io_base, SSELCR, w & ~(ST_COEFFWREN));
+
+	if (i == 1000)
+		dev_err(mcbsp->dev, "McBSP FIR load error!\n");
 }
 
 static void omap_st_chgain(struct omap_mcbsp *mcbsp, s16 ch0gain, s16 ch1gain)
@@ -553,12 +625,15 @@ static void omap_st_start(struct omap_mcbsp *mcbsp)
 	unsigned long flags;
 
 	spin_lock_irqsave(&mcbsp->lock, flags);
-	if (st_data && st_data->enabled) {
+	if (st_data) {
 		omap_st_fir_write(mcbsp, mcbsp->st_data->taps);
 		omap_st_chgain(mcbsp,
 			       mcbsp->st_data->ch0gain,
 			       mcbsp->st_data->ch1gain);
-		omap_st_enable(mcbsp);
+		if (st_data->enabled)
+			omap_st_enable(mcbsp);
+		else
+			omap_st_enable_autoidle(mcbsp);
 		st_data->running = 1;
 	}
 	spin_unlock_irqrestore(&mcbsp->lock, flags);
@@ -1232,6 +1307,53 @@ static DEVICE_ATTR(prop, 0644, prop##_show, prop##_store);
 THRESHOLD_PROP_BUILDER(max_tx_thres);
 THRESHOLD_PROP_BUILDER(max_rx_thres);
 
+static ssize_t dma_op_mode_show(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct omap_mcbsp *mcbsp = dev_get_drvdata(dev);
+	int dma_op_mode;
+
+	spin_lock_irq(&mcbsp->lock);
+	dma_op_mode = mcbsp->dma_op_mode;
+	spin_unlock_irq(&mcbsp->lock);
+
+	return sprintf(buf, "%d\n", dma_op_mode);
+}
+
+static ssize_t dma_op_mode_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t size)
+{
+	struct omap_mcbsp *mcbsp = dev_get_drvdata(dev);
+	unsigned long val;
+	int status;
+
+	status = strict_strtoul(buf, 0, &val);
+	if (status)
+		return status;
+
+	spin_lock_irq(&mcbsp->lock);
+
+	if (!mcbsp->free) {
+		size = -EBUSY;
+		goto unlock;
+	}
+
+	if (val > MCBSP_DMA_MODE_FRAME || val < MCBSP_DMA_MODE_ELEMENT) {
+		size = -EINVAL;
+		goto unlock;
+	}
+
+	mcbsp->dma_op_mode = val;
+
+unlock:
+	spin_unlock_irq(&mcbsp->lock);
+
+	return size;
+}
+
+static DEVICE_ATTR(dma_op_mode, 0644, dma_op_mode_show, dma_op_mode_store);
+
 static ssize_t st_enable_show(struct device *dev,
 			      struct device_attribute *attr, char *buf)
 {
@@ -1254,7 +1376,17 @@ static ssize_t st_enable_store(struct device *dev,
 	if (status)
 		return status;
 
+	spin_lock_irq(&mcbsp->lock);
 	st_data->enabled = !!val;
+
+	if (st_data->running) {
+		if (st_data->enabled)
+			omap_st_enable(mcbsp);
+		else
+			omap_st_disable(mcbsp);
+	}
+	spin_unlock_irq(&mcbsp->lock);
+
 	return size;
 }
 
@@ -1363,24 +1495,25 @@ static ssize_t st_chgain_store(struct device *dev,
 static DEVICE_ATTR(st_ch0gain, 0644, st_chgain_show, st_chgain_store);
 static DEVICE_ATTR(st_ch1gain, 0644, st_chgain_show, st_chgain_store);
 
-static const struct attribute *threshold_attrs[] = {
+static const struct attribute *additional_attrs[] = {
 	&dev_attr_max_tx_thres.attr,
 	&dev_attr_max_rx_thres.attr,
+	&dev_attr_dma_op_mode.attr,
 	NULL,
 };
 
-static const struct attribute_group threshold_attr_group = {
-	.attrs = (struct attribute **)threshold_attrs,
+static const struct attribute_group additional_attr_group = {
+	.attrs = (struct attribute **)additional_attrs,
 };
 
-static inline int __devinit omap_thres_add(struct platform_device *pdev)
+static inline int __devinit omap_additional_add(struct platform_device *pdev)
 {
-	return sysfs_create_group(&pdev->dev.kobj, &threshold_attr_group);
+	return sysfs_create_group(&pdev->dev.kobj, &additional_attr_group);
 }
 
-static inline void __devexit omap_thres_remove(struct platform_device *pdev)
+static inline void __devexit omap_additional_rem(struct platform_device *pdev)
 {
-	sysfs_remove_group(&pdev->dev.kobj, &threshold_attr_group);
+	sysfs_remove_group(&pdev->dev.kobj, &additional_attr_group);
 }
 
 static const struct attribute *sidetone_attrs[] = {
@@ -1447,11 +1580,12 @@ static inline int __devinit omap_st_add(struct platform_device *pdev)
 	return 0;
 }
 static inline void __devexit omap_st_remove(struct platform_device *pdev) {}
-static inline int __devinit omap_thres_add(struct platform_device *pdev)
+static inline int __devinit omap_additional_add(struct platform_device *pdev)
 {
 	return 0;
 }
-static inline void __devexit omap_thres_remove(struct platform_device *pdev) {}
+static inline void __devexit omap_additional_rem(struct platform_device *pdev)
+{ }
 #endif /* CONFIG_ARCH_OMAP34XX */
 
 /*
@@ -1536,9 +1670,11 @@ static int __devinit omap_mcbsp_probe(struct platform_device *pdev)
 	if (cpu_is_omap34xx()) {
 		mcbsp->max_tx_thres = max_thres(mcbsp);
 		mcbsp->max_rx_thres = max_thres(mcbsp);
+		mcbsp->dma_op_mode = MCBSP_DMA_MODE_THRESHOLD;
 	} else {
 		mcbsp->max_tx_thres = -EINVAL;
 		mcbsp->max_rx_thres = -EINVAL;
+		mcbsp->dma_op_mode = MCBSP_DMA_MODE_ELEMENT;
 	}
 #endif
 
@@ -1548,7 +1684,7 @@ static int __devinit omap_mcbsp_probe(struct platform_device *pdev)
 				dev_warn(&pdev->dev,
 				 "Unable to create sidetone controls\n");
 
-		if (omap_thres_add(pdev))
+		if (omap_additional_add(pdev))
 			dev_warn(&pdev->dev,
 				"Unable to create threshold controls\n");
 	}
@@ -1582,7 +1718,7 @@ static int __devexit omap_mcbsp_remove(struct platform_device *pdev)
 			if (mcbsp->id == 2 || mcbsp->id == 3)
 				omap_st_remove(pdev);
 
-			omap_thres_remove(pdev);
+			omap_additional_rem(pdev);
 		}
 
 		for (i = mcbsp->num_clks - 1; i >= 0; i--) {

@@ -19,7 +19,7 @@
 #define _MMU_REG_ACM_H
 
 #include <GlobalTypes.h>
-
+#include <linux/io.h>
 #include <EasiGlobal.h>
 
 #include "MMUAccInt.h"
@@ -29,40 +29,40 @@
 
 #define MMUMMU_SYSCONFIGReadRegister32(baseAddress)\
     (_DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_SYSCONFIGReadRegister32),\
-      RD_MEM_32_VOLATILE((baseAddress)+MMU_MMU_SYSCONFIG_OFFSET))
+      __raw_readl((baseAddress)+MMU_MMU_SYSCONFIG_OFFSET))
 
 
 #define MMUMMU_SYSCONFIGIdleModeWrite32(baseAddress, value)\
 {\
     const u32 offset = MMU_MMU_SYSCONFIG_OFFSET;\
-    register u32 data = RD_MEM_32_VOLATILE((baseAddress)+offset);\
+    register u32 data = __raw_readl((baseAddress)+offset);\
     register u32 newValue = (value);\
     _DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_SYSCONFIGIdleModeWrite32);\
     data &= ~(MMU_MMU_SYSCONFIG_IdleMode_MASK);\
     newValue <<= MMU_MMU_SYSCONFIG_IdleMode_OFFSET;\
     newValue &= MMU_MMU_SYSCONFIG_IdleMode_MASK;\
     newValue |= data;\
-    WR_MEM_32_VOLATILE(baseAddress+offset, newValue);\
+    __raw_writel(newValue, baseAddress+offset);\
 }
 
 
 #define MMUMMU_SYSCONFIGAutoIdleWrite32(baseAddress, value)\
 {\
     const u32 offset = MMU_MMU_SYSCONFIG_OFFSET;\
-    register u32 data = RD_MEM_32_VOLATILE((baseAddress)+offset);\
+    register u32 data = __raw_readl((baseAddress)+offset);\
     register u32 newValue = (value);\
     _DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_SYSCONFIGAutoIdleWrite32);\
     data &= ~(MMU_MMU_SYSCONFIG_AutoIdle_MASK);\
     newValue <<= MMU_MMU_SYSCONFIG_AutoIdle_OFFSET;\
     newValue &= MMU_MMU_SYSCONFIG_AutoIdle_MASK;\
     newValue |= data;\
-    WR_MEM_32_VOLATILE(baseAddress+offset, newValue);\
+    __raw_writel(newValue, baseAddress+offset);\
 }
 
 
 #define MMUMMU_IRQSTATUSReadRegister32(baseAddress)\
     (_DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_IRQSTATUSReadRegister32),\
-      RD_MEM_32_VOLATILE((baseAddress)+MMU_MMU_IRQSTATUS_OFFSET))
+      __raw_readl((baseAddress)+MMU_MMU_IRQSTATUS_OFFSET))
 
 
 #define MMUMMU_IRQSTATUSWriteRegister32(baseAddress, value)\
@@ -70,13 +70,13 @@
     const u32 offset = MMU_MMU_IRQSTATUS_OFFSET;\
     register u32 newValue = (value);\
     _DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_IRQSTATUSWriteRegister32);\
-    WR_MEM_32_VOLATILE((baseAddress)+offset, newValue);\
+    __raw_writel(newValue, (baseAddress)+offset);\
 }
 
 
 #define MMUMMU_IRQENABLEReadRegister32(baseAddress)\
     (_DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_IRQENABLEReadRegister32),\
-      RD_MEM_32_VOLATILE((baseAddress)+MMU_MMU_IRQENABLE_OFFSET))
+      __raw_readl((baseAddress)+MMU_MMU_IRQENABLE_OFFSET))
 
 
 #define MMUMMU_IRQENABLEWriteRegister32(baseAddress, value)\
@@ -84,20 +84,20 @@
     const u32 offset = MMU_MMU_IRQENABLE_OFFSET;\
     register u32 newValue = (value);\
     _DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_IRQENABLEWriteRegister32);\
-    WR_MEM_32_VOLATILE((baseAddress)+offset, newValue);\
+    __raw_writel(newValue, (baseAddress)+offset);\
 }
 
 
 #define MMUMMU_WALKING_STTWLRunningRead32(baseAddress)\
     (_DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_WALKING_STTWLRunningRead32),\
-      (((RD_MEM_32_VOLATILE(((baseAddress)+(MMU_MMU_WALKING_ST_OFFSET))))\
+      (((__raw_readl(((baseAddress)+(MMU_MMU_WALKING_ST_OFFSET))))\
       & MMU_MMU_WALKING_ST_TWLRunning_MASK) >>\
       MMU_MMU_WALKING_ST_TWLRunning_OFFSET))
 
 
 #define MMUMMU_CNTLTWLEnableRead32(baseAddress)\
     (_DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_CNTLTWLEnableRead32),\
-      (((RD_MEM_32_VOLATILE(((baseAddress)+(MMU_MMU_CNTL_OFFSET)))) &\
+      (((__raw_readl(((baseAddress)+(MMU_MMU_CNTL_OFFSET)))) &\
       MMU_MMU_CNTL_TWLEnable_MASK) >>\
       MMU_MMU_CNTL_TWLEnable_OFFSET))
 
@@ -105,34 +105,34 @@
 #define MMUMMU_CNTLTWLEnableWrite32(baseAddress, value)\
 {\
     const u32 offset = MMU_MMU_CNTL_OFFSET;\
-    register u32 data = RD_MEM_32_VOLATILE((baseAddress)+offset);\
+    register u32 data = __raw_readl((baseAddress)+offset);\
     register u32 newValue = (value);\
     _DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_CNTLTWLEnableWrite32);\
     data &= ~(MMU_MMU_CNTL_TWLEnable_MASK);\
     newValue <<= MMU_MMU_CNTL_TWLEnable_OFFSET;\
     newValue &= MMU_MMU_CNTL_TWLEnable_MASK;\
     newValue |= data;\
-    WR_MEM_32_VOLATILE(baseAddress+offset, newValue);\
+    __raw_writel(newValue, baseAddress+offset);\
 }
 
 
 #define MMUMMU_CNTLMMUEnableWrite32(baseAddress, value)\
 {\
     const u32 offset = MMU_MMU_CNTL_OFFSET;\
-    register u32 data = RD_MEM_32_VOLATILE((baseAddress)+offset);\
+    register u32 data = __raw_readl((baseAddress)+offset);\
     register u32 newValue = (value);\
     _DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_CNTLMMUEnableWrite32);\
     data &= ~(MMU_MMU_CNTL_MMUEnable_MASK);\
     newValue <<= MMU_MMU_CNTL_MMUEnable_OFFSET;\
     newValue &= MMU_MMU_CNTL_MMUEnable_MASK;\
     newValue |= data;\
-    WR_MEM_32_VOLATILE(baseAddress+offset, newValue);\
+    __raw_writel(newValue, baseAddress+offset);\
 }
 
 
 #define MMUMMU_FAULT_ADReadRegister32(baseAddress)\
     (_DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_FAULT_ADReadRegister32),\
-      RD_MEM_32_VOLATILE((baseAddress)+MMU_MMU_FAULT_AD_OFFSET))
+      __raw_readl((baseAddress)+MMU_MMU_FAULT_AD_OFFSET))
 
 
 #define MMUMMU_TTBWriteRegister32(baseAddress, value)\
@@ -140,13 +140,13 @@
     const u32 offset = MMU_MMU_TTB_OFFSET;\
     register u32 newValue = (value);\
     _DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_TTBWriteRegister32);\
-    WR_MEM_32_VOLATILE((baseAddress)+offset, newValue);\
+    __raw_writel(newValue, (baseAddress)+offset);\
 }
 
 
 #define MMUMMU_LOCKReadRegister32(baseAddress)\
     (_DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_LOCKReadRegister32),\
-      RD_MEM_32_VOLATILE((baseAddress)+MMU_MMU_LOCK_OFFSET))
+      __raw_readl((baseAddress)+MMU_MMU_LOCK_OFFSET))
 
 
 #define MMUMMU_LOCKWriteRegister32(baseAddress, value)\
@@ -154,13 +154,13 @@
     const u32 offset = MMU_MMU_LOCK_OFFSET;\
     register u32 newValue = (value);\
     _DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_LOCKWriteRegister32);\
-    WR_MEM_32_VOLATILE((baseAddress)+offset, newValue);\
+    __raw_writel(newValue, (baseAddress)+offset);\
 }
 
 
 #define MMUMMU_LOCKBaseValueRead32(baseAddress)\
     (_DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_LOCKBaseValueRead32),\
-      (((RD_MEM_32_VOLATILE(((baseAddress)+(MMU_MMU_LOCK_OFFSET)))) &\
+      (((__raw_readl(((baseAddress)+(MMU_MMU_LOCK_OFFSET)))) &\
       MMU_MMU_LOCK_BaseValue_MASK) >>\
       MMU_MMU_LOCK_BaseValue_OFFSET))
 
@@ -168,20 +168,20 @@
 #define MMUMMU_LOCKBaseValueWrite32(baseAddress, value)\
 {\
     const u32 offset = MMU_MMU_LOCK_OFFSET;\
-    register u32 data = RD_MEM_32_VOLATILE((baseAddress)+offset);\
+    register u32 data = __raw_readl((baseAddress)+offset);\
     register u32 newValue = (value);\
     _DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_LOCKBaseValueWrite32);\
     data &= ~(MMU_MMU_LOCK_BaseValue_MASK);\
     newValue <<= MMU_MMU_LOCK_BaseValue_OFFSET;\
     newValue &= MMU_MMU_LOCK_BaseValue_MASK;\
     newValue |= data;\
-    WR_MEM_32_VOLATILE(baseAddress+offset, newValue);\
+    __raw_writel(newValue, baseAddress+offset);\
 }
 
 
 #define MMUMMU_LOCKCurrentVictimRead32(baseAddress)\
     (_DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_LOCKCurrentVictimRead32),\
-      (((RD_MEM_32_VOLATILE(((baseAddress)+(MMU_MMU_LOCK_OFFSET)))) &\
+      (((__raw_readl(((baseAddress)+(MMU_MMU_LOCK_OFFSET)))) &\
       MMU_MMU_LOCK_CurrentVictim_MASK) >>\
       MMU_MMU_LOCK_CurrentVictim_OFFSET))
 
@@ -189,14 +189,14 @@
 #define MMUMMU_LOCKCurrentVictimWrite32(baseAddress, value)\
 {\
     const u32 offset = MMU_MMU_LOCK_OFFSET;\
-    register u32 data = RD_MEM_32_VOLATILE((baseAddress)+offset);\
+    register u32 data = __raw_readl((baseAddress)+offset);\
     register u32 newValue = (value);\
     _DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_LOCKCurrentVictimWrite32);\
     data &= ~(MMU_MMU_LOCK_CurrentVictim_MASK);\
     newValue <<= MMU_MMU_LOCK_CurrentVictim_OFFSET;\
     newValue &= MMU_MMU_LOCK_CurrentVictim_MASK;\
     newValue |= data;\
-    WR_MEM_32_VOLATILE(baseAddress+offset, newValue);\
+    __raw_writel(newValue, baseAddress+offset);\
 }
 
 
@@ -209,7 +209,7 @@
 
 #define MMUMMU_LD_TLBReadRegister32(baseAddress)\
     (_DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_LD_TLBReadRegister32),\
-      RD_MEM_32_VOLATILE((baseAddress)+MMU_MMU_LD_TLB_OFFSET))
+      __raw_readl((baseAddress)+MMU_MMU_LD_TLB_OFFSET))
 
 
 #define MMUMMU_LD_TLBWriteRegister32(baseAddress, value)\
@@ -217,7 +217,7 @@
     const u32 offset = MMU_MMU_LD_TLB_OFFSET;\
     register u32 newValue = (value);\
     _DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_LD_TLBWriteRegister32);\
-    WR_MEM_32_VOLATILE((baseAddress)+offset, newValue);\
+    __raw_writel(newValue, (baseAddress)+offset);\
 }
 
 
@@ -226,7 +226,7 @@
     const u32 offset = MMU_MMU_CAM_OFFSET;\
     register u32 newValue = (value);\
     _DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_CAMWriteRegister32);\
-    WR_MEM_32_VOLATILE((baseAddress)+offset, newValue);\
+    __raw_writel(newValue, (baseAddress)+offset);\
 }
 
 
@@ -235,7 +235,7 @@
     const u32 offset = MMU_MMU_RAM_OFFSET;\
     register u32 newValue = (value);\
     _DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_RAMWriteRegister32);\
-    WR_MEM_32_VOLATILE((baseAddress)+offset, newValue);\
+    __raw_writel(newValue, (baseAddress)+offset);\
 }
 
 
@@ -244,7 +244,7 @@
     const u32 offset = MMU_MMU_FLUSH_ENTRY_OFFSET;\
     register u32 newValue = (value);\
     _DEBUG_LEVEL_1_EASI(EASIL1_MMUMMU_FLUSH_ENTRYWriteRegister32);\
-    WR_MEM_32_VOLATILE((baseAddress)+offset, newValue);\
+    __raw_writel(newValue, (baseAddress)+offset);\
 }
 
 

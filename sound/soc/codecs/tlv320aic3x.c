@@ -55,6 +55,7 @@
 struct aic3x_priv {
 	unsigned int sysclk;
 	int master;
+	int prepare_reset;
 };
 
 /*
@@ -72,7 +73,7 @@ static const u8 aic3x_reg[AIC3X_CACHEREGNUM] = {
 	0x78, 0x78, 0x78, 0x78,	/* 20 */
 	0x78, 0x00, 0x00, 0xfe,	/* 24 */
 	0x00, 0x00, 0xfe, 0x00,	/* 28 */
-	0x18, 0x18, 0x00, 0x00,	/* 32 */
+	0x00, 0x00, 0x00, 0x00,	/* 32 */
 	0x00, 0x00, 0x00, 0x00,	/* 36 */
 	0x00, 0x00, 0x00, 0x80,	/* 40 */
 	0x80, 0x00, 0x00, 0x00,	/* 44 */
@@ -145,11 +146,34 @@ static int aic3x_read(struct snd_soc_codec *codec, unsigned int reg,
 		      u8 *value)
 {
 	*value = reg & 0xff;
+
+	/* No read access is recommended if the chip is reset after use */
+	printk(KERN_ERR "%s(): Values are may be incorrect!\n", __func__);
+
 	if (codec->hw_read(codec->control_data, value, 1) != 1)
 		return -EIO;
 
 	aic3x_write_reg_cache(codec, reg, *value);
 	return 0;
+}
+
+/*
+ * Reset for getting low power consumption after bypass paths
+ */
+static void aic3x_reset(struct snd_soc_codec *codec)
+{
+	u8 *cache = codec->reg_cache;
+	u8 data[2];
+	int i;
+
+	aic3x_write(codec, AIC3X_RESET, SOFT_RESET);
+
+	/* We do not rewrite page select nor reset again */
+	for (i = AIC3X_SAMPLE_RATE_SEL_REG; i < ARRAY_SIZE(aic3x_reg); i++) {
+		data[0] = i;
+		data[1] = cache[i];
+		codec->hw_write(codec->control_data, data, 2);
+	}
 }
 
 #define SOC_DAPM_SINGLE_AIC3X(xname, reg, shift, mask, invert) \
@@ -257,6 +281,8 @@ static const struct soc_enum aic3x_enum[] = {
 static DECLARE_TLV_DB_SCALE(dac_tlv, -6350, 50, 0);
 /* ADC PGA gain volumes. From 0 to 59.5 dB in 0.5 dB steps */
 static DECLARE_TLV_DB_SCALE(adc_tlv, 0, 50, 0);
+/* HP DAC Output gain values. From 0 to 9.0 dB in 1 dB steps */
+static DECLARE_TLV_DB_SCALE(hpout_tlv, 0, 100, 0);
 /*
  * Output stage volumes. From -78.3 to 0 dB. Muted below -78.3 dB.
  * Step size is approximately 0.5 dB over most of the scale but increasing
@@ -301,6 +327,8 @@ static const struct snd_kcontrol_new aic3x_snd_controls[] = {
 			 0, 118, 1, output_stage_tlv),
 	SOC_DOUBLE_R("HP DAC Playback Switch", HPLOUT_CTRL, HPROUT_CTRL, 3,
 		     0x01, 0),
+	SOC_DOUBLE_R_TLV("HP DAC Output Volume", HPLOUT_CTRL, HPROUT_CTRL, 4,
+			 9, 0, hpout_tlv),
 	SOC_DOUBLE_R_TLV("HP PGA Bypass Playback Volume",
 			 PGAL_2_HPLOUT_VOL, PGAR_2_HPROUT_VOL,
 			 0, 118, 1, output_stage_tlv),
@@ -313,6 +341,8 @@ static const struct snd_kcontrol_new aic3x_snd_controls[] = {
 			 0, 118, 1, output_stage_tlv),
 	SOC_DOUBLE_R("HPCOM DAC Playback Switch", HPLCOM_CTRL, HPRCOM_CTRL, 3,
 		     0x01, 0),
+	SOC_DOUBLE_R_TLV("HPCOM DAC Output Volume", HPLCOM_CTRL, HPRCOM_CTRL,
+			 4, 9, 0, hpout_tlv),
 	SOC_DOUBLE_R_TLV("HPCOM PGA Bypass Playback Volume",
 			 PGAL_2_HPLCOM_VOL, PGAR_2_HPRCOM_VOL,
 			 0, 118, 1, output_stage_tlv),
@@ -345,6 +375,59 @@ static int aic3x_add_controls(struct snd_soc_codec *codec)
 					       codec, NULL));
 		if (err < 0)
 			return err;
+	}
+
+	return 0;
+}
+
+static int reset_after_bypass(struct snd_soc_dapm_widget *w,
+			struct snd_kcontrol *kcontrol, int event)
+{
+	struct aic3x_priv *aic3x = w->codec->private_data;
+	struct soc_mixer_control *mc = NULL;
+	unsigned int reg = 0;
+
+	if (kcontrol)
+		mc = (struct soc_mixer_control *)kcontrol->private_value;
+	if (mc)
+		reg = mc->reg;
+
+	if (reg == PGAL_2_LLOPM_VOL || reg == PGAR_2_RLOPM_VOL ||
+	    reg == PGAL_2_HPLOUT_VOL || reg == PGAR_2_HPROUT_VOL) {
+		if (w->value & 0x80) {
+			/* Prepare reset on the chip */
+			if (reg == PGAL_2_LLOPM_VOL)
+				aic3x->prepare_reset |= 0x01;
+			else if (reg == PGAR_2_RLOPM_VOL)
+				aic3x->prepare_reset |= 0x02;
+			else if (reg == PGAL_2_HPLOUT_VOL)
+				aic3x->prepare_reset |= 0x04;
+			else if (reg == PGAR_2_HPROUT_VOL)
+				aic3x->prepare_reset |= 0x08;
+		} else {
+			if (aic3x->prepare_reset) {
+				if (reg == PGAL_2_LLOPM_VOL)
+					aic3x->prepare_reset &= ~0x01;
+				else if (reg == PGAR_2_RLOPM_VOL)
+					aic3x->prepare_reset &= ~0x02;
+				else if (reg == PGAL_2_HPLOUT_VOL)
+					aic3x->prepare_reset &= ~0x04;
+				else if (reg == PGAR_2_HPROUT_VOL)
+					aic3x->prepare_reset &= ~0x08;
+				/*
+				 * Controls may have now been turned off,
+				 * once they were on, so schedule or
+				 * issue a reset on the chip.
+				 */
+				if (!aic3x->prepare_reset) {
+					if (!((w->codec->bias_level ==
+						SND_SOC_BIAS_ON) ||
+						(w->codec->bias_level ==
+						SND_SOC_BIAS_PREPARE)))
+						aic3x_reset(w->codec);
+				}
+			}
+		}
 	}
 
 	return 0;
@@ -528,14 +611,16 @@ static const struct snd_soc_dapm_widget aic3x_dapm_widgets[] = {
 			 MICBIAS_CTRL, 6, 3, 3, 0),
 
 	/* Left PGA to Left Output bypass */
-	SND_SOC_DAPM_MIXER("Left PGA Bypass Mixer", SND_SOC_NOPM, 0, 0,
+	SND_SOC_DAPM_MIXER_E("Left PGA Bypass Mixer", SND_SOC_NOPM, 0, 0,
 			   &aic3x_left_pga_bp_mixer_controls[0],
-			   ARRAY_SIZE(aic3x_left_pga_bp_mixer_controls)),
+			   ARRAY_SIZE(aic3x_left_pga_bp_mixer_controls),
+			   reset_after_bypass, SND_SOC_DAPM_POST_REG),
 
 	/* Right PGA to Right Output bypass */
-	SND_SOC_DAPM_MIXER("Right PGA Bypass Mixer", SND_SOC_NOPM, 0, 0,
+	SND_SOC_DAPM_MIXER_E("Right PGA Bypass Mixer", SND_SOC_NOPM, 0, 0,
 			   &aic3x_right_pga_bp_mixer_controls[0],
-			   ARRAY_SIZE(aic3x_right_pga_bp_mixer_controls)),
+			   ARRAY_SIZE(aic3x_right_pga_bp_mixer_controls),
+			   reset_after_bypass, SND_SOC_DAPM_POST_REG),
 
 	/* Left Line2 to Left Output bypass */
 	SND_SOC_DAPM_MIXER("Left Line2 Bypass Mixer", SND_SOC_NOPM, 0, 0,
@@ -887,7 +972,8 @@ static int aic3x_set_dai_fmt(struct snd_soc_dai *codec_dai,
 {
 	struct snd_soc_codec *codec = codec_dai->codec;
 	struct aic3x_priv *aic3x = codec->private_data;
-	u8 iface_areg, iface_breg, iface_creg = 0;
+	u8 iface_areg, iface_breg;
+	int delay = 0;
 
 	iface_areg = aic3x_read_reg_cache(codec, AIC3X_ASD_INTF_CTRLA) & 0x3f;
 	iface_breg = aic3x_read_reg_cache(codec, AIC3X_ASD_INTF_CTRLB) & 0x3f;
@@ -913,6 +999,8 @@ static int aic3x_set_dai_fmt(struct snd_soc_dai *codec_dai,
 		       SND_SOC_DAIFMT_INV_MASK)) {
 	case (SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF):
 		break;
+	case (SND_SOC_DAIFMT_DSP_A | SND_SOC_DAIFMT_IB_NF):
+		delay = 1;
 	case (SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_IB_NF):
 		iface_breg |= (0x01 << 6);
 		break;
@@ -922,10 +1010,6 @@ static int aic3x_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	case (SND_SOC_DAIFMT_LEFT_J | SND_SOC_DAIFMT_NB_NF):
 		iface_breg |= (0x03 << 6);
 		break;
-	case (SND_SOC_DAIFMT_DSP | SND_SOC_DAIFMT_NB_NF):
-		iface_breg |= (0x01 << 6);
-		iface_creg = 0x01;
-		break;
 	default:
 		return -EINVAL;
 	}
@@ -933,7 +1017,7 @@ static int aic3x_set_dai_fmt(struct snd_soc_dai *codec_dai,
 	/* set iface */
 	aic3x_write(codec, AIC3X_ASD_INTF_CTRLA, iface_areg);
 	aic3x_write(codec, AIC3X_ASD_INTF_CTRLB, iface_breg);
-	aic3x_write(codec, AIC3X_ASD_INTF_CTRLC, iface_creg);
+	aic3x_write(codec, AIC3X_ASD_INTF_CTRLC, delay);
 
 	return 0;
 }
@@ -975,6 +1059,9 @@ static int aic3x_set_bias_level(struct snd_soc_codec *codec,
 			aic3x_write(codec, AIC3X_PLL_PROGA_REG,
 				    reg & ~PLL_ENABLE);
 		}
+		/* Reset cannot be issued, if bypass paths are in use */
+		if (!aic3x->prepare_reset)
+			aic3x_reset(codec);
 		break;
 	case SND_SOC_BIAS_OFF:
 		/* force all power off */
@@ -1080,7 +1167,7 @@ static int aic3x_suspend(struct platform_device *pdev, pm_message_t state)
 	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
 	struct snd_soc_codec *codec = socdev->codec;
 
-	aic3x_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	aic3x_write(codec, AIC3X_RESET, SOFT_RESET);
 
 	return 0;
 }
@@ -1381,7 +1468,8 @@ static int aic3x_remove(struct platform_device *pdev)
 	snd_soc_free_pcms(socdev);
 	snd_soc_dapm_free(socdev);
 #if defined(CONFIG_I2C) || defined(CONFIG_I2C_MODULE)
-	i2c_unregister_device(codec->control_data);
+	if (codec->control_data)
+		i2c_unregister_device(codec->control_data);
 	i2c_del_driver(&aic3x_i2c_driver);
 #endif
 	kfree(codec->private_data);

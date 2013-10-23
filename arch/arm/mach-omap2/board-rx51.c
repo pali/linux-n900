@@ -15,6 +15,7 @@
 #include <linux/err.h>
 #include <linux/clk.h>
 #include <linux/omapfb.h>
+#include <linux/usb/musb.h>
 
 #include <mach/hardware.h>
 #include <asm/mach-types.h>
@@ -39,41 +40,23 @@
 #include "omap3-opp.h"
 #include "pm.h"
 
+#include <mach/pm.h>
+#include <mach/omap-pm.h>
+#include <mach/prcm.h>
+#include "cm.h"
+
+#define RX51_USB_TRANSCEIVER_RST_GPIO	67
+
 extern int omap_init_fb(void);
+extern void rx51_video_mem_init(void);
 
 static struct omap_uart_config rx51_uart_config = {
 	.enabled_uarts	= ((1 << 0) | (1 << 1) | (1 << 2)),
 };
 
-#if defined CONFIG_FB_OMAP || defined CONFIG_FB_OMAP_MODULE
-static struct omap_lcd_config rx51_lcd_config = {
-	.ctrl_name	= "internal",
-};
-
-static struct omap_fbmem_config rx51_fbmem0_config = {
-	.size = (800 * 480 * 2) * 5,
-};
-
-static struct omap_fbmem_config rx51_fbmem1_config = {
-	.size = 752 * 1024,
-};
-
-static struct omap_fbmem_config rx51_fbmem2_config = {
-	.size = 752 * 1024,
-};
-
-static struct omap_board_config_kernel rx51_config[] = {
-	{ OMAP_TAG_UART,	&rx51_uart_config },
-	{ OMAP_TAG_FBMEM,	&rx51_fbmem0_config },
-	{ OMAP_TAG_FBMEM,	&rx51_fbmem1_config },
-	{ OMAP_TAG_FBMEM,	&rx51_fbmem2_config },
-	{ OMAP_TAG_LCD,		&rx51_lcd_config },
-};
-#else
 static struct omap_board_config_kernel rx51_config[] = {
 	{ OMAP_TAG_UART,	&rx51_uart_config },
 };
-#endif	/* CONFIG_FB_OMAP || CONFIG_FB_OMAP_MODULE */
 
 static struct omap_bluetooth_config rx51_bt_config = {
 	.chip_type		= BT_CHIP_BCM,
@@ -86,10 +69,14 @@ static struct omap_bluetooth_config rx51_bt_config = {
 
 static void __init rx51_init_irq(void)
 {
-	omap2_init_common_hw(rx51_get_sdram_timings(),
-				omap3_mpu_rate_table,
-				omap3_dsp_rate_table,
-				omap3_l3_rate_table);
+	struct omap_sdrc_params *sdrc_params;
+
+	sdrc_params = rx51_get_sdram_timings();
+
+	omap2_init_common_hw(sdrc_params, sdrc_params,
+			     omap3_mpu_rate_table,
+			     omap3_dsp_rate_table,
+			     omap3_l3_rate_table);
 	omap_init_irq();
 	omap_gpio_init();
 }
@@ -97,19 +84,83 @@ static void __init rx51_init_irq(void)
 static void __init rx51_pm_init(void)
 {
 	struct prm_setup_times prm_setup = {
-		.clksetup = 0,
-		.voltsetup_time1 = 60,
-		.voltsetup_time2 = 60,
-		.voltoffset = 56,
-		.voltsetup2 = 150,
+		.clksetup = 81,
+		.voltsetup_time1 = 270,
+		.voltsetup_time2 = 150,
+		.voltoffset = 17,
+		.voltsetup2 = 37,
 	};
 
 	omap3_set_prm_setup_times(&prm_setup);
 }
 
+static void __init rx51_xceiv_init(void)
+{
+	if (gpio_request(RX51_USB_TRANSCEIVER_RST_GPIO, NULL) < 0)
+		BUG();
+	gpio_direction_output(RX51_USB_TRANSCEIVER_RST_GPIO, 1);
+}
+
+static int rx51_xceiv_reset(void)
+{
+	/* make sure the transceiver is awake */
+	msleep(15);
+	/* only reset powered transceivers */
+	if (!gpio_get_value(RX51_USB_TRANSCEIVER_RST_GPIO))
+		return 0;
+	gpio_set_value(RX51_USB_TRANSCEIVER_RST_GPIO, 0);
+	msleep(1);
+	gpio_set_value(RX51_USB_TRANSCEIVER_RST_GPIO, 1);
+	msleep(15);
+
+	return 0;
+}
+
+static int rx51_xceiv_power(bool power)
+{
+	unsigned long	timeout;
+
+	if (!power) {
+		/* Let musb go stdby before powering down the transceiver */
+		timeout = jiffies + msecs_to_jiffies(100);
+		while (!time_after(jiffies, timeout))
+			if (cm_read_mod_reg(CORE_MOD, CM_IDLEST1)
+				& OMAP3430ES2_ST_HSOTGUSB_STDBY_MASK)
+				break;
+		if (!(cm_read_mod_reg(CORE_MOD, CM_IDLEST1)
+			& OMAP3430ES2_ST_HSOTGUSB_STDBY_MASK))
+			WARN(1, "could not put musb to sleep\n");
+	}
+	gpio_set_value(RX51_USB_TRANSCEIVER_RST_GPIO, power);
+
+	return 0;
+}
+
+/**
+ * rx51_usb_set_pm_limits - sets omap3-related pm constraints
+ * @dev:	musb's device pointer
+ * @set:	set or clear constraints
+ *
+ * For now we only need mpu wakeup latency mpu frequency, if we
+ * need anything else we just add the logic here and the driver
+ * is already handling what needs to be handled.
+ */
+static void rx51_usb_set_pm_limits(struct device *dev, bool set)
+{
+	omap_pm_set_max_mpu_wakeup_lat(dev, set ? 10 : -1);
+	omap_pm_set_min_mpu_freq(dev, set ? 500000000 : 0);
+}
+
+static struct musb_board_data rx51_musb_data = {
+	.xceiv_reset	= rx51_xceiv_reset,
+	.xceiv_power	= rx51_xceiv_power,
+	.set_pm_limits	= rx51_usb_set_pm_limits,
+};
+
 static void __init rx51_init(void)
 {
-	usb_musb_init();
+	rx51_xceiv_init();
+	usb_musb_init(&rx51_musb_data);
 	omap_serial_init();
 	rx51_pm_init();
 	/*
@@ -127,10 +178,8 @@ static void __init rx51_map_io(void)
 	omap_board_config = rx51_config;
 	omap_board_config_size = ARRAY_SIZE(rx51_config);
 	omap2_set_globals_343x();
-#ifdef CONFIG_OMAP2_DSS
-	omap2_set_sdram_vram(1024 * 752 * 2, 0);
-#endif
 	omap2_map_common_io();
+	rx51_video_mem_init();
 }
 
 MACHINE_START(NOKIA_RX51, "Nokia RX-51 board")

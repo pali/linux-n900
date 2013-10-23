@@ -256,46 +256,69 @@ static int ad5820_ioctl_s_ctrl(struct v4l2_int_device *s,
 	return r;
 }
 
-/* Power must not be OFF when this function is called */
-static int ad5820_configure(struct v4l2_int_device *s)
+static int ad5820_ioctl_dev_init(struct v4l2_int_device *s)
 {
+	/* Detect that the chip is there */
+
 	struct ad5820_device *coil = s->priv;
+	static const int CHECK_VALUE = 0x3FF0;
+	u16 status = BIT_POWER_DOWN | CHECK_VALUE;
 	int rval;
 
-	if (!coil->dev_init_done) {
-		/* Detect that the chip is there */
-		static const int CHECK_VALUE = 0x3FF0;
-		u16 status = BIT_POWER_DOWN | CHECK_VALUE;
+	rval = coil->platform_data->s_power(s, V4L2_POWER_ON);
+	if (rval)
+		goto not_detected;
+	rval = ad5820_write(s, status);
+	if (rval)
+		goto not_detected;
+	rval = ad5820_read(s);
+	if (rval != status)
+		goto not_detected;
 
-		rval = ad5820_write(s, status);
-		if (rval)
-			goto not_detected;
-		rval = ad5820_read(s);
-		if (rval != status)
-			goto not_detected;
-		coil->dev_init_done = true;
-	}
-
-	return ad5820_update_hw(s);
+	coil->platform_data->s_power(s, V4L2_POWER_OFF);
+	return 0;
 
 not_detected:
-	printk(KERN_ERR AD5820_NAME ": not detected\n");
+	dev_err(&coil->i2c_client->dev, "not detected\n");
 	return -ENODEV;
 }
 
 static int ad5820_ioctl_s_power(struct v4l2_int_device *s,
-				enum v4l2_power state)
+				enum v4l2_power new_state)
 {
 	struct ad5820_device *coil = s->priv;
+	enum v4l2_power orig_state = coil->power;
 	int rval;
 
-	rval = coil->platform_data->s_power(s, state);
-	if (rval)
-		return rval;
-	coil->power = state;
+	if (new_state == V4L2_POWER_STANDBY)
+		new_state = V4L2_POWER_ON;
 
-	if (state == V4L2_POWER_ON) {
-		rval = ad5820_configure(s);
+	if (orig_state == new_state)
+		return 0;
+	if (orig_state == V4L2_POWER_OFF) {
+		/* Requested STANDBY or ON -- enable power */
+		rval = coil->platform_data->s_power(s, V4L2_POWER_ON);
+		if (rval)
+			return rval;
+	}
+	coil->power = new_state;
+	if (new_state == V4L2_POWER_OFF) {
+		/* Requested OFF -- before disabling power, set to standby */
+		coil->power = V4L2_POWER_STANDBY;
+	}
+	/*
+	 * Here power is on. If OFF is requested, the chip
+	 * is first set into STANDBY mode. This is necessary
+	 * because sensor driver might keep power enabled even
+	 * if lens driver requests it off.
+	 */
+	rval = ad5820_update_hw(s);
+	if (rval)
+		goto fail;
+	coil->power = new_state;
+	if (new_state == V4L2_POWER_OFF) {
+		/* Requested OFF -- disable power */
+		rval = coil->platform_data->s_power(s, V4L2_POWER_OFF);
 		if (rval)
 			goto fail;
 	}
@@ -303,8 +326,11 @@ static int ad5820_ioctl_s_power(struct v4l2_int_device *s,
 	return 0;
 
 fail:
-	coil->power = V4L2_POWER_OFF;
-	coil->platform_data->s_power(s, V4L2_POWER_OFF);
+	/* Try to restore original state and return error code */
+	coil->platform_data->s_power(s, orig_state == V4L2_POWER_OFF ?
+				     V4L2_POWER_OFF : V4L2_POWER_ON);
+	coil->power = orig_state;
+	ad5820_update_hw(s);
 	return rval;
 }
 
@@ -328,6 +354,8 @@ static struct v4l2_int_ioctl_desc ad5820_ioctl_desc[] = {
 	  (v4l2_int_ioctl_func *)ad5820_ioctl_s_power },
 	{ vidioc_int_g_priv_num,
 	  (v4l2_int_ioctl_func *)ad5820_ioctl_g_priv },
+	{ vidioc_int_dev_init_num,
+	  (v4l2_int_ioctl_func *)ad5820_ioctl_dev_init },
 };
 
 static struct v4l2_int_slave ad5820_slave = {
@@ -398,7 +426,6 @@ static int ad5820_probe(struct i2c_client *client,
 			ad5820_ctrls[CTRL_FOCUS_RAMP_TIME].default_value;
 	coil->focus_ramp_mode =
 			ad5820_ctrls[CTRL_FOCUS_RAMP_MODE].default_value;
-	coil->dev_init_done   = false;
 
 	coil->v4l2_int_device = &ad5820_int_device;
 

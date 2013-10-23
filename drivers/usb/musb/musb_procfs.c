@@ -42,6 +42,8 @@
 
 #include "davinci.h"
 
+extern unsigned musb_debug;
+
 #ifdef CONFIG_USB_MUSB_HDRC_HCD
 
 static int dump_qh(struct musb_qh *qh, char *buf, unsigned max)

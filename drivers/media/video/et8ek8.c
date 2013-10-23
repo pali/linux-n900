@@ -134,7 +134,7 @@ static int et8ek8_set_gain(struct et8ek8_sensor *sensor, s32 gain)
 		sensor->controls[CTRL_GAIN].minimum,
 		sensor->controls[CTRL_GAIN].maximum);
 
-	if (sensor->power != V4L2_POWER_ON)
+	if (sensor->power == V4L2_POWER_OFF)
 		return 0;
 
 	new = et8ek8_gain_table[sensor->controls[CTRL_GAIN].value];
@@ -189,7 +189,7 @@ static int et8ek8_set_exposure(struct et8ek8_sensor *sensor, s32 exptime)
 	/* Set the V4L2 control for exposure time to the rounded value */
 	sensor->controls[CTRL_EXPOSURE].value = (rt * rows + (1 << 7)) >> 8;
 
-	if (sensor->power != V4L2_POWER_ON)
+	if (sensor->power == V4L2_POWER_OFF)
 		return 0;
 
 	return smia_i2c_write_reg(sensor->i2c_client, SMIA_REG_16BIT, 0x1243,
@@ -205,7 +205,7 @@ static int et8ek8_set_test_pattern(struct et8ek8_sensor *sensor, s32 mode)
 
 	sensor->controls[CTRL_TEST_PATTERN].value = mode;
 
-	if (sensor->power != V4L2_POWER_ON)
+	if (sensor->power == V4L2_POWER_OFF)
 		return 0;
 
 	/* Values for normal mode */
@@ -260,20 +260,12 @@ out:
 
 }
 
-static int et8ek8_configure(struct v4l2_int_device *s)
+static int et8ek8_update_controls(struct v4l2_int_device *s)
 {
 	struct et8ek8_sensor *sensor = s->priv;
-	int rval, val, i;
+	int i;
 	unsigned int rt;	/* Row time in us */
 	unsigned int clock;	/* Pixel clock in Hz>>2 fixed point */
-
-	rval = smia_i2c_reglist_find_write(sensor->i2c_client,
-					   sensor->meta_reglist,
-					   SMIA_REGLIST_POWERON);
-	if (rval)
-		return rval;
-
-	/* Update V4L2 exposure controls to the current mode */
 
 	if (sensor->current_reglist->mode.pixel_clock <= 0 ||
 	    sensor->current_reglist->mode.width <= 0) {
@@ -299,17 +291,105 @@ static int et8ek8_configure(struct v4l2_int_device *s)
 	/* Adjust V4L2 control values and write them to the sensor */
 
 	for (i=0; i<ARRAY_SIZE(sensor->controls); i++) {
-		rval = sensor->controls[i].set(sensor,
+		int rval = sensor->controls[i].set(sensor,
 			sensor->controls[i].value);
 		if (rval)
-			goto fail;
+			return rval;
 	}
+	return 0;
+}
+
+static int et8ek8_configure(struct v4l2_int_device *s)
+{
+	struct et8ek8_sensor *sensor = s->priv;
+	int rval;
+
+	rval = et8ek8_update_controls(s);
+	if (rval)
+		goto fail;
+
+	rval = smia_i2c_write_regs(sensor->i2c_client,
+				   sensor->current_reglist->regs);
+	if (rval)
+		goto fail;
+
+	rval = sensor->platform_data->configure_interface(
+		s, &sensor->current_reglist->mode);
+	if (rval)
+		goto fail;
+
+	return 0;
+
+fail:
+	dev_err(&sensor->i2c_client->dev, "sensor configuration failed\n");
+	return rval;
+}
+
+static int et8ek8_stream_on(struct v4l2_int_device *s)
+{
+	struct et8ek8_sensor *sensor = s->priv;
+	return smia_i2c_write_reg(sensor->i2c_client,
+				  SMIA_REG_8BIT, 0x1252, 0xB0);
+}
+
+static int et8ek8_stream_off(struct v4l2_int_device *s)
+{
+	struct et8ek8_sensor *sensor = s->priv;
+	return smia_i2c_write_reg(sensor->i2c_client,
+				  SMIA_REG_8BIT, 0x1252, 0x30);
+}
+
+static int et8ek8_power_off(struct v4l2_int_device *s)
+{
+	struct et8ek8_sensor *sensor = s->priv;
+	int rval;
+
+	rval = sensor->platform_data->power_off(s);
+	if (rval)
+		return rval;
+	udelay(1);
+	rval = sensor->platform_data->set_xclk(s, 0);
+	return rval;
+}
+
+static int et8ek8_power_on(struct v4l2_int_device *s)
+{
+	struct et8ek8_sensor *sensor = s->priv;
+	unsigned int hz = ET8EK8_XCLK_HZ;
+	int val, rval;
+
+	if (sensor->current_reglist)
+		hz = sensor->current_reglist->mode.ext_clock;
+
+	rval = sensor->platform_data->set_xclk(s, hz);
+	if (rval)
+		goto out;
+
+	udelay(10);			/* I wish this is a good value */
+
+	rval = sensor->platform_data->power_on(s);
+	if (rval)
+		goto out;
+
+	msleep(5000*1000/hz+1);				/* Wait 5000 cycles */
+
+	if (sensor->meta_reglist) {
+		rval = smia_i2c_reglist_find_write(sensor->i2c_client,
+						   sensor->meta_reglist,
+						   SMIA_REGLIST_POWERON);
+		if (rval)
+			goto out;
+	}
+
+	rval = et8ek8_stream_off(s);
+	if (rval)
+		goto out;
 
 #ifdef USE_CRC
 	rval = smia_i2c_read_reg(sensor->i2c_client,
 				 SMIA_REG_8BIT, 0x1263, &val);
 	if (rval)
-		goto fail;
+		goto out;
 #if USE_CRC
 	val |= (1<<4);
 #else
@@ -318,72 +398,8 @@ static int et8ek8_configure(struct v4l2_int_device *s)
 	rval = smia_i2c_write_reg(sensor->i2c_client,
 				  SMIA_REG_8BIT, 0x1263, val);
 	if (rval)
-		goto fail;
-#endif
-
-	rval = smia_i2c_write_regs(sensor->i2c_client,
-				   sensor->current_reglist->regs);
-	if (rval)
-		goto fail;
-
-	return rval;
-
-fail:
-	dev_err(&sensor->i2c_client->dev, "sensor configuration failed\n");
-	return rval;
-
-}
-
-static int et8ek8_setup_if(struct v4l2_int_device *s)
-{
-	struct et8ek8_sensor *sensor = s->priv;
-	int rval;
-	unsigned int hz;
-
-	if (sensor->current_reglist) {
-		rval = sensor->platform_data->configure_interface(
-			s, &sensor->current_reglist->mode);
-		if (rval)
-			return rval;
-		hz = sensor->current_reglist->mode.ext_clock;
-	} else {
-		hz = ET8EK8_XCLK_HZ;
-	}
-
-	sensor->platform_data->set_xclk(s, hz);
-	msleep(5000*1000/ET8EK8_XCLK_HZ+1);		/* Wait 5000 cycles */
-
-	return 0;
-}
-
-static int et8ek8_power_off(struct v4l2_int_device *s)
-{
-	struct et8ek8_sensor *sensor = s->priv;
-	int rval;
-
-	rval = sensor->platform_data->set_xclk(s, 0);
-	if (rval)
-		return rval;
-
-	return sensor->platform_data->power_off(s);
-}
-
-static int et8ek8_power_on(struct v4l2_int_device *s)
-{
-	struct et8ek8_sensor *sensor = s->priv;
-	int rval;
-
-	rval = sensor->platform_data->power_on(s);
-	if (rval)
 		goto out;
-
-	/*
-	 * At least one ms is required between xshutdown up and clock
-	 * start.
-	 */
-	msleep(1);
-
-	rval = et8ek8_setup_if(s);
+#endif
 
 out:
 	if (rval)
@@ -540,9 +556,13 @@ static int et8ek8_ioctl_s_fmt_cap(struct v4l2_int_device *s,
 	if (!reglist)
 		return -EINVAL;
 
+	if (sensor->power != V4L2_POWER_OFF &&
+	    sensor->current_reglist->mode.ext_clock != reglist->mode.ext_clock)
+		return -EINVAL;
+
 	sensor->current_reglist = reglist;
 
-	return 0;
+	return et8ek8_update_controls(s);
 }
 
 static int et8ek8_ioctl_g_parm(struct v4l2_int_device *s,
@@ -575,9 +595,13 @@ static int et8ek8_ioctl_s_parm(struct v4l2_int_device *s,
 	if (!reglist)
 		return -EINVAL;
 
+	if (sensor->power != V4L2_POWER_OFF &&
+	    sensor->current_reglist->mode.ext_clock != reglist->mode.ext_clock)
+		return -EINVAL;
+
 	sensor->current_reglist = reglist;
 
-	return 0;
+	return et8ek8_update_controls(s);
 }
 
 static int et8ek8_g_priv_mem(struct v4l2_int_device *s)
@@ -657,11 +681,15 @@ out:
 	return rval;
 }
 
-static int et8ek8_dev_init(struct v4l2_int_device *s)
+static int et8ek8_ioctl_dev_init(struct v4l2_int_device *s)
 {
 	struct et8ek8_sensor *sensor = s->priv;
 	char name[FIRMWARE_NAME_MAX];
 	int rval, rev_l, rev_h;
+
+	rval = et8ek8_power_on(s);
+	if (rval)
+		return -ENODEV;
 
 	if (smia_i2c_read_reg(sensor->i2c_client, SMIA_REG_8BIT,
 			      REG_REVISION_NUMBER_L, &rev_l) != 0
@@ -669,11 +697,10 @@ static int et8ek8_dev_init(struct v4l2_int_device *s)
 				 REG_REVISION_NUMBER_H, &rev_h) != 0) {
 		dev_err(&sensor->i2c_client->dev,
 			"no et8ek8 sensor detected\n");
-		return -ENODEV;
+		rval = -ENODEV;
+		goto out_poweroff;
 	}
-
 	sensor->version = (rev_h << 8) + rev_l;
-
 	if (sensor->version != ET8EK8_REV_1
 	    && sensor->version != ET8EK8_REV_2)
 		dev_info(&sensor->i2c_client->dev,
@@ -682,17 +709,15 @@ static int et8ek8_dev_init(struct v4l2_int_device *s)
 
 	snprintf(name, FIRMWARE_NAME_MAX, "%s-%4.4x.bin", ET8EK8_NAME,
 		 sensor->version);
-
 	if (request_firmware(&sensor->fw, name,
 			     &sensor->i2c_client->dev)) {
 		dev_err(&sensor->i2c_client->dev,
 			"can't load firmware %s\n", name);
-		return -ENODEV;
+		rval = -ENODEV;
+		goto out_poweroff;
 	}
-
 	sensor->meta_reglist =
 		(struct smia_meta_reglist *)sensor->fw->data;
-
 	rval = smia_reglist_import(sensor->meta_reglist);
 	if (rval) {
 		dev_err(&sensor->i2c_client->dev,
@@ -712,61 +737,91 @@ static int et8ek8_dev_init(struct v4l2_int_device *s)
 		goto out_release;
 	}
 
-	sensor->dev_init_done = true;
+	rval = smia_i2c_reglist_find_write(sensor->i2c_client,
+					   sensor->meta_reglist,
+					   SMIA_REGLIST_POWERON);
+	if (rval) {
+		dev_err(&sensor->i2c_client->dev,
+			"invalid register list %s, no POWERON mode found\n",
+			name);
+		goto out_release;
+	}
+	rval = et8ek8_stream_on(s);	/* Needed to be able to read EEPROM */
+	if (rval)
+		goto out_release;
+	rval = et8ek8_g_priv_mem(s);
+	if (rval)
+		dev_warn(&sensor->i2c_client->dev,
+			"can not read OTP (EEPROM) memory from sensor\n");
+	rval = et8ek8_stream_off(s);
+	if (rval)
+		goto out_release;
+
+	rval = et8ek8_power_off(s);
+	if (rval)
+		goto out_release;
 
 	return 0;
 
 out_release:
 	release_firmware(sensor->fw);
+out_poweroff:
 	sensor->meta_reglist = NULL;
 	sensor->fw = NULL;
+	et8ek8_power_off(s);
 
 	return rval;
 }
 
 static int et8ek8_ioctl_s_power(struct v4l2_int_device *s,
-				enum v4l2_power state)
+				enum v4l2_power new_state)
 {
 	struct et8ek8_sensor *sensor = s->priv;
-	int initialized = sensor->dev_init_done;
 	int rval = 0;
-	enum v4l2_power old_state;
 
-	if (state != V4L2_POWER_ON)
-		state = V4L2_POWER_OFF;
+	/* If we are already in this mode, do nothing */
+	if (sensor->power == new_state)
+		return 0;
 
-	old_state = sensor->power;
-	sensor->power = state;
-
-	switch (state) {
-	case V4L2_POWER_STANDBY:
-	case V4L2_POWER_OFF:
+	/* Disable power if so requested (it was enabled) */
+	if (new_state == V4L2_POWER_OFF) {
+		rval = et8ek8_stream_off(s);
+		if (rval)
+			dev_err(&sensor->i2c_client->dev,
+				"can not stop streaming\n");
 		rval = et8ek8_power_off(s);
-		break;
-	case V4L2_POWER_ON:
-		rval = et8ek8_power_on(s);
-		if (rval)
-			break;
-		if (!initialized) {
-			rval = et8ek8_dev_init(s);
-			if (rval)
-				goto out_on;
-		}
-		rval = et8ek8_configure(s);
-		if (rval)
-			goto out_on;
-		if (!initialized)
-			rval = et8ek8_g_priv_mem(s);
-	out_on:
-		if (rval)
-			et8ek8_power_off(s);
-		break;
-	default:
-		return -EINVAL;
+		goto out;
 	}
 
-	if (rval)
-		sensor->power = old_state;
+	/* Either STANDBY or ON requested */
+
+	/* Enable power and move to standby if it was off */
+	if (sensor->power == V4L2_POWER_OFF) {
+		rval = et8ek8_power_on(s);
+		if (rval)
+			goto out;
+	}
+
+	/* Now sensor is powered (standby or streaming) */
+
+	if (new_state == V4L2_POWER_ON) {
+		/* Standby -> streaming */
+		rval = et8ek8_configure(s);
+		if (rval) {
+			et8ek8_stream_off(s);
+			if (sensor->power == V4L2_POWER_OFF)
+				et8ek8_power_off(s);
+			goto out;
+		}
+		rval = et8ek8_stream_on(s);
+	} else {
+		/* Streaming -> standby */
+		rval = et8ek8_stream_off(s);
+	}
+
+out:
+	if (rval == 0)
+		sensor->power = new_state;
 
 	return rval;
 }
@@ -794,18 +849,6 @@ static int et8ek8_ioctl_enum_frameintervals(struct v4l2_int_device *s,
 	return smia_reglist_enum_frameintervals(sensor->meta_reglist, frm);
 }
 
-static int et8ek8_ioctl_enum_slaves(struct v4l2_int_device *s,
-				    struct v4l2_slave_info *si)
-{
-	struct et8ek8_sensor *sensor = s->priv;
-
-	strlcpy(si->driver, ET8EK8_NAME, sizeof(si->driver));
-	strlcpy(si->bus_info, "ccp2", sizeof(si->bus_info));
-	snprintf(si->version, sizeof(si->version), "%x", sensor->version);
-
-	return 0;
-}
-
 static ssize_t
 et8ek8_priv_mem_read(struct device *dev, struct device_attribute *attr,
 		     char *buf)
@@ -815,8 +858,6 @@ et8ek8_priv_mem_read(struct device *dev, struct device_attribute *attr,
 #if PAGE_SIZE < ET8EK8_PRIV_MEM_SIZE
 #error PAGE_SIZE too small!
 #endif
-	if (!sensor->dev_init_done)
-		return -EBUSY;
 
 	memcpy(buf, sensor->priv_mem, ET8EK8_PRIV_MEM_SIZE);
 
@@ -853,8 +894,8 @@ static struct v4l2_int_ioctl_desc et8ek8_ioctl_desc[] = {
 	  (v4l2_int_ioctl_func *)et8ek8_ioctl_enum_framesizes },
 	{ vidioc_int_enum_frameintervals_num,
 	  (v4l2_int_ioctl_func *)et8ek8_ioctl_enum_frameintervals },
-	{ vidioc_int_enum_slaves_num,
-	  (v4l2_int_ioctl_func *)et8ek8_ioctl_enum_slaves },
+	{ vidioc_int_dev_init_num,
+	  (v4l2_int_ioctl_func *)et8ek8_ioctl_dev_init },
 };
 
 static struct v4l2_int_slave et8ek8_slave = {
@@ -879,24 +920,21 @@ static struct v4l2_int_device et8ek8_int_device = {
 static int et8ek8_suspend(struct i2c_client *client, pm_message_t mesg)
 {
 	struct et8ek8_sensor *sensor = dev_get_drvdata(&client->dev);
+	enum v4l2_power resume_state = sensor->power;
+	int rval;
 
-	if (sensor->power == V4L2_POWER_OFF)
-		return 0;
-
-	return et8ek8_power_off(sensor->v4l2_int_device);
+	rval = et8ek8_ioctl_s_power(sensor->v4l2_int_device, V4L2_POWER_OFF);
+	if (rval == 0)
+		sensor->power = resume_state;
+	return rval;
 }
 
 static int et8ek8_resume(struct i2c_client *client)
 {
 	struct et8ek8_sensor *sensor = dev_get_drvdata(&client->dev);
-	enum v4l2_power resume_state;
+	enum v4l2_power resume_state = sensor->power;
 
-	if (sensor->power == V4L2_POWER_OFF)
-		return 0;
-
-	resume_state = sensor->power;
 	sensor->power = V4L2_POWER_OFF;
-
 	return et8ek8_ioctl_s_power(sensor->v4l2_int_device, resume_state);
 }
 

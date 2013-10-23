@@ -43,8 +43,6 @@
 
 #include <asm/io.h>
 
-#define TG_PATCHES 1
-
 /*#include <asm/arch-omap/display.h>*/
 
 #include "img_defs.h"
@@ -53,14 +51,12 @@
 #include "omaplfb.h"
 #include "pvrmodule.h"
 
-#if defined(TG_PATCHES)
 #if defined(CONFIG_FB_OMAP) || defined(CONFIG_FB_OMAP_MODULE)
 extern void omap_dispc_set_plane_base(int plane, IMG_UINT32 phys_addr);
 #elif defined(CONFIG_FB_OMAP2) || defined(CONFIG_FB_OMAP2_MODULE) 
 #include <mach/display.h>
 #else
 #error "PVR needs OMAPFB, but it's disabled"
-#endif
 #endif
 
 MODULE_SUPPORTED_DEVICE(DEVNAME);
@@ -92,68 +88,23 @@ PVRSRV_ERROR OMAPLFBGetLibFuncAddr (IMG_CHAR *szFunctionName, PFN_DC_GET_PVRJTAB
 	return PVRSRV_OK;
 }
 
-static IMG_VOID OMAPLFBVSyncWriteReg(OMAPLFB_SWAPCHAIN *psSwapChain, IMG_UINT32 ui32Offset, IMG_UINT32 ui32Value)
-{
-	IMG_VOID *pvRegAddr = (IMG_VOID *)((IMG_UINT8 *)psSwapChain->pvRegs + ui32Offset);
-
-	
-	writel(ui32Value, pvRegAddr);
-}
-
-static IMG_UINT32 OMAPLFBVSyncReadReg(OMAPLFB_SWAPCHAIN *psSwapChain, IMG_UINT32 ui32Offset)
-{
-	return readl((IMG_UINT8 *)psSwapChain->pvRegs + ui32Offset);
-}
-
 IMG_VOID OMAPLFBEnableVSyncInterrupt(OMAPLFB_SWAPCHAIN *psSwapChain)
 {
-#if defined(TG_PATCHES)
-#else
-	#if defined(SYS_USING_INTERRUPTS)
-	
-	IMG_UINT32 ui32InterruptEnable  = OMAPLFBVSyncReadReg(psSwapChain, OMAPLCD_IRQENABLE);
-	ui32InterruptEnable |= OMAPLCD_INTMASK_VSYNC;
-	OMAPLFBVSyncWriteReg(psSwapChain, OMAPLCD_IRQENABLE, ui32InterruptEnable );
-	#endif
-#endif
 }
 
 IMG_VOID OMAPLFBDisableVSyncInterrupt(OMAPLFB_SWAPCHAIN *psSwapChain)
 {
-#if defined(TG_PATCHES)
-#else
-	#if defined(SYS_USING_INTERRUPTS)
-	
-	IMG_UINT32 ui32InterruptEnable = OMAPLFBVSyncReadReg(psSwapChain, OMAPLCD_IRQENABLE);
-	ui32InterruptEnable &= ~(OMAPLCD_INTMASK_VSYNC);
-	OMAPLFBVSyncWriteReg(psSwapChain, OMAPLCD_IRQENABLE, ui32InterruptEnable);
-	#endif
-#endif
 }
 
 #if defined(SYS_USING_INTERRUPTS)
-	#if defined(TG_PATCHES)
-#if defined(CONFIG_FB_OMAP) || defined(CONFIG_FB_OMAP_MODULE) 
-static void
-OMAPLFBVSyncISR(void *arg)
+#if defined(CONFIG_FB_OMAP) || defined(CONFIG_FB_OMAP_MODULE)
+static void OMAPLFBVSyncISR(void *arg)
 #else
-static void
-OMAPLFBVSyncISR(void *arg, u32 mask)
+static void OMAPLFBVSyncISR(void *arg, u32 mask)
 #endif
 {
-	(void) OMAPLFBVSyncIHandler((OMAPLFB_SWAPCHAIN *)arg);
+	(void)OMAPLFBVSyncIHandler((OMAPLFB_SWAPCHAIN *) arg);
 }
-	#else
-static void
-OMAPLFBVSyncISR(void *arg, struct pt_regs unref__ *regs)
-{
-	
-	
-	OMAPLFB_SWAPCHAIN *psSwapChain= (OMAPLFB_SWAPCHAIN *)arg;
-	
-	(void) OMAPLFBVSyncIHandler(psSwapChain);
-}
-	#endif
 #endif
 
 #if defined(CONFIG_FB_OMAP) || defined(CONFIG_FB_OMAP_MODULE)
@@ -162,54 +113,26 @@ OMAPLFBVSyncISR(void *arg, struct pt_regs unref__ *regs)
 
 PVRSRV_ERROR OMAPLFBInstallVSyncISR(OMAPLFB_SWAPCHAIN *psSwapChain)
 {
-#if defined(TG_PATCHES)
-
 #if defined(CONFIG_FB_OMAP) || defined(CONFIG_FB_OMAP_MODULE)
 	if (omap_dispc_request_irq(DISPC_IRQ_VSYNC, OMAPLFBVSyncISR, psSwapChain) != 0)
-    	return PVRSRV_ERROR_OUT_OF_MEMORY; /* not worth a proper mapping */
+		return PVRSRV_ERROR_OUT_OF_MEMORY;
 #else
 	if (omap_dispc_register_isr(OMAPLFBVSyncISR, psSwapChain, DISPC_IRQ_VSYNC) != 0)
 		return PVRSRV_ERROR_OUT_OF_MEMORY;
 #endif
 
-#else
-
-	#if defined(SYS_USING_INTERRUPTS)
-	OMAPLFBDisableVSyncInterrupt(psSwapChain);
-
-	if (omap2_disp_register_isr(OMAPLFBVSyncISR, psSwapChain,
-				    DISPC_IRQSTATUS_VSYNC))
-	{
-		printk(KERN_INFO DRIVER_PREFIX ": OMAPLFBInstallVSyncISR: Request OMAPLCD IRQ failed\n");
-		return PVRSRV_ERROR_INIT_FAILURE;
-	}
-		
-	#endif	
-#endif    	
-    return PVRSRV_OK;
+	return PVRSRV_OK;
 }
 
 
 PVRSRV_ERROR OMAPLFBUninstallVSyncISR (OMAPLFB_SWAPCHAIN *psSwapChain)
 {
-#if defined(TG_PATCHES)
-
 #if defined(CONFIG_FB_OMAP) || defined(CONFIG_FB_OMAP_MODULE)
 	omap_dispc_free_irq(DISPC_IRQ_VSYNC, OMAPLFBVSyncISR, psSwapChain);
 #else
 	omap_dispc_unregister_isr(OMAPLFBVSyncISR, psSwapChain, DISPC_IRQ_VSYNC);
 #endif
- 	return PVRSRV_OK;
- 	
-#else 	
- 	
-	#if defined(SYS_USING_INTERRUPTS)
-	OMAPLFBDisableVSyncInterrupt(psSwapChain);
-
-	omap2_disp_unregister_isr(OMAPLFBVSyncISR);
-		
-	#endif 	
-#endif 	
+	return PVRSRV_OK;
 }
 
 IMG_VOID OMAPLFBEnableDisplayRegisterAccess(IMG_VOID)
@@ -224,43 +147,12 @@ IMG_VOID OMAPLFBDisableDisplayRegisterAccess(IMG_VOID)
 	/*omap2_disp_put_dss();*/
 }
 
-#if defined(TG_PATCHES)
-static void set_plane_base(IMG_UINT32 aPhyAddr)
+IMG_VOID OMAPLFBFlip(OMAPLFB_SWAPCHAIN * psSwapChain, IMG_UINT32 aPhyAddr)
 {
 #if defined(CONFIG_FB_OMAP) || defined(CONFIG_FB_OMAP_MODULE)
 	omap_dispc_set_plane_base(0, aPhyAddr);
 #else
 	omap_dispc_set_plane_ba0(OMAP_DSS_CHANNEL_LCD, OMAP_DSS_GFX, aPhyAddr);
-#endif
-}
-#endif
-
-IMG_VOID OMAPLFBFlip(OMAPLFB_SWAPCHAIN *psSwapChain, IMG_UINT32 aPhyAddr)
-{
-#if defined(TG_PATCHES)
- 	if (1 /* omap2_disp_get_output_dev(OMAP2_GRAPHICS) == OMAP2_OUTPUT_LCD */)
-  	{
-		set_plane_base(aPhyAddr);
-  		return PVRSRV_OK;
-  	}
-  	else
- 	if (0 /*omap2_disp_get_output_dev(OMAP2_GRAPHICS) == OMAP2_OUTPUT_TV*/)
-  	{
-		set_plane_base(aPhyAddr);
-  		return PVRSRV_OK;
-  	}
-
-#else	
-	
-	IMG_UINT32 control;
-
-	
-	OMAPLFBVSyncWriteReg(psSwapChain, OMAPLCD_GFX_BA0, aPhyAddr);
-	OMAPLFBVSyncWriteReg(psSwapChain, OMAPLCD_GFX_BA1, aPhyAddr);
-
-	control = OMAPLFBVSyncReadReg(psSwapChain, OMAPLCD_CONTROL);
-	control |= OMAP_CONTROL_GOLCD;
-	OMAPLFBVSyncWriteReg(psSwapChain, OMAPLCD_CONTROL, control);
 #endif
 }
 

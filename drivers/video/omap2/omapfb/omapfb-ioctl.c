@@ -30,6 +30,7 @@
 
 #include <mach/display.h>
 #include <mach/vrfb.h>
+#include <mach/vram.h>
 
 #include "omapfb.h"
 
@@ -71,14 +72,16 @@ static int omapfb_setup_plane(struct fb_info *fbi, struct omapfb_plane_info *pi)
 	info.out_height = pi->out_height;
 	info.enabled = pi->enabled;
 
+	omap_dss_lock();
+
 	r = ovl->set_overlay_info(ovl, &info);
 	if (r)
-		goto out;
+		goto unlock;
 
 	if (ovl->manager) {
 		r = ovl->manager->apply(ovl->manager);
 		if (r)
-			goto out;
+			goto unlock;
 	}
 
 	if (display) {
@@ -93,6 +96,8 @@ static int omapfb_setup_plane(struct fb_info *fbi, struct omapfb_plane_info *pi)
 			display->update(display, 0, 0, w, h);
 	}
 
+unlock:
+	omap_dss_unlock();
 out:
 	omapfb_unlock(fbdev);
 	if (r)
@@ -206,7 +211,9 @@ static int omapfb_update_window(struct fb_info *fbi,
 		return -EINVAL;
 
 	omapfb_lock(fbdev);
+	omap_dss_lock();
 	display->update(display, x, y, w, h);
+	omap_dss_unlock();
 	omapfb_unlock(fbdev);
 
 	return 0;
@@ -242,7 +249,9 @@ static int omapfb_set_update_mode(struct fb_info *fbi,
 	}
 
 	omapfb_lock(fbdev);
+	omap_dss_lock();
 	r = display->set_update_mode(display, um);
+	omap_dss_unlock();
 	omapfb_unlock(fbdev);
 
 	return r;
@@ -288,7 +297,8 @@ static int _omapfb_set_color_key(struct omap_overlay_manager *mgr,
 {
 	enum omap_dss_color_key_type kt;
 
-	if(!mgr->set_default_color || !mgr->set_trans_key ||
+	if (!mgr->set_default_color ||
+			!mgr->set_trans_key_type_and_value ||
 			!mgr->enable_trans_key)
 		return 0;
 
@@ -309,9 +319,11 @@ static int _omapfb_set_color_key(struct omap_overlay_manager *mgr,
 		return -EINVAL;
 	}
 
+	omap_dss_lock();
 	mgr->set_default_color(mgr, ck->background);
-	mgr->set_trans_key(mgr, kt, ck->trans_key);
+	mgr->set_trans_key_type_and_value(mgr, kt, ck->trans_key);
 	mgr->enable_trans_key(mgr, 1);
+	omap_dss_unlock();
 
 	omapfb_color_keys[mgr->id] = *ck;
 
@@ -341,7 +353,8 @@ static int omapfb_set_color_key(struct fb_info *fbi,
 		goto err;
 	}
 
-	if(!mgr->set_default_color || !mgr->set_trans_key ||
+	if (!mgr->set_default_color ||
+			!mgr->set_trans_key_type_and_value ||
 			!mgr->enable_trans_key) {
 		r = -ENODEV;
 		goto err;
@@ -377,7 +390,8 @@ static int omapfb_get_color_key(struct fb_info *fbi,
 		goto err;
 	}
 
-	if(!mgr->set_default_color || !mgr->set_trans_key ||
+	if (!mgr->set_default_color ||
+			!mgr->set_trans_key_type_and_value ||
 			!mgr->enable_trans_key) {
 		r = -ENODEV;
 		goto err;
@@ -416,9 +430,11 @@ static int omapfb_memory_read(struct fb_info *fbi,
 
 	omapfb_lock(fbdev);
 
+	omap_dss_lock();
 	r = display->memory_read(display, buf, mr->buffer_size,
 			mr->x, mr->y, mr->w, mr->h);
 
+	omap_dss_unlock();
 	if (r > 0) {
 		if (copy_to_user(mr->buffer, buf, mr->buffer_size))
 			r = -EFAULT;
@@ -429,6 +445,52 @@ static int omapfb_memory_read(struct fb_info *fbi,
 	omapfb_unlock(fbdev);
 
 	return r;
+}
+
+int omapfb_get_ovl_colormode(struct omapfb2_device *fbdev,
+			     struct omapfb_ovl_colormode *mode)
+{
+	int ovl_idx = mode->overlay_idx;
+	int mode_idx = mode->mode_idx;
+	struct omap_overlay *ovl;
+	enum omap_color_mode supported_modes;
+	struct fb_var_screeninfo var;
+	int i;
+
+	if (ovl_idx >= fbdev->num_overlays)
+		return -ENODEV;
+	ovl = fbdev->overlays[ovl_idx];
+	supported_modes = ovl->supported_modes;
+
+	mode_idx = mode->mode_idx;
+
+	for (i = 0; i < sizeof(supported_modes) * 8; i++) {
+		if (!(supported_modes & (1 << i)))
+			continue;
+		/*
+		 * It's possible that the FB doesn't support a mode
+		 * that is supported by the overlay, so call the
+		 * following here.
+		 */
+		if (dss_mode_to_fb_mode(1 << i, &var) < 0)
+			continue;
+
+		mode_idx--;
+		if (mode_idx < 0)
+			break;
+	}
+
+	if (i == sizeof(supported_modes) * 8)
+		return -ENOENT;
+
+	mode->bits_per_pixel = var.bits_per_pixel;
+	mode->nonstd = var.nonstd;
+	mode->red = var.red;
+	mode->green = var.green;
+	mode->blue = var.blue;
+	mode->transp = var.transp;
+
+	return 0;
 }
 
 int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
@@ -444,9 +506,11 @@ int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 		struct omapfb_caps		caps;
 		struct omapfb_mem_info          mem_info;
 		struct omapfb_color_key		color_key;
+		struct omapfb_ovl_colormode	ovl_colormode;
 		enum omapfb_update_mode		update_mode;
 		int test_num;
 		struct omapfb_memory_read	memory_read;
+		struct omapfb_vram_info		vram_info;
 	} p;
 
 	int r = 0;
@@ -461,7 +525,9 @@ int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 		}
 
 		omapfb_lock(fbdev);
+		omap_dss_lock();
 		r = display->sync(display);
+		omap_dss_unlock();
 		omapfb_unlock(fbdev);
 		break;
 
@@ -545,9 +611,25 @@ int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 			break;
 		}
 
+		memset(&p.caps, 0, sizeof(p.caps));
 		p.caps.ctrl = display->caps;
 
 		if (copy_to_user((void __user *)arg, &p.caps, sizeof(p.caps)))
+			r = -EFAULT;
+		break;
+
+	case OMAPFB_GET_OVERLAY_COLORMODE:
+		DBG("ioctl GET_OVERLAY_COLORMODE\n");
+		if (copy_from_user(&p.ovl_colormode, (void __user *)arg,
+				   sizeof(p.ovl_colormode))) {
+			r = -EFAULT;
+			break;
+		}
+		r = omapfb_get_ovl_colormode(fbdev, &p.ovl_colormode);
+		if (r < 0)
+			break;
+		if (copy_to_user((void __user *)arg, &p.ovl_colormode,
+				 sizeof(p.ovl_colormode)))
 			r = -EFAULT;
 		break;
 
@@ -594,7 +676,9 @@ int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 			break;
 		}
 
+		omap_dss_lock();
 		r = display->wait_vsync(display);
+		omap_dss_unlock();
 		break;
 
 	/* LCD and CTRL tests do the same thing for backward
@@ -610,7 +694,9 @@ int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 			break;
 		}
 
+		omap_dss_lock();
 		r = display->run_test(display, p.test_num);
+		omap_dss_unlock();
 
 		break;
 
@@ -625,7 +711,9 @@ int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 			break;
 		}
 
+		omap_dss_lock();
 		r = display->run_test(display, p.test_num);
+		omap_dss_unlock();
 
 		break;
 
@@ -641,6 +729,22 @@ int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 		r = omapfb_memory_read(fbi, &p.memory_read);
 
 		break;
+
+	case OMAPFB_GET_VRAM_INFO: {
+		unsigned long vram, free, largest;
+
+		DBG("ioctl GET_VRAM_INFO\n");
+
+		omap_vram_get_info(&vram, &free, &largest);
+		p.vram_info.total = vram;
+		p.vram_info.free = free;
+		p.vram_info.largest_free_block = largest;
+
+		if (copy_to_user((void __user *)arg, &p.vram_info,
+					sizeof(p.vram_info)))
+			r = -EFAULT;
+		break;
+	}
 
 	default:
 		dev_err(fbdev->dev, "Unknown ioctl 0x%x\n", cmd);

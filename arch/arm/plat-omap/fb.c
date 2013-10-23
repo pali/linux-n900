@@ -491,10 +491,6 @@ void omapfb_set_platform_data(struct omapfb_platform_data *data)
 #ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
 static void __init enable_used_clocks(void)
 {
-	unsigned long paddr;
-	size_t size;
-	enum omapfb_color_format format;
-
 	if (!dss_boottime_plane_is_enabled(0))
 		return;
 
@@ -507,17 +503,6 @@ static void __init enable_used_clocks(void)
 		pr_err("Can't enable DSS clocks\n");
 		dss_boottime_put_clocks();
 	}
-
-	paddr = dss_boottime_get_plane_base(0);
-	format = dss_boottime_get_plane_format(0);
-	size = dss_boottime_get_plane_size(0);
-
-	omapfb_config.mem_desc.region[0].paddr = paddr;
-	omapfb_config.mem_desc.region[0].format = format;
-	omapfb_config.mem_desc.region[0].format_used = 1;
-	omapfb_config.mem_desc.region[0].size = size;
-	if (!omapfb_config.mem_desc.region_cnt)
-		omapfb_config.mem_desc.region_cnt = 1;
 
 	return;
 }

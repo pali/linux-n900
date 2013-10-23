@@ -23,6 +23,7 @@
 #include <mach/control.h>
 #include <mach/mmc.h>
 #include <mach/board.h>
+#include <mach/omap-pm.h>
 
 #include "mmc-twl4030.h"
 
@@ -226,7 +227,6 @@ static void twl_mmc_cleanup(struct device *dev)
 }
 
 #ifdef CONFIG_PM
-
 static int twl_mmc_suspend(struct device *dev, int slot)
 {
 	struct omap_mmc_platform_data *mmc = dev->platform_data;
@@ -248,6 +248,17 @@ static int twl_mmc_resume(struct device *dev, int slot)
 #define twl_mmc_resume	NULL
 #endif
 
+#if defined(CONFIG_ARCH_OMAP3) && defined(CONFIG_PM)
+
+static int twl4030_mmc_get_context_loss(struct device *dev)
+{
+	return omap_pm_get_dev_context_loss_count(dev);
+}
+
+#else
+#define twl4030_mmc_get_context_loss NULL
+#endif
+
 /*
  * Sets the MMC voltage in twl4030
  */
@@ -258,12 +269,11 @@ static int twl_mmc_resume(struct device *dev, int slot)
 		|MMC_VDD_25_26|MMC_VDD_26_27|MMC_VDD_27_28 \
 		|MMC_VDD_28_29|MMC_VDD_29_30|MMC_VDD_30_31|MMC_VDD_31_32)
 
-
 #define VMMC1_ID 5
 #define VMMC2_ID 6
 #define VAUX3_ID 3
 #define VSIM_ID 9
-
+#define BAD_ID 255
 
 static int twl_mmc_i2c_wait(void)
 {
@@ -286,38 +296,10 @@ static int twl_mmc_i2c_wait(void)
 	return -1;
 }
 
-static int twl_mmc_enable_regulator(u8 vmmc_dev_grp)
+static int twl_mmc_send_pb_msg(u16 msg)
 {
 	int ret;
-	u16 msg;
-	u8 reg_id, pwb_state;
-
-	switch (vmmc_dev_grp) {
-	case VMMC1_DEV_GRP:
-		reg_id = VMMC1_ID;
-		break;
-	case VMMC2_DEV_GRP:
-		reg_id = VMMC2_ID;
-		break;
-	case VAUX3_DEV_GRP:
-		reg_id = VAUX3_ID;
-		break;
-	case VSIM_DEV_GRP:
-		reg_id = VSIM_ID;
-		break;
-	default:
-		printk(KERN_ERR "twl_mmc_enable_regulator: unknown dev grp\n");
-		return -1;
-	}
-
-	/* add regulator to dev grp P1 */
-	ret = twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
-				   VMMC_DEV_GRP_P1, vmmc_dev_grp);
-	if (ret)
-		return ret;
-
-	/* construct message to enable regulator on P1 */
-	msg = (1 << 13) | (reg_id << 4) | 0xe;
+	u8 pwb_state;
 
 	ret = twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER,
 				  &pwb_state, 0x14);
@@ -352,10 +334,62 @@ out:
 	twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER,
 			     pwb_state, 0x14);
 
+	return ret;
+}
+
+static u8 dev_grp_to_id(u8 vmmc_dev_grp)
+{
+	switch (vmmc_dev_grp) {
+	case VMMC1_DEV_GRP:
+		return VMMC1_ID;
+	case VMMC2_DEV_GRP:
+		return VMMC2_ID;
+	case VAUX3_DEV_GRP:
+		return VAUX3_ID;
+	case VSIM_DEV_GRP:
+		return VSIM_ID;
+	default:
+		return BAD_ID;
+	}
+}
+
+static int twl_mmc_regulator_set_mode(u8 vmmc_dev_grp, int sleep)
+{
+	u8 reg_id = dev_grp_to_id(vmmc_dev_grp);
+	u16 msg;
+
+	if (reg_id == BAD_ID)
+		return -EINVAL;
+
+	if (sleep)
+		msg = MSG_SINGULAR(DEV_GRP_P1, reg_id, RES_STATE_SLEEP);
+	else
+		msg = MSG_SINGULAR(DEV_GRP_P1, reg_id, RES_STATE_ACTIVE);
+
+	return twl_mmc_send_pb_msg(msg);
+}
+
+static int twl_mmc_enable_regulator(u8 vmmc_dev_grp)
+{
+	int ret;
+	u16 msg;
+	u8 reg_id = dev_grp_to_id(vmmc_dev_grp);
+
+	if (reg_id == BAD_ID) {
+		printk(KERN_ERR "twl_mmc_enable_regulator: unknown dev grp\n");
+		return -1;
+	}
+
+	/* add regulator to dev grp P1 */
+	ret = twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
+				   VMMC_DEV_GRP_P1, vmmc_dev_grp);
 	if (ret)
 		return ret;
 
-	return 0;
+	/* construct message to enable regulator on P1 */
+	msg = (1 << 13) | (reg_id << 4) | 0xe;
+
+	return twl_mmc_send_pb_msg(msg);
 }
 
 static int twl_mmc_set_regulator(u8 vmmc_dev_grp, u8 vmmc)
@@ -580,6 +614,72 @@ static int twl_mmc2_set_power(struct device *dev, int slot, int power_on, int vd
 	return ret;
 }
 
+static int twl_mmc1_set_sleep(struct device *dev, int slot, int sleep, int vdd,
+			      int cardsleep)
+{
+	struct twl_mmc_controller *c = &hsmmc[0];
+	int err;
+
+	if (!c->vsim_18v)
+		return twl_mmc_regulator_set_mode(c->twl_vmmc_dev_grp, sleep);
+
+	if (cardsleep) {
+		/* VCC can be turned off if card is asleep */
+		c->vsim_18v = 0;
+		if (sleep)
+			err = twl_mmc1_set_power(dev, slot, 0, 0);
+		else
+			err = twl_mmc1_set_power(dev, slot, 1, vdd);
+		c->vsim_18v = 1;
+	} else
+		err = twl_mmc_regulator_set_mode(c->twl_vmmc_dev_grp, sleep);
+	if (err)
+		return err;
+	return twl_mmc_regulator_set_mode(VSIM_DEV_GRP, sleep);
+}
+
+static int twl_mmc2_set_sleep(struct device *dev, int slot, int sleep, int vdd,
+			      int cardsleep)
+{
+	struct twl_mmc_controller *c = &hsmmc[1];
+
+	int err;
+
+	if (!c->vsim_18v)
+		return twl_mmc_regulator_set_mode(c->twl_vmmc_dev_grp, sleep);
+
+	if (cardsleep) {
+		/* VCC can be turned off if card is asleep */
+		c->vsim_18v = 0;
+		if (sleep)
+			err = twl_mmc2_set_power(dev, slot, 0, 0);
+		else
+			err = twl_mmc2_set_power(dev, slot, 1, vdd);
+		c->vsim_18v = 1;
+	} else
+		err = twl_mmc_regulator_set_mode(c->twl_vmmc_dev_grp, sleep);
+	if (err)
+		return err;
+	return twl_mmc_regulator_set_mode(VSIM_DEV_GRP, sleep);
+}
+
+#if defined(CONFIG_BRIDGE_DVFS)
+/*
+ * This handler can be used for setting other DVFS/PM constraints:
+ * intr latency, wakeup latency, DMA start latency, bus throughput
+ * according to API in mach/omap-pm.h
+ * Currently we only set constraints for MPU frequency which forces
+ * VDD1 to stay at OPP3.
+ */
+#define MMC_MIN_MPU_FREQUENCY	500000000	/* S500M at OPP3 */
+static void mmc_set_pm_constraints(struct device *dev, int on)
+{
+	omap_pm_set_min_mpu_freq(dev, (on ? MMC_MIN_MPU_FREQUENCY : 0));
+}
+#else
+#define mmc_set_pm_constraints NULL
+#endif
+
 static struct omap_mmc_platform_data *hsmmc_data[OMAP34XX_NR_MMC] __initdata;
 
 void __init twl4030_mmc_init(struct twl4030_hsmmc_info *controllers)
@@ -642,6 +742,11 @@ void __init twl4030_mmc_init(struct twl4030_hsmmc_info *controllers)
 		} else
 			mmc->slots[0].switch_pin = -EINVAL;
 
+		mmc->get_context_loss_count =
+				twl4030_mmc_get_context_loss;
+
+		mmc->set_pm_constraints = mmc_set_pm_constraints;
+
 		/* write protect normally uses an OMAP gpio */
 		if (gpio_is_valid(c->gpio_wp)) {
 			gpio_request(c->gpio_wp, "mmc_wp");
@@ -652,6 +757,11 @@ void __init twl4030_mmc_init(struct twl4030_hsmmc_info *controllers)
 		} else
 			mmc->slots[0].gpio_wp = -EINVAL;
 
+		if (c->power_saving)
+			mmc->slots[0].power_saving = 1;
+
+		mmc->slots[0].caps = c->caps;
+
 		/* NOTE:  we assume OMAP's MMC1 and MMC2 use
 		 * the TWL4030's VMMC1 and VMMC2, respectively;
 		 * and that OMAP's MMC3 isn't used.
@@ -660,10 +770,12 @@ void __init twl4030_mmc_init(struct twl4030_hsmmc_info *controllers)
 		switch (c->mmc) {
 		case 1:
 			mmc->slots[0].set_power = twl_mmc1_set_power;
+			mmc->slots[0].set_sleep = twl_mmc1_set_sleep;
 			mmc->slots[0].ocr_mask = MMC1_OCR;
 			break;
 		case 2:
 			mmc->slots[0].set_power = twl_mmc2_set_power;
+			mmc->slots[0].set_sleep = twl_mmc2_set_sleep;
 			if (c->vmmc_dev_grp)
 				twl->twl_vmmc_dev_grp = c->vmmc_dev_grp;
 			if (c->transceiver)

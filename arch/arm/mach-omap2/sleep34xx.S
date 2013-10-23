@@ -26,6 +26,7 @@
  */
 #include <linux/linkage.h>
 #include <asm/assembler.h>
+#include <asm/memory.h>
 #include <mach/io.h>
 #include <mach/pm.h>
 #include <mach/control.h>
@@ -250,7 +251,11 @@ restore:
 	mov	r1, #0		@ set task id for ROM code in r1
 	mov	r2, #4		@ set some flags in r2, r6
 	mov	r6, #0xff
-	adr	r3, write_aux_control_params	@ r3 points to parameters
+	ldr	r3, write_aux_control_params	@ r3 points to parameters
+	ldr	r4, phys_offset
+	adds	r3, r3, r4
+	ldr	r4, page_offset
+	subs	r3, r3, r4
 	mcr	p15, 0, r0, c7, c10, 4	@ data write barrier
 	mcr	p15, 0, r0, c7, c10, 5	@ data memory barrier
 	.word	0xE1600071		@ call SMI monitor (smi #1)
@@ -259,13 +264,18 @@ restore:
 l2_inv_api_params:
 	.word   0x1, 0x00
 write_aux_control_params:
-	.word   0x1, 0x72
+	.word	omap3_aux_ctrl
 l2_inv_gp:
 	/* Execute smi to invalidate L2 cache */
 	mov r12, #0x1                         @ set up to invalide L2
 smi:    .word 0xE1600070		@ Call SMI monitor (smieq)
 	/* Write to Aux control register to set some bits */
-	mov	r0, #0x72
+	ldr	r1, write_aux_control_params
+	ldr	r0, phys_offset
+	adds	r1, r1, r0
+	ldr	r0, page_offset
+	subs	r1, r1, r0
+	ldr	r0, [r1, #4]
 	mov	r12, #0x3
 	.word 0xE1600070	@ Call SMI monitor (smieq)
 logic_l1_restore:
@@ -444,6 +454,9 @@ usettbr0:
 save_context_wfi:
 	/*b	save_context_wfi*/	@ enable to debug save code
 	mov	r8, r0 /* Store SDRAM address in r8 */
+	mrc	p15, 0, r4, c1, c0, 1	@ Read Auxiliary Control Register
+	ldr	r5, write_aux_control_params
+	str	r4, [r5, #4]
         /* Check what that target sleep state is:stored in r1*/
         /* 1 - Only L1 and logic lost */
         /* 2 - Only L2 lost */
@@ -684,6 +697,10 @@ wait_dll_lock:
         bne     wait_dll_lock
         bx      lr
 
+phys_offset:
+	.word	PHYS_OFFSET
+page_offset:
+	.word	PAGE_OFFSET
 cm_idlest1_core:
 	.word	CM_IDLEST1_CORE_V
 sdrc_dlla_status:

@@ -73,7 +73,6 @@ struct et8ek8_sensor {
 	struct smia_meta_reglist *meta_reglist;
 	u8 priv_mem[ET8EK8_PRIV_MEM_SIZE];
 
-	bool dev_init_done;
 	enum v4l2_power power;
 };
 

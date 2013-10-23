@@ -795,7 +795,11 @@ enum omap34xx_index {
 	AF6_34XX_GPIO140_UP,
 	AE6_34XX_GPIO141,
 	AF5_34XX_GPIO142,
-	AE5_34XX_GPIO143
+	AE5_34XX_GPIO143,
+
+	/* OMAP3 SDRC CKE signals to SDR/DDR ram chips */
+	H16_34XX_SDRC_CKE0,
+	H17_34XX_SDRC_CKE1,
 };
 
 struct omap_mux_cfg {

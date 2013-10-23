@@ -323,7 +323,7 @@ out:
 
 static void __init omap_2430sdp_init_irq(void)
 {
-	omap2_init_common_hw(NULL);
+	omap2_init_common_hw(NULL, NULL, NULL, NULL, NULL);
 	omap_init_irq();
 	omap_gpio_init();
 	sdp2430_init_smc91x();
@@ -411,7 +411,7 @@ static void __init omap_2430sdp_init(void)
 	msecure_init();
 
 	sdp2430_flash_init();
-	usb_musb_init();
+	usb_musb_init(NULL);
 
 	spi_register_board_info(sdp2430_spi_board_info,
 				ARRAY_SIZE(sdp2430_spi_board_info));

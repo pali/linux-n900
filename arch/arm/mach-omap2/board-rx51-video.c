@@ -10,10 +10,13 @@
 
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/mm.h>
 #include <linux/platform_device.h>
 #include <linux/delay.h>
 #include <linux/spi/spi.h>
 #include <linux/i2c/twl4030.h>
+#include <linux/regulator/machine.h>
+#include <linux/bootmem.h>
 
 #include <asm/mach-types.h>
 
@@ -21,14 +24,16 @@
 #include <mach/gpio.h>
 #include <mach/board.h>
 #include <mach/pm.h>
+#include <mach/vram.h>
+#include <mach/vrfb.h>
+#include <mach/dss_boottime.h>
+#include <mach/omap-pm.h>
 
-#if defined(CONFIG_FB_OMAP) || defined(CONFIG_FB_OMAP_MODULE)
-#include <mach/lcd_mipid.h>
-#else
 #include <linux/omapfb.h>
 #include <mach/display.h>
 #include <../drivers/video/omap2/displays/panel-acx565akm.h>
-#endif
+
+#if defined(CONFIG_FB_OMAP2) || defined(CONFIG_FB_OMAP2_MODULE)
 
 static struct omap2_mcspi_device_config mipid_mcspi_config = {
 	.turbo_mode	= 0,
@@ -102,95 +107,6 @@ static void twl4030_set_bklight_level(int level)
 	twl4030_bklight_level = level;
 }
 
-#if defined(CONFIG_FB_OMAP) || defined(CONFIG_FB_OMAP_MODULE)
-
-
-static struct platform_device rx51_lcd_device = {
-	.name		= "lcd_mipid",
-	.id		= -1,
-};
-
-static void mipid_shutdown(struct mipid_platform_data *pdata)
-{
-	if (pdata->nreset_gpio != -1) {
-		pr_info("shutdown LCD\n");
-		gpio_set_value(pdata->nreset_gpio, 0);
-		msleep(120);
-	}
-}
-
-static void mipid_set_bklight_level(struct mipid_platform_data *md, int level)
-{
-	twl4030_set_bklight_level(level);
-}
-
-static int mipid_get_bklight_level(struct mipid_platform_data *md)
-{
-	return twl4030_get_bklight_level();
-}
-
-static int mipid_get_bklight_max(struct mipid_platform_data *md)
-{
-	return twl4030_bklight_max;
-}
-
-static struct mipid_platform_data rx51_mipid_platform_data = {
-	.bc_connected		= 1,
-	.shutdown		= mipid_shutdown,
-	.set_bklight_level	= mipid_set_bklight_level,
-	.get_bklight_level	= mipid_get_bklight_level,
-	.get_bklight_max	= mipid_get_bklight_max,
-};
-
-static void __init mipid_dev_init(void)
-{
-	const struct omap_lcd_config *conf;
-
-	conf = omap_get_config(OMAP_TAG_LCD, struct omap_lcd_config);
-	if (conf != NULL) {
-		int ret = gpio_request(conf->nreset_gpio, "mipid-reset");
-		if (ret) {
-			printk(KERN_ERR "Failed to request GPIO %d for "
-				"mipid reset\n", conf->nreset_gpio);
-		} else {
-			gpio_direction_output(conf->nreset_gpio, 1);
-			rx51_mipid_platform_data.nreset_gpio =
-				conf->nreset_gpio;
-		}
-
-		rx51_mipid_platform_data.data_lines = conf->data_lines;
-	}
-}
-
-static struct spi_board_info rx51_video_spi_board_info[] = {
-	[0] = {
-		.modalias		= "lcd_mipid",
-		.bus_num		= 1,
-		.chip_select		= 2,
-		.max_speed_hz		= 6000000,
-		.controller_data	= &mipid_mcspi_config,
-		.platform_data		= &rx51_mipid_platform_data,
-	},
-};
-
-static struct platform_device *rx51_video_devices[] = {
-	&rx51_lcd_device,
-};
-
-static int __init rx51_video_init(void)
-{
-	if (!(machine_is_nokia_rx51() || machine_is_nokia_rx71()))
-		return 0;
-
-	platform_add_devices(rx51_video_devices, ARRAY_SIZE(rx51_video_devices));
-	spi_register_board_info(rx51_video_spi_board_info,
-			ARRAY_SIZE(rx51_video_spi_board_info));
-	mipid_dev_init();
-	return 0;
-}
-
-#else	/* CONFIG_FB_OMAP || CONFIG_FB_OMAP_MODULE */
-
 static struct spi_board_info rx51_video_spi_board_info[] = {
 	[0] = {
 		.modalias		= "acx565akm",
@@ -205,9 +121,8 @@ static struct spi_board_info rx51_video_spi_board_info[] = {
 static int acx565akm_enable(struct omap_display *display)
 {
 	if (display->hw_config.panel_reset_gpio != -1) {
-		pr_info("Release LCD reset\n");
+		pr_debug("Release LCD reset\n");
 		gpio_set_value(display->hw_config.panel_reset_gpio, 1);
-		msleep(15);
 	}
 
 	return 0;
@@ -216,9 +131,8 @@ static int acx565akm_enable(struct omap_display *display)
 static void acx565akm_disable(struct omap_display *display)
 {
 	if (display->hw_config.panel_reset_gpio != -1) {
-		pr_info("Enable LCD reset\n");
+		pr_debug("Enable LCD reset\n");
 		gpio_set_value(display->hw_config.panel_reset_gpio, 0);
-		msleep(120);
 	}
 }
 
@@ -273,7 +187,6 @@ static void __init acx565akm_dev_init(void)
 }
 
 /* TV-out */
-
 static struct omap_dss_display_config venc_display_data = {
 	.type = OMAP_DISPLAY_TYPE_VENC,
 	.name = "tv",
@@ -283,11 +196,15 @@ static struct omap_dss_display_config venc_display_data = {
 /* DSS */
 static struct omap_dss_board_info rx51_dss_data = {
 	.get_last_off_on_transaction_id = get_last_off_on_transaction_id,
+	.set_min_bus_tput = omap_pm_set_min_bus_tput,
 	.num_displays = 2,
 	.displays = {
 		&acx565akm_display_data,
 		&venc_display_data,
-	}
+	},
+	.fifo_thresholds = {
+		[OMAP_DSS_GFX] = { .low = 2944, .high = 3008, },
+	},
 };
 
 static struct platform_device rx51_dss_device = {
@@ -302,8 +219,131 @@ static struct platform_device *rx51_video_devices[] = {
 	&rx51_dss_device,
 };
 
+/* TV-OUT (VDAC) regulator */
+static struct regulator_consumer_supply rx51_vdac_supply = {
+	.supply		= "vdac",
+	.dev		= &rx51_dss_device.dev,
+};
+
+struct regulator_init_data rx51_vdac_data = {
+	.constraints = {
+		.name			= "VDAC_18",
+		.min_uV			= 1800000,
+		.max_uV			= 1800000,
+		.apply_uV		= true,
+		.valid_modes_mask	= REGULATOR_MODE_NORMAL
+					| REGULATOR_MODE_STANDBY,
+		.valid_ops_mask		= REGULATOR_CHANGE_MODE
+					| REGULATOR_CHANGE_STATUS,
+	},
+	.num_consumer_supplies  = 1,
+	.consumer_supplies      = &rx51_vdac_supply,
+};
+
+static struct omapfb_platform_data omapfb_config;
+
+static size_t rx51_vrfb_min_phys_size(int bpp)
+{
+	unsigned bytespp = bpp >> 3;
+	size_t landscape;
+	size_t portrait;
+
+	/* For physical screen resolution of 800x480. */
+	landscape = omap_vrfb_min_phys_size(800, 480, bytespp);
+	portrait = omap_vrfb_min_phys_size(480, 800, bytespp);
+
+	return max(landscape, portrait);
+}
+
+
+static void __init rx51_add_gfx_fb(u32 paddr, size_t size, enum omapfb_color_format format)
+{
+	omapfb_config.mem_desc.region_cnt = 1;
+	omapfb_config.mem_desc.region[0].paddr = paddr;
+	omapfb_config.mem_desc.region[0].size = size;
+	omapfb_config.mem_desc.region[0].format = format;
+	omapfb_config.mem_desc.region[0].format_used = 1;
+	omapfb_set_platform_data(&omapfb_config);
+}
+
+static void __init rx51_detect_vram(size_t vid_plane_mem_size)
+{
+	unsigned long vram_paddr;
+	size_t vram_size;
+	unsigned long gfx_paddr;
+	size_t gfx_size;
+	enum omapfb_color_format format;
+
+	gfx_paddr = dss_boottime_get_plane_base(0);
+
+	if (gfx_paddr == -1UL)
+		return;
+
+	gfx_size = rx51_vrfb_min_phys_size(dss_boottime_get_plane_bpp(0));
+	format = dss_boottime_get_plane_format(0);
+
+	vram_size = PAGE_ALIGN(gfx_size) + PAGE_ALIGN(vid_plane_mem_size);
+	vram_paddr = gfx_paddr + PAGE_ALIGN(gfx_size) - vram_size;
+
+	rx51_add_gfx_fb(gfx_paddr, gfx_size, format);
+
+	if (reserve_bootmem(vram_paddr, vram_size, BOOTMEM_EXCLUSIVE) < 0) {
+		pr_err("FB: can't reserve VRAM region\n");
+		return;
+	}
+
+	if (omap_vram_add_region(vram_paddr, vram_size) < 0) {
+		free_bootmem(vram_paddr, vram_size);
+		pr_err("Can't set VRAM region\n");
+		return;
+	}
+
+	pr_info("VRAM: %zd bytes at 0x%lx. (Detected %zd at %#lx)\n",
+		vram_size, vram_paddr, gfx_size, gfx_paddr);
+}
+
+static void __init rx51_alloc_vram(size_t vid_plane_mem_size)
+{
+	unsigned long vram_paddr;
+	size_t vram_size;
+	size_t gfx_size;
+
+	gfx_size = rx51_vrfb_min_phys_size(16);
+
+	vram_size = PAGE_ALIGN(gfx_size) + PAGE_ALIGN(vid_plane_mem_size);
+	vram_paddr = virt_to_phys(alloc_bootmem_pages(vram_size));
+	BUG_ON(vram_paddr & ~PAGE_MASK);
+
+	rx51_add_gfx_fb(vram_paddr, gfx_size, OMAPFB_COLOR_RGB565);
+
+	if (omap_vram_add_region(vram_paddr, vram_size) < 0) {
+		free_bootmem(vram_paddr, vram_size);
+		pr_err("Can't set VRAM region\n");
+		return;
+	}
+
+	pr_info("VRAM: %zd bytes at 0x%lx\n", vram_size, vram_paddr);
+}
+
+
+void __init rx51_video_mem_init(void)
+{
+	size_t vid_plane_mem_size;
+
+	/* 2 VID planes, 2 buffers, 2 bytes per pixel, 864x648 resolution. */
+	vid_plane_mem_size = 2 * 2 * PAGE_ALIGN(2 * 864 * 648);
+
+	if (dss_boottime_plane_is_enabled(0))
+		rx51_detect_vram(vid_plane_mem_size);
+	else
+		rx51_alloc_vram(vid_plane_mem_size);
+}
+
 static int __init rx51_video_init(void)
 {
+	if (!machine_is_nokia_rx51())
+		return 0;
+
 	platform_add_devices(rx51_video_devices, ARRAY_SIZE(rx51_video_devices));
 	spi_register_board_info(rx51_video_spi_board_info,
 			ARRAY_SIZE(rx51_video_spi_board_info));
@@ -311,7 +351,13 @@ static int __init rx51_video_init(void)
 	return 0;
 }
 
-#endif	/* CONFIG_FB_OMAP || CONFIG_FB_OMAP_MODULE */
-
 subsys_initcall(rx51_video_init);
+
+#else
+
+void __init rx51_video_mem_init(void)
+{
+}
+
+#endif	/* CONFIG_FB_OMAP2 || CONFIG_FB_OMAP2_MODULE */
 

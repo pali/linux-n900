@@ -59,6 +59,7 @@ enum {
 	RX51_JACK_TVOUT,	/* stereo output with tv-out */
 };
 
+static int rx51_new_hw_audio;
 static int rx51_spk_func;
 static int rx51_jack_func;
 static int rx51_fmtx_func;
@@ -234,6 +235,8 @@ static void rx51_shutdown(struct snd_pcm_substream *substream)
 {
 }
 
+static int pre_events;
+
 static int rx51_hw_params(struct snd_pcm_substream *substream,
 	struct snd_pcm_hw_params *params)
 {
@@ -242,18 +245,27 @@ static int rx51_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_dai *cpu_dai = rtd->dai->cpu_dai;
 	int err;
 
+	if (rx51_new_hw_audio) {
+		if (!pre_events) {
+			pre_events = 1;
+			err = twl4030_enable_regulator(RES_VMMC2);
+			if (err < 0)
+				return err;
+		}
+	}
+
 	/* Set codec DAI configuration */
 	err = snd_soc_dai_set_fmt(codec_dai,
-				  SND_SOC_DAIFMT_DSP |
-				  SND_SOC_DAIFMT_NB_NF |
+				  SND_SOC_DAIFMT_DSP_A |
+				  SND_SOC_DAIFMT_IB_NF |
 				  SND_SOC_DAIFMT_CBM_CFM);
 	if (err < 0)
 		return err;
 
 	/* Set cpu DAI configuration */
 	err = snd_soc_dai_set_fmt(cpu_dai,
-				  SND_SOC_DAIFMT_DSP |
-				  SND_SOC_DAIFMT_NB_NF |
+				  SND_SOC_DAIFMT_DSP_A |
+				  SND_SOC_DAIFMT_IB_NF |
 				  SND_SOC_DAIFMT_CBM_CFM);
 	if (err < 0)
 		return err;
@@ -475,6 +487,62 @@ static int rx51_ear_event(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
+static int rx51_pre_spk_event(struct snd_soc_dapm_widget *w,
+			  struct snd_kcontrol *k, int event)
+{
+	if (!rx51_new_hw_audio)
+		return 0;
+
+	if (SND_SOC_DAPM_EVENT_ON(event))
+		return twl4030_enable_regulator(RES_VMMC2);
+
+	return 0;
+}
+
+static int rx51_post_spk_event(struct snd_soc_dapm_widget *w,
+			  struct snd_kcontrol *k, int event)
+{
+	if (!rx51_new_hw_audio)
+		return 0;
+
+	if (!SND_SOC_DAPM_EVENT_ON(event))
+		return twl4030_disable_regulator(RES_VMMC2);
+
+	return 0;
+}
+
+static int rx51_pre_event(struct snd_soc_dapm_widget *w,
+			  struct snd_kcontrol *k, int event)
+{
+	if (!rx51_new_hw_audio)
+		return 0;
+
+	if (SND_SOC_DAPM_EVENT_ON(event)) {
+		if (!pre_events) {
+			pre_events = 1;
+			return twl4030_enable_regulator(RES_VMMC2);
+		}
+	}
+
+	return 0;
+}
+
+static int rx51_post_event(struct snd_soc_dapm_widget *w,
+			  struct snd_kcontrol *k, int event)
+{
+	if (!rx51_new_hw_audio)
+		return 0;
+
+	if (!SND_SOC_DAPM_EVENT_ON(event)) {
+		if (pre_events && !w->codec->active) {
+			pre_events = 0;
+			return twl4030_disable_regulator(RES_VMMC2);
+		}
+	}
+
+	return 0;
+}
+
 enum {
        RX51_EXT_API_TPA6130,
        RX51_EXT_API_AIC34B,
@@ -555,15 +623,22 @@ static int rx51_ext_put_volsw(struct snd_kcontrol *kcontrol,
 }
 
 static const struct snd_soc_dapm_widget aic34_dapm_widgets[] = {
+	SND_SOC_DAPM_POST("Post event", rx51_post_event),
+	SND_SOC_DAPM_SPK("Post spk", rx51_post_spk_event),
 	SND_SOC_DAPM_SPK("Ext Spk", rx51_spk_event),
 	SND_SOC_DAPM_SPK("Headphone Jack", rx51_jack_hp_event),
 	SND_SOC_DAPM_MIC("Mic Jack", rx51_jack_mic_event),
 	SND_SOC_DAPM_OUTPUT("FM Transmitter"),
 	SND_SOC_DAPM_MIC("DMic", NULL),
 	SND_SOC_DAPM_SPK("Earphone", rx51_ear_event),
+	SND_SOC_DAPM_SPK("Pre spk", rx51_pre_spk_event),
+	SND_SOC_DAPM_PRE("Pre event", rx51_pre_event),
 };
 
 static const struct snd_soc_dapm_route audio_map[] = {
+	{"Post spk", NULL, "LLOUT"},
+	{"Post spk", NULL, "RLOUT"},
+
 	{"Ext Spk", NULL, "HPLOUT"},
 	{"Ext Spk", NULL, "HPROUT"},
 
@@ -578,6 +653,9 @@ static const struct snd_soc_dapm_route audio_map[] = {
 
 	{"DMic Rate 64", NULL, "Mic Bias 2V"},
 	{"Mic Bias 2V", NULL, "DMic"},
+
+	{"Pre spk", NULL, "LLOUT"},
+	{"Pre spk", NULL, "RLOUT"},
 };
 
 static const char *spk_function[] = {"Off", "On"};
@@ -601,7 +679,19 @@ static const struct soc_enum rx51_enum[] = {
  * up. This setting shows -30 dB at minimum, -12.95 dB at 49 % (actual
  * is -10.3 dB) and 4.65 dB at maximum (actual is 4 dB).
  */
-static DECLARE_TLV_DB_SCALE(tpa6130_tlv, -3000, 55, 0);
+static const unsigned int tpa6130_tlv[] = {
+	TLV_DB_RANGE_HEAD(10),
+	0, 1, TLV_DB_SCALE_ITEM(-5950, 600, 0),
+	2, 3, TLV_DB_SCALE_ITEM(-5000, 250, 0),
+	4, 5, TLV_DB_SCALE_ITEM(-4550, 160, 0),
+	6, 7, TLV_DB_SCALE_ITEM(-4140, 190, 0),
+	8, 9, TLV_DB_SCALE_ITEM(-3650, 120, 0),
+	10, 11, TLV_DB_SCALE_ITEM(-3330, 160, 0),
+	12, 13, TLV_DB_SCALE_ITEM(-3040, 180, 0),
+	14, 20, TLV_DB_SCALE_ITEM(-2710, 110, 0),
+	21, 37, TLV_DB_SCALE_ITEM(-1960, 74, 0),
+	38, 63, TLV_DB_SCALE_ITEM(-720, 45, 0),
+};
 
 /*
  * TLV320AIC3x output stage volumes. From -78.3 to 0 dB. Muted below -78.3 dB.
@@ -675,13 +765,13 @@ static int rx51_aic34_init(struct snd_soc_codec *codec)
 struct snd_soc_dai btcodec_dai = {
 	.name = "Bluetooth codec",
 	.playback = {
-		.stream_name = "Playback",
+		.stream_name = "BT Playback",
 		.channels_min = 1,
 		.channels_max = 1,
 		.rates = SNDRV_PCM_RATE_8000,
 		.formats = SNDRV_PCM_FMTBIT_S16_LE,},
 	.capture = {
-		.stream_name = "Capture",
+		.stream_name = "BT Capture",
 		.channels_min = 1,
 		.channels_max = 1,
 		.rates = SNDRV_PCM_RATE_8000,
@@ -731,6 +821,11 @@ static struct snd_soc_device rx51_snd_devdata = {
 
 static struct platform_device *rx51_snd_device;
 
+#define REMAP_OFFSET		2
+#define DEDICATED_OFFSET	3
+#define VMMC2_DEV_GRP		0x2B
+#define VMMC2_285V		0x0a
+
 static int __init rx51_soc_init(void)
 {
 	int err;
@@ -738,6 +833,20 @@ static int __init rx51_soc_init(void)
 
 	if (!machine_is_nokia_rx51())
 		return -ENODEV;
+
+	if ((system_rev >= 0x08 && system_rev <= 0x13) || /* Macros */
+						system_rev >= 0x1901) {
+		rx51_new_hw_audio = 1;
+		err = twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
+					VMMC2_285V,
+					VMMC2_DEV_GRP + DEDICATED_OFFSET);
+		err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0xee,
+					VMMC2_DEV_GRP + REMAP_OFFSET);
+		if (err) {
+			printk(KERN_ERR "%s rx51 audio failed!\n", __func__);
+			return -ENODEV;
+		}
+	}
 
 	if (gpio_request(RX51_CODEC_RESET_GPIO, NULL) < 0)
 		BUG();

@@ -25,13 +25,34 @@
 #include <linux/pm.h>
 #include <linux/i2c/twl4030.h>
 
+#define STS_HW_CONDITIONS      0x0f
+#define STS_VBUS (1<<7)
+
 #define PWR_P1_SW_EVENTS	0x10
 #define PWR_DEVOFF	(1<<0)
+
+#define TWL4030_WATCHDOG_CFG_REG_OFFS   0x3
 
 static void twl4030_poweroff(void)
 {
 	u8 val;
 	int err;
+
+	err = twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &val,
+				  STS_HW_CONDITIONS);
+	if (err)
+		printk(KERN_WARNING "I2C error %d while reading TWL4030"
+				    " PM_MASTER HW_CONDITIONS\n", err);
+
+	if (val & STS_VBUS) {
+		printk(KERN_EMERG "twl4030-poweroff: VBUS on,"
+				  " forcing restart!\n");
+		/* Set watchdog, Triton goes to WAIT-ON state.
+		   VBUS will cause start up */
+		twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 1,
+				     TWL4030_WATCHDOG_CFG_REG_OFFS);
+		while (1);
+	}
 
 	err = twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &val,
 				  PWR_P1_SW_EVENTS);

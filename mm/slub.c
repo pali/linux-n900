@@ -9,6 +9,7 @@
  */
 
 #include <linux/mm.h>
+#include <linux/swap.h> /* struct reclaim_state */
 #include <linux/module.h>
 #include <linux/bit_spinlock.h>
 #include <linux/interrupt.h>
@@ -1170,6 +1171,8 @@ static void __free_slab(struct kmem_cache *s, struct page *page)
 
 	__ClearPageSlab(page);
 	reset_page_mapcount(page);
+	if (current->reclaim_state)
+		current->reclaim_state->reclaimed_slab += pages;
 	__free_pages(page, order);
 }
 
@@ -1591,6 +1594,7 @@ static __always_inline void *slab_alloc(struct kmem_cache *s,
 	unsigned long flags;
 	unsigned int objsize;
 
+	might_sleep_if(gfpflags & __GFP_WAIT);
 	local_irq_save(flags);
 	c = get_cpu_slab(s, smp_processor_id());
 	objsize = c->objsize;
@@ -1986,7 +1990,7 @@ static struct kmem_cache_cpu *alloc_kmem_cache_cpu(struct kmem_cache *s,
 static void free_kmem_cache_cpu(struct kmem_cache_cpu *c, int cpu)
 {
 	if (c < per_cpu(kmem_cache_cpu, cpu) ||
-			c > per_cpu(kmem_cache_cpu, cpu) + NR_KMEM_CACHE_CPU) {
+			c >= per_cpu(kmem_cache_cpu, cpu) + NR_KMEM_CACHE_CPU) {
 		kfree(c);
 		return;
 	}
@@ -2969,10 +2973,12 @@ void __init kmem_cache_init(void)
 	slab_state = PARTIAL;
 
 	/* Caches that are not of the two-to-the-power-of size */
-	if (KMALLOC_MIN_SIZE <= 64) {
+	if (KMALLOC_MIN_SIZE <= 32) {
 		create_kmalloc_cache(&kmalloc_caches[1],
 				"kmalloc-96", 96, GFP_KERNEL);
 		caches++;
+	}
+	if (KMALLOC_MIN_SIZE <= 64) {
 		create_kmalloc_cache(&kmalloc_caches[2],
 				"kmalloc-192", 192, GFP_KERNEL);
 		caches++;
@@ -2999,10 +3005,17 @@ void __init kmem_cache_init(void)
 	BUILD_BUG_ON(KMALLOC_MIN_SIZE > 256 ||
 		(KMALLOC_MIN_SIZE & (KMALLOC_MIN_SIZE - 1)));
 
-	for (i = 8; i < KMALLOC_MIN_SIZE; i += 8)
+	for (i = 8; i < min(KMALLOC_MIN_SIZE, 192 + 8); i += 8)
 		size_index[(i - 1) / 8] = KMALLOC_SHIFT_LOW;
 
-	if (KMALLOC_MIN_SIZE == 128) {
+	if (KMALLOC_MIN_SIZE == 64) {
+		/*
+		 * The 96 byte size cache is not used if the alignment
+		 * is 64 byte.
+		 */
+		for (i = 64 + 8; i <= 96; i += 8)
+			size_index[(i - 1) / 8] = 7;
+	} else if (KMALLOC_MIN_SIZE == 128) {
 		/*
 		 * The 192 byte sized cache is not used if the alignment
 		 * is 128 byte. Redirect kmalloc to use the 256 byte cache
@@ -3123,8 +3136,12 @@ struct kmem_cache *kmem_cache_create(const char *name, size_t size,
 		s->inuse = max_t(int, s->inuse, ALIGN(size, sizeof(void *)));
 		up_write(&slub_lock);
 
-		if (sysfs_slab_alias(s, name))
+		if (sysfs_slab_alias(s, name)) {
+			down_write(&slub_lock);
+			s->refcount--;
+			up_write(&slub_lock);
 			goto err;
+		}
 		return s;
 	}
 
@@ -3134,8 +3151,13 @@ struct kmem_cache *kmem_cache_create(const char *name, size_t size,
 				size, align, flags, ctor)) {
 			list_add(&s->list, &slab_caches);
 			up_write(&slub_lock);
-			if (sysfs_slab_add(s))
+			if (sysfs_slab_add(s)) {
+				down_write(&slub_lock);
+				list_del(&s->list);
+				up_write(&slub_lock);
+				kfree(s);
 				goto err;
+			}
 			return s;
 		}
 		kfree(s);

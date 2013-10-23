@@ -76,7 +76,7 @@ enum clock_event_nofitiers {
 struct clock_event_device {
 	const char		*name;
 	unsigned int		features;
-	unsigned long		max_delta_ns;
+	unsigned long long	max_delta_ns;
 	unsigned long		min_delta_ns;
 	unsigned long		mult;
 	int			shift;
@@ -115,7 +115,7 @@ static inline unsigned long div_sc(unsigned long ticks, unsigned long nsec,
 }
 
 /* Clock event layer functions */
-extern unsigned long clockevent_delta2ns(unsigned long latch,
+extern unsigned long long clockevent_delta2ns(unsigned long latch,
 					 struct clock_event_device *evt);
 extern void clockevents_register_device(struct clock_event_device *dev);
 

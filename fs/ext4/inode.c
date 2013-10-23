@@ -4309,7 +4309,7 @@ static int ext4_do_update_inode(handle_t *handle,
 			ext4_update_dynamic_rev(sb);
 			EXT4_SET_RO_COMPAT_FEATURE(sb,
 					EXT4_FEATURE_RO_COMPAT_LARGE_FILE);
-			sb->s_dirt = 1;
+			mark_sb_dirty(sb);
 			handle->h_sync = 1;
 			err = ext4_journal_dirty_metadata(handle,
 					EXT4_SB(sb)->s_sbh);

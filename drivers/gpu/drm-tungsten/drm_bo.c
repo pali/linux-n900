@@ -157,14 +157,14 @@ static int drm_bo_add_ttm(struct drm_buffer_object *bo)
 		bo->ttm = drm_ttm_create(dev, bo->num_pages << PAGE_SHIFT,
 					 page_flags | DRM_TTM_PAGE_USER,
 					 dev->bm.dummy_read_page);
-		if (!bo->ttm)
+		if (!bo->ttm) {
 			ret = -ENOMEM;
+			break;
+		}
 
 		ret = drm_ttm_set_user(bo->ttm, current,
 				       bo->buffer_start,
 				       bo->num_pages);
-		if (ret)
-			return ret;
 
 		break;
 	default:

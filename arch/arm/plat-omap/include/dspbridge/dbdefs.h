@@ -101,6 +101,7 @@
 #define DSP_MMUFAULT                0x00000010
 #define DSP_SYSERROR                0x00000020
 #define DSP_EXCEPTIONABORT          0x00000300
+#define DSP_PWRERROR                0x00000080
 
 /* IVA exception events (IVA MMU fault) */
 #define IVA_MMUFAULT                0x00000040
@@ -174,7 +175,8 @@
 				    DSP_STREAMDONE | \
 				    DSP_STREAMIOCOMPLETION | \
 				    DSP_MMUFAULT | \
-				    DSP_SYSERROR)) && \
+				    DSP_SYSERROR | \
+				    DSP_PWRERROR)) && \
 				!((x) & ~(DSP_PROCESSORSTATECHANGE | \
 				    DSP_PROCESSORATTACH | \
 				    DSP_PROCESSORDETACH | \
@@ -183,7 +185,8 @@
 				    DSP_STREAMDONE | \
 				    DSP_STREAMIOCOMPLETION | \
 				    DSP_MMUFAULT | \
-				    DSP_SYSERROR))))
+				    DSP_SYSERROR | \
+				    DSP_PWRERROR))))
 
 #define IsValidNodeEvent(x)    (((x) == 0) || (((x) & (DSP_NODESTATECHANGE | \
 				DSP_NODEMESSAGEREADY)) && \
@@ -570,6 +573,9 @@ bit 6 - MMU element size = 64bit (valid only for non mixed page entries)
 #define DSP_MAPELEMSIZE64           0x00000040
 
 #define DSP_MAPVMALLOCADDR         0x00000080
+
+#define DSP_MAPDONOTLOCK	   0x00000100
+
 
 #define GEM_CACHE_LINE_SIZE     128
 #define GEM_L1P_PREFETCH_SIZE   128

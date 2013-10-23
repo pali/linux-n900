@@ -204,7 +204,7 @@ DSP_STATUS WMD_IO_Create(OUT struct IO_MGR **phIOMgr,
 	struct CFG_HOSTRES hostRes;
 	struct CFG_DEVNODE *hDevNode;
 	struct CHNL_MGR *hChnlMgr;
-       static int ref_count;
+	static int ref_count;
 	u32 devType;
 	/* Check DBC requirements:  */
 	DBC_Require(phIOMgr != NULL);
@@ -215,31 +215,30 @@ DSP_STATUS WMD_IO_Create(OUT struct IO_MGR **phIOMgr,
 	DBC_Require(status != DSP_EHANDLE);
 	DBC_Require(hChnlMgr != NULL);
 	DBC_Require(hChnlMgr->hIOMgr == NULL);
-	 /*  Message manager will be created when a file is loaded, since
-	 *  size of message buffer in shared memory is configurable in
-	 *  the base image.  */
+	/*
+	 * Message manager will be created when a file is loaded, since
+	 * size of message buffer in shared memory is configurable in
+	 * the base image.
+	 */
 	DEV_GetWMDContext(hDevObject, &hWmdContext);
 	DBC_Assert(hWmdContext);
 	DEV_GetDevType(hDevObject, &devType);
-	/*  DSP shared memory area will get set properly when
-	 *  a program is loaded. They are unknown until a COFF file is
-	 *  loaded. I chose the value -1 because it was less likely to be
-	 *  a valid address than 0.  */
+	/*
+	 * DSP shared memory area will get set properly when
+	 * a program is loaded. They are unknown until a COFF file is
+	 * loaded. I chose the value -1 because it was less likely to be
+	 * a valid address than 0.
+	 */
 	pSharedMem = (struct SHM *) -1;
 	if (DSP_FAILED(status))
 		goto func_cont;
 
-    /*
-     *  Create a Single Threaded Work Queue
-     */
+	/* Create a Single Threaded Work Queue */
+	if (ref_count == 0)
+		bridge_workqueue = create_workqueue("bridge_work-queue");
 
-       if (ref_count == 0)
-               bridge_workqueue = create_workqueue("bridge_work-queue");
-
-       if (bridge_workqueue <= 0)
-               DBG_Trace(DBG_LEVEL1, "Workque Create"
-                       " failed 0x%d \n", bridge_workqueue);
-
+	if (!bridge_workqueue)
+		DBG_Trace(DBG_LEVEL1, "Workqueue creation failed!\n");
 
 	/* Allocate IO manager object: */
 	MEM_AllocObject(pIOMgr, struct IO_MGR, IO_MGRSIGNATURE);
@@ -247,12 +246,13 @@ DSP_STATUS WMD_IO_Create(OUT struct IO_MGR **phIOMgr,
 		status = DSP_EMEMORY;
 		goto func_cont;
 	}
-       /*Intializing Work Element*/
-       if (ref_count == 0) {
-               INIT_WORK(&pIOMgr->io_workq, (void *)IO_DispatchPM);
-               ref_count = 1;
-       } else
-               PREPARE_WORK(&pIOMgr->io_workq, (void *)IO_DispatchPM);
+
+	/* Intializing Work Element */
+	if (ref_count == 0) {
+		INIT_WORK(&pIOMgr->io_workq, (void *)IO_DispatchPM);
+		ref_count = 1;
+	} else
+		PREPARE_WORK(&pIOMgr->io_workq, (void *)IO_DispatchPM);
 
 	/* Initialize CHNL_MGR object:    */
 #ifndef DSP_TRACEBUF_DISABLED
@@ -282,19 +282,20 @@ DSP_STATUS WMD_IO_Create(OUT struct IO_MGR **phIOMgr,
 		pIOMgr->fSharedIRQ = pMgrAttrs->fShared;
 		IO_DisableInterrupt(hWmdContext);
 		if (devType == DSP_UNIT) {
+			HW_MBOX_initSettings(hostRes.dwMboxBase);
 			/* Plug the channel ISR:. */
-                       if ((request_irq(INT_MAIL_MPU_IRQ, IO_ISR, 0,
-                               "DspBridge\tmailbox", (void *)pIOMgr)) == 0)
-                               status = DSP_SOK;
-                       else
-                               status = DSP_EFAIL;
+			if ((request_irq(INT_MAIL_MPU_IRQ, IO_ISR, 0,
+				"DspBridge\tmailbox", (void *)pIOMgr)) == 0)
+				status = DSP_SOK;
+			else
+				status = DSP_EFAIL;
 		}
-       if (DSP_SUCCEEDED(status))
-               DBG_Trace(DBG_LEVEL1, "ISR_IRQ Object 0x%x \n",
-                               pIOMgr);
-       else
-               status = CHNL_E_ISR;
-       } else
+		if (DSP_SUCCEEDED(status))
+			DBG_Trace(DBG_LEVEL1, "ISR_IRQ Object 0x%x \n",
+					pIOMgr);
+		else
+			status = CHNL_E_ISR;
+	} else
 		status = CHNL_E_ISR;
 func_cont:
 	if (DSP_FAILED(status)) {
@@ -533,6 +534,8 @@ func_cont1:
 	mapAttrs = DSP_MAPLITTLEENDIAN;
 	mapAttrs |= DSP_MAPPHYSICALADDR;
 	mapAttrs |= DSP_MAPELEMSIZE32;
+	mapAttrs |= DSP_MAPDONOTLOCK;
+
 	while (numBytes && DSP_SUCCEEDED(status)) {
 		/* To find the max. page size with which both PA & VA are
 		 * aligned */
@@ -670,18 +673,18 @@ func_cont:
 	mapAttrs = DSP_MAPLITTLEENDIAN;
 	mapAttrs |= DSP_MAPPHYSICALADDR;
 	mapAttrs |= DSP_MAPELEMSIZE32;
+	mapAttrs |= DSP_MAPDONOTLOCK;
+
 	/* Map the L4 peripherals */
-	{
-		i = 0;
-		while (L4PeripheralTable[i].physAddr && DSP_SUCCEEDED(status)) {
-				status = hIOMgr->pIntfFxns->pfnBrdMemMap
-					(hIOMgr->hWmdContext,
-					L4PeripheralTable[i].physAddr,
-					L4PeripheralTable[i].dspVirtAddr,
-					HW_PAGE_SIZE_4KB, mapAttrs);
-				DBC_Assert(DSP_SUCCEEDED(status));
-				i++;
-		}
+	i = 0;
+	while (L4PeripheralTable[i].physAddr && DSP_SUCCEEDED(status)) {
+		status = hIOMgr->pIntfFxns->pfnBrdMemMap
+			(hIOMgr->hWmdContext, L4PeripheralTable[i].physAddr,
+			L4PeripheralTable[i].dspVirtAddr, HW_PAGE_SIZE_4KB,
+			mapAttrs);
+		if (DSP_FAILED(status))
+			break;
+		i++;
 	}
 
 	if (DSP_SUCCEEDED(status)) {
@@ -1155,7 +1158,7 @@ static void InputChnl(struct IO_MGR *pIOMgr, struct CHNL_OBJECT *pChnl,
 			    pChnlMgr->uWordSize;
 	chnlId = IO_GetValue(pIOMgr->hWmdContext, struct SHM, sm, inputId);
 	dwArg = IO_GetLong(pIOMgr->hWmdContext, struct SHM, sm, arg);
-	if (!(chnlId >= 0) || !(chnlId < CHNL_MAXCHANNELS)) {
+	if (chnlId >= CHNL_MAXCHANNELS) {
 		/* Shouldn't be here: would indicate corrupted SHM. */
 		DBC_Assert(chnlId);
 		goto func_end;
@@ -1740,9 +1743,6 @@ DSP_STATUS IO_SHMsetting(IN struct IO_MGR *hIOMgr, IN enum SHM_DESCTYPE desc,
 		break;
 	default:
 		break;
-
-				queue_work(bridge_workqueue,
-							 &(hIOMgr->io_workq));
 	}
 #endif
 	return DSP_SOK;

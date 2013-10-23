@@ -64,7 +64,6 @@ struct musb_ep;
 #include "musb_host.h"
 
 
-
 #ifdef CONFIG_USB_MUSB_OTG
 
 #define	is_peripheral_enabled(musb)	((musb)->board_mode != MUSB_HOST)
@@ -109,7 +108,7 @@ struct musb_ep;
 
 extern irqreturn_t musb_g_ep0_irq(struct musb *);
 extern void musb_g_tx(struct musb *, u8);
-extern void musb_g_rx(struct musb *, u8);
+extern void musb_g_rx(struct musb *, u8, bool);
 extern void musb_g_reset(struct musb *);
 extern void musb_g_suspend(struct musb *);
 extern void musb_g_resume(struct musb *);
@@ -310,12 +309,9 @@ static inline struct usb_request *next_out_request(struct musb_hw_ep *hw_ep)
 
 struct musb_ctx {
 	/* common register */
-	u16	intrtx;
-	u16	intrrx;
 	u16	intrtxe;
 	u16	intrrxe;
 
-	u8	intrusb;
 	u8	intrusbe;
 
 	u8	faddr;
@@ -343,6 +339,11 @@ struct musb_ctx {
 	u8	rxinterval[MUSB_MAX_EPS];
 
 	u8	fifosize[MUSB_MAX_EPS];
+
+	u8	rxfifosz[MUSB_MAX_EPS];
+	u8	txfifosz[MUSB_MAX_EPS];
+	u16	txfifoadd[MUSB_MAX_EPS];
+	u16	rxfifoadd[MUSB_MAX_EPS];
 
 	u8	count0;
 	u8	type0;
@@ -416,6 +417,7 @@ struct musb {
 	u16 epmask;
 	u8 nr_endpoints;
 
+	struct musb_board_data	*board;
 	u8 board_mode;		/* enum musb_mode */
 	int			(*board_set_power)(int state);
 
@@ -470,12 +472,6 @@ struct musb {
 	unsigned		test_mode:1;
 	unsigned		softconnect:1;
 
-	/* true if this chip can enable SUSPENDM */
-	unsigned		suspendm:1;
-
-	/* true if we're using dma */
-	unsigned		use_dma:1;
-
 	u8			address;
 	u8			test_mode_nr;
 	u16			ackpend;		/* ep0 */
@@ -484,11 +480,18 @@ struct musb {
 	struct usb_gadget_driver *gadget_driver;	/* its driver */
 #endif
 
+	/* true if this chip can enable SUSPENDM */
+	unsigned		suspendm:1;
+
+	/* true if we're using dma */
+	unsigned		use_dma:1;
+
 	struct musb_hdrc_config	*config;
 
 #ifdef MUSB_CONFIG_PROC_FS
 	struct proc_dir_entry *proc_entry;
 #endif
+	unsigned		is_charger:1;
 };
 
 static inline void musb_set_vbus(struct musb *musb, int is_on)
@@ -600,6 +603,18 @@ extern void musb_platform_try_idle(struct musb *musb, unsigned long timeout);
 extern int musb_platform_get_vbus_status(struct musb *musb);
 #else
 #define musb_platform_get_vbus_status(x)	0
+#endif
+
+#ifdef CONFIG_PM
+extern void musb_save_ctx(struct musb *musb);
+extern void musb_restore_ctx(struct musb *musb);
+extern void musb_save_ctx_and_suspend(struct usb_gadget *, int);
+extern void musb_restore_ctx_and_resume(struct usb_gadget *);
+#else
+static inline void musb_save_ctx(struct musb *musb) {}
+static inline void musb_restore_ctx(struct musb *musb) {}
+static inline void musb_save_ctx_and_suspend(struct usb_gadget *, int) {}
+static inline void musb_restore_ctx_and_resume(struct usb_gadget *) {}
 #endif
 
 extern int __init musb_platform_init(struct musb *musb);

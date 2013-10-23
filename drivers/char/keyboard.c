@@ -1035,6 +1035,7 @@ DECLARE_TASKLET_DISABLED(keyboard_tasklet, kbd_bh, 0);
     defined(CONFIG_MIPS) || defined(CONFIG_PPC) || defined(CONFIG_SPARC) ||\
     defined(CONFIG_PARISC) || defined(CONFIG_SUPERH) ||\
     (defined(CONFIG_ARM) && defined(CONFIG_KEYBOARD_ATKBD) && !defined(CONFIG_ARCH_RPC)) ||\
+    (defined(CONFIG_ARM) && defined(CONFIG_KEYBOARD_TWL4030) && !defined(CONFIG_ARCH_RPC)) ||\
     defined(CONFIG_AVR32)
 
 #define HW_RAW(dev) (test_bit(EV_MSC, dev->evbit) && test_bit(MSC_RAW, dev->mscbit) &&\

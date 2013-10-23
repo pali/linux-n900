@@ -177,18 +177,14 @@ int Dynamic_Load_Module(struct Dynamic_Loader_Stream *module,
 
 		init_module_handle(&dl_state);
 
+		/* dl_state.myio is init or 0 at this point. */
 		if (dl_state.myio) {
 			if ((!dl_state.dload_errcount) &&
-			   (dl_state.dfile_hdr.df_entry_secn != DN_UNDEF)) {
-				if (init != NULL) {
-					if (!init->execute(init,
-					   dl_state.dfile_hdr.df_entrypt))
-						dload_error(&dl_state,
-						    "Init->Execute Failed");
-				} else {
-					dload_error(&dl_state, "init is NULL");
-				}
-			}
+			    (dl_state.dfile_hdr.df_entry_secn != DN_UNDEF) &&
+			    (!init->execute(init,
+					    dl_state.dfile_hdr.df_entrypt)))
+				dload_error(&dl_state,
+					    "Init->Execute Failed");
 			init->release(init);
 		}
 
@@ -287,12 +283,13 @@ Dynamic_Open_Module(struct Dynamic_Loader_Stream *module,
 
 		init_module_handle(&dl_state);
 
+		/* dl_state.myio is either 0 or init at this point. */
 		if (dl_state.myio) {
-			if ((!dl_state.dload_errcount)
-			    && (dl_state.dfile_hdr.df_entry_secn != DN_UNDEF))
-				if (!init->execute(init,
-				   dl_state.dfile_hdr.df_entrypt))
-					dload_error(&dl_state,
+			if ((!dl_state.dload_errcount) &&
+			    (dl_state.dfile_hdr.df_entry_secn != DN_UNDEF) &&
+			    (!init->execute(init,
+					    dl_state.dfile_hdr.df_entrypt)))
+				dload_error(&dl_state,
 					    "Init->Execute Failed");
 			init->release(init);
 		}

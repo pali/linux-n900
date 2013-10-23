@@ -142,6 +142,21 @@ struct swap_info_struct {
 	struct swap_extent *curr_swap_extent;
 	unsigned old_block_size;
 	unsigned short * swap_map;
+	/*
+	 * swap_remap is dual-purpose. The bottome 31 bits contain the
+	 * re-mapped page number. The top bit determines if the re-mapped page
+	 * itself is in use. e.g.
+	 *     say swap_remap[5] = 0x00000009
+	 *     and swap_remap[9] = 0x80000000
+	 * then page 5 is re-mapped to page 9, which is therefore in use.
+	 * Page 9, on the other hand, is not re-mapped.
+	 */
+	unsigned int *swap_remap;
+	spinlock_t remap_lock; /* Protects swap_remap */
+	struct mutex remap_mutex; /* Protects find_gap() */
+	unsigned int gap_next;
+	unsigned int gap_end;
+	unsigned int gaps_exist;
 	unsigned int lowest_bit;
 	unsigned int highest_bit;
 	unsigned int cluster_next;
@@ -303,7 +318,7 @@ extern void swap_free(swp_entry_t);
 extern void free_swap_and_cache(swp_entry_t);
 extern int swap_type_of(dev_t, sector_t, struct block_device **);
 extern unsigned int count_swap_pages(int, int);
-extern sector_t map_swap_page(struct swap_info_struct *, pgoff_t);
+extern sector_t map_swap_page(struct swap_info_struct *, pgoff_t, int);
 extern sector_t swapdev_block(int, pgoff_t);
 extern struct swap_info_struct *get_swap_info_struct(unsigned);
 extern int can_share_swap_page(struct page *);

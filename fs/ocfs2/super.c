@@ -190,7 +190,7 @@ static void ocfs2_write_super(struct super_block *sb)
 {
 	if (mutex_trylock(&sb->s_lock) != 0)
 		BUG();
-	sb->s_dirt = 0;
+	mark_sb_clean(sb);
 }
 
 static int ocfs2_sync_fs(struct super_block *sb, int wait)
@@ -199,7 +199,7 @@ static int ocfs2_sync_fs(struct super_block *sb, int wait)
 	tid_t target;
 	struct ocfs2_super *osb = OCFS2_SB(sb);
 
-	sb->s_dirt = 0;
+	mark_sb_clean(sb);
 
 	if (ocfs2_is_hard_readonly(osb))
 		return -EROFS;

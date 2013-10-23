@@ -57,14 +57,15 @@ int __init ssi_cawake_init(struct ssi_port *port, const char *irq_name)
 {
 	tasklet_init(&port->cawake_tasklet, do_ssi_cawake_tasklet,
 							(unsigned long)port);
-
-	if (request_irq(port->cawake_gpio_irq, ssi_cawake_isr, IRQF_DISABLED,
+	if (request_irq(port->cawake_gpio_irq, ssi_cawake_isr,
+		IRQF_DISABLED | IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
 							irq_name, port) < 0) {
 		dev_err(port->ssi_controller->dev,
-			"FAILED to request CAWAKE GPIO IRQ %d on port %d\n",
-			port->cawake_gpio_irq, port->port_number);
+			"FAILED to request %s GPIO IRQ %d on port %d\n",
+			irq_name, port->cawake_gpio_irq, port->port_number);
 		return -EBUSY;
 	}
+	enable_irq_wake(port->cawake_gpio_irq);
 
 	return 0;
 }
@@ -74,5 +75,7 @@ void ssi_cawake_exit(struct ssi_port *port)
 	if (port->cawake_gpio < 0)
 		return;	/* Nothing to do */
 
+	disable_irq_wake(port->cawake_gpio_irq);
+	tasklet_kill(&port->cawake_tasklet);
 	free_irq(port->cawake_gpio_irq, port);
 }

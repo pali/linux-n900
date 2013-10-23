@@ -49,21 +49,28 @@ static ssize_t display_enabled_show(struct omap_display *display, char *buf)
 static ssize_t display_enabled_store(struct omap_display *display,
 		const char *buf, size_t size)
 {
-	bool enabled, r;
+	bool enabled, r = 0;
 
 	enabled = simple_strtoul(buf, NULL, 10);
 
+	omap_dss_lock();
+
 	if (enabled != (display->state != OMAP_DSS_DISPLAY_DISABLED)) {
 		if (enabled) {
+			omap_dss_maximize_min_bus_tput();
 			r = display->enable(display);
+			omap_dss_update_min_bus_tput();
 			if (r)
-				return r;
+				goto unlock;
 		} else {
 			display->disable(display);
 		}
 	}
 
-	return size;
+unlock:
+	omap_dss_unlock();
+
+	return r ? r : size;
 }
 
 static ssize_t display_upd_mode_show(struct omap_display *display, char *buf)
@@ -164,7 +171,9 @@ static ssize_t display_timings_store(struct omap_display *display,
 	if ((r = display->check_timings(display, &t)))
 		return r;
 
+	omap_dss_lock();
 	display->set_timings(display, &t);
+	omap_dss_unlock();
 
 	return size;
 }
@@ -239,6 +248,43 @@ struct display_attribute {
 	ssize_t	(*store)(struct omap_display *, const char *, size_t);
 };
 
+static ssize_t display_wss_show(struct omap_display *display, char *buf)
+{
+	unsigned int wss;
+
+	if (!display->get_wss)
+		return -ENOENT;
+
+	wss = display->get_wss(display);
+
+	return snprintf(buf, PAGE_SIZE, "0x%05x\n", wss);
+}
+
+static ssize_t display_wss_store(struct omap_display *display,
+		const char *buf, size_t size)
+{
+	unsigned long wss;
+	int r;
+
+	if (!display->get_wss || !display->set_wss)
+		return -ENOENT;
+
+	if (strict_strtoul(buf, 0, &wss))
+		return -EINVAL;
+
+	if (wss > 0xfffff)
+		return -EINVAL;
+
+	omap_dss_lock();
+	r = display->set_wss(display, wss);
+	omap_dss_unlock();
+
+	if (r)
+		return r;
+
+	return size;
+}
+
 #define DISPLAY_ATTR(_name, _mode, _show, _store) \
 	struct display_attribute display_attr_##_name = \
 	__ATTR(_name, _mode, _show, _store)
@@ -258,6 +304,8 @@ static DISPLAY_ATTR(mirror, S_IRUGO|S_IWUSR,
 		display_mirror_show, display_mirror_store);
 static DISPLAY_ATTR(panel_name, S_IRUGO, display_panel_name_show, NULL);
 static DISPLAY_ATTR(ctrl_name, S_IRUGO, display_ctrl_name_show, NULL);
+static DISPLAY_ATTR(wss, S_IRUGO|S_IWUSR,
+		display_wss_show, display_wss_store);
 
 static struct attribute *display_sysfs_attrs[] = {
 	&display_attr_name.attr,
@@ -269,6 +317,7 @@ static struct attribute *display_sysfs_attrs[] = {
 	&display_attr_mirror.attr,
 	&display_attr_panel_name.attr,
 	&display_attr_ctrl_name.attr,
+	&display_attr_wss.attr,
 	NULL
 };
 
@@ -282,6 +331,9 @@ static ssize_t display_attr_show(struct kobject *kobj, struct attribute *attr, c
 
 	if (!display_attr->show)
 		return -ENOENT;
+
+	if (display->state == OMAP_DSS_DISPLAY_UNINITIALIZED)
+		return -ENODEV;
 
 	return display_attr->show(display, buf);
 }
@@ -297,6 +349,9 @@ static ssize_t display_attr_store(struct kobject *kobj, struct attribute *attr,
 
 	if (!display_attr->store)
 		return -ENOENT;
+
+	if (display->state == OMAP_DSS_DISPLAY_UNINITIALIZED)
+		return -ENODEV;
 
 	return display_attr->store(display, buf, size);
 }
@@ -331,6 +386,13 @@ static void default_configure_overlay(struct omap_overlay *ovl)
 
 	high = dispc_get_plane_fifo_size(plane) - 1;
 	low = dispc_get_plane_fifo_size(plane) - size;
+
+	if (ovl->info.fifo_threshold_high &&
+	    ovl->info.fifo_threshold_high < high)
+		high = ovl->info.fifo_threshold_high;
+	if (ovl->info.fifo_threshold_low &&
+	    ovl->info.fifo_threshold_low < low)
+		low = ovl->info.fifo_threshold_low;
 
 	dispc_setup_plane_fifo(plane, low, high);
 }
@@ -375,10 +437,44 @@ static int default_get_recommended_bpp(struct omap_display *display)
 	}
 }
 
+/* Checks if replication logic should be used. Only use for active matrix,
+ * when overlay is in RGB12U or RGB16 mode, and LCD interface is
+ * 18bpp or 24bpp */
+bool dss_use_replication(struct omap_display *display,
+		enum omap_color_mode mode)
+{
+	int bpp;
+
+	if (mode != OMAP_DSS_COLOR_RGB12U && mode != OMAP_DSS_COLOR_RGB16)
+		return false;
+
+	if (display->type == OMAP_DISPLAY_TYPE_DPI &&
+			(display->panel->config & OMAP_DSS_LCD_TFT) == 0)
+		return false;
+
+	switch (display->type) {
+	case OMAP_DISPLAY_TYPE_DPI:
+		bpp = display->hw_config.u.dpi.data_lines;
+		break;
+	case OMAP_DISPLAY_TYPE_VENC:
+	case OMAP_DISPLAY_TYPE_SDI:
+		bpp = 24;
+		break;
+	case OMAP_DISPLAY_TYPE_DBI:
+	case OMAP_DISPLAY_TYPE_DSI:
+		bpp = display->ctrl->pixel_size;
+		break;
+	default:
+		BUG();
+	}
+
+	return bpp > 16;
+}
+
 void dss_init_displays(struct platform_device *pdev)
 {
 	struct omap_dss_board_info *pdata = pdev->dev.platform_data;
-	int i, r;
+	int i, r = 0;
 
 	INIT_LIST_HEAD(&display_list);
 
@@ -424,30 +520,35 @@ void dss_init_displays(struct platform_device *pdev)
 
 		switch (display->type) {
 		case OMAP_DISPLAY_TYPE_DPI:
-			dpi_init_display(display);
+			r = dpi_init_display(display);
 			break;
 #ifdef CONFIG_OMAP2_DSS_RFBI
 		case OMAP_DISPLAY_TYPE_DBI:
-			rfbi_init_display(display);
+			r = rfbi_init_display(display);
 			break;
 #endif
 #ifdef CONFIG_OMAP2_DSS_VENC
 		case OMAP_DISPLAY_TYPE_VENC:
-			venc_init_display(display);
+			r = venc_init_display(display);
 			break;
 #endif
 #ifdef CONFIG_OMAP2_DSS_SDI
 		case OMAP_DISPLAY_TYPE_SDI:
-			sdi_init_display(display);
+			r = sdi_init_display(display);
 			break;
 #endif
 #ifdef CONFIG_OMAP2_DSS_DSI
 		case OMAP_DISPLAY_TYPE_DSI:
-			dsi_init_display(display);
+			r = dsi_init_display(display);
 			break;
 #endif
 		default:
 			BUG();
+		}
+
+		if (r) {
+			DSSERR("failed to init display%d\n", i);
+			continue;
 		}
 
 		r = kobject_init_and_add(&display->kobj, &display_ktype,
@@ -597,7 +698,11 @@ struct omap_display *omap_dss_get_display(int no)
 				goto err3;
 	}
 
+	dss_recheck_connections(display,
+				!strcmp(display->name, dss_get_def_disp_name()));
+
 	display->ref_count++;
+	display->state = OMAP_DSS_DISPLAY_DISABLED;
 	/*
 	if (atomic_cmpxchg(&display->ref_count, 0, 1) != 0)
 		return 0;
@@ -622,6 +727,8 @@ void omap_dss_put_display(struct omap_display *display)
 {
 	if (--display->ref_count > 0)
 		return;
+
+	display->state = OMAP_DSS_DISPLAY_UNINITIALIZED;
 /*
 	if (atomic_cmpxchg(&display->ref_count, 1, 0) != 1)
 		return;

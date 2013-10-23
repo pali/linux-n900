@@ -49,7 +49,7 @@ MODULE_LICENSE("GPL");
  */
 static void hfs_write_super(struct super_block *sb)
 {
-	sb->s_dirt = 0;
+	mark_sb_clean(sb);
 	if (sb->s_flags & MS_RDONLY)
 		return;
 	/* sync everything to the buffers */

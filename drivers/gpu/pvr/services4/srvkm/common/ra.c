@@ -697,7 +697,7 @@ RA_Create (IMG_CHAR *name,
   insert_fail:
 	HASH_Delete (pArena->pSegmentHash);
   hash_fail:
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, pArena, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(RA_ARENA), pArena, IMG_NULL);
   arena_fail:
 	return IMG_NULL;
 }
@@ -729,7 +729,7 @@ RA_Delete (RA_ARENA *pArena)
 	RemoveProcEntry(pArena->szProcSegsName);
 #endif
 	HASH_Delete (pArena->pSegmentHash);
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, pArena, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(RA_ARENA), pArena, IMG_NULL);
 }
 
 IMG_BOOL

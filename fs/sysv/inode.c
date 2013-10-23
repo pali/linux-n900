@@ -30,7 +30,7 @@
 #include <asm/byteorder.h>
 #include "sysv.h"
 
-/* This is only called on sync() and umount(), when s_dirt=1. */
+/* This is only called on sync() and umount(), when the super block is dirty. */
 static void sysv_write_super(struct super_block *sb)
 {
 	struct sysv_sb_info *sbi = SYSV_SB(sb);
@@ -53,7 +53,7 @@ static void sysv_write_super(struct super_block *sb)
 		mark_buffer_dirty(sbi->s_bh2);
 	}
 clean:
-	sb->s_dirt = 0;
+	mark_sb_clean(sb);
 	unlock_kernel();
 }
 
@@ -63,7 +63,7 @@ static int sysv_remount(struct super_block *sb, int *flags, char *data)
 	if (sbi->s_forced_ro)
 		*flags |= MS_RDONLY;
 	if (!(*flags & MS_RDONLY))
-		sb->s_dirt = 1;
+		mark_sb_dirty(sb);
 	return 0;
 }
 

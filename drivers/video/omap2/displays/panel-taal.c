@@ -592,8 +592,6 @@ static struct omap_panel taal_panel = {
 		.x_res = 864,
 		.y_res = 480,
 	},
-
-	.recommended_bpp = 16,
 };
 
 static int __init taal_init(void)

@@ -190,6 +190,13 @@ config OMAP_IOMMU
 	  Say Y here if you want to use OMAP IOMMU support for IVA2 and
 	  Camera in OMAP3.
 
+config OMAP_IOMMU_DEBUG
+	tristate "IOMMU debug support"
+	depends on ARCH_OMAP && DEBUG_FS && m
+	default n
+	help
+	  Use debugfs to investigate iommu
+
 choice
         prompt "System timer"
 	default OMAP_MPU_TIMER

@@ -243,7 +243,8 @@ static void omap_uart_allow_sleep(struct omap_uart_state *uart)
 	if (!uart->clocked)
 		return;
 
-	omap_uart_smart_idle_enable(uart, 1);
+	if (serial_read_reg(uart->p, UART_LSR) & UART_LSR_TEMT)
+		omap_uart_smart_idle_enable(uart, 1);
 	uart->can_sleep = 1;
 	del_timer(&uart->timer);
 }
@@ -264,7 +265,11 @@ void omap_uart_prepare_idle(int num)
 			continue;
 
 		if (num == uart->num && uart->can_sleep) {
-			omap_uart_disable_clocks(uart);
+			if (serial_read_reg(uart->p, UART_LSR) &
+					UART_LSR_TEMT)
+				omap_uart_disable_clocks(uart);
+			else
+				omap_uart_smart_idle_enable(uart, 0);
 			return;
 		}
 	}
@@ -337,8 +342,14 @@ int omap_uart_can_sleep(void)
 static irqreturn_t omap_uart_interrupt(int irq, void *dev_id)
 {
 	struct omap_uart_state *uart = dev_id;
+	u8 lsr;
 
-	omap_uart_block_sleep(uart);
+	lsr = serial_read_reg(uart->p, UART_LSR);
+	/* Check for receive interrupt */
+	if (lsr & UART_LSR_DR)
+		omap_uart_block_sleep(uart);
+	if (lsr & UART_LSR_TEMT && uart->can_sleep)
+		omap_uart_smart_idle_enable(uart, 1);
 
 	return IRQ_NONE;
 }
@@ -465,8 +476,11 @@ static ssize_t sleep_timeout_store(struct kobject *kobj,
 		return -EINVAL;
 	}
 	sleep_timeout = value * HZ;
-	list_for_each_entry(uart, &uart_list, node)
+	list_for_each_entry(uart, &uart_list, node) {
 		uart->timeout = sleep_timeout;
+		if (timer_pending(&uart->timer))
+			mod_timer(&uart->timer, jiffies + sleep_timeout);
+	}
 	return n;
 }
 

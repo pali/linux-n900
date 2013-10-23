@@ -484,6 +484,17 @@ struct usb_gadget {
 	unsigned			b_hnp_enable:1;
 	unsigned			a_hnp_support:1;
 	unsigned			a_alt_hnp_support:1;
+	/** UGLY UGLY HACK: Windows problems with multiple
+	 * configurations.
+	 *
+	 * We're adding the next three fields in order to:
+	 *	(a) keep track when we get a get_config
+	 *	(b) keep track when we get a set_config
+	 *	(c) keep track of config index.
+	 */
+	unsigned			get_config:1;
+	unsigned			set_config:1;
+	unsigned			cindex;
 	const char			*name;
 	struct device			dev;
 };
@@ -771,6 +782,7 @@ struct usb_gadget_driver {
 	int			(*setup)(struct usb_gadget *,
 					const struct usb_ctrlrequest *);
 	void			(*disconnect)(struct usb_gadget *);
+	void			(*vbus_disconnect)(struct usb_gadget *);
 	void			(*suspend)(struct usb_gadget *);
 	void			(*resume)(struct usb_gadget *);
 

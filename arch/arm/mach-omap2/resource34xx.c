@@ -147,7 +147,8 @@ static int vdd2_lock;
 static struct clk *dpll1_clk, *dpll2_clk, *dpll3_clk;
 static int curr_vdd1_opp;
 static int curr_vdd2_opp;
-static DEFINE_MUTEX(dvfs_mutex);
+
+DEFINE_MUTEX(dvfs_mutex);
 
 static unsigned short get_opp(struct omap_opp *opp_freq_table,
 		unsigned long freq)
@@ -264,27 +265,38 @@ static int program_opp_freq(int res, int target_level, int current_level)
 static int program_opp(int res, struct omap_opp *opp, int target_level,
 		int current_level)
 {
-	int i, ret = 0, raise;
+	int i, ret = 0, raise, sr_status;
 #ifdef CONFIG_OMAP_SMARTREFLEX
-	unsigned long t_opp;
+	unsigned long t_opp, c_opp;
 
 	t_opp = ID_VDD(res) | ID_OPP_NO(opp[target_level].opp_id);
+	c_opp = ID_VDD(res) | ID_OPP_NO(opp[current_level].opp_id);
 #endif
 	if (target_level > current_level)
 		raise = 1;
 	else
 		raise = 0;
 
+#ifdef CONFIG_OMAP_SMARTREFLEX
+	sr_status = sr_stop_vddautocomap((get_vdd(t_opp) == PRCM_VDD1) ?
+			SR1 : SR2);
+#endif
 	for (i = 0; i < 2; i++) {
 		if (i == raise)
 			ret = program_opp_freq(res, target_level,
 					current_level);
 #ifdef CONFIG_OMAP_SMARTREFLEX
 		else
-			sr_voltagescale_vcbypass(t_opp,
-					opp[target_level].vsel);
+			sr_voltagescale_vcbypass(t_opp, c_opp,
+				opp[target_level].vsel,
+				opp[current_level].vsel);
 #endif
 	}
+#ifdef CONFIG_OMAP_SMARTREFLEX
+	if (sr_status)
+		sr_start_vddautocomap((get_vdd(t_opp) == PRCM_VDD1) ? SR1 : SR2,
+				opp[target_level].opp_id);
+#endif
 
 	return ret;
 }
@@ -354,6 +366,9 @@ int set_opp(struct shared_resource *resp, u32 target_level)
 	int ind;
 
 	if (resp == vdd1_resp) {
+		if (target_level < 3)
+			resource_release_locked("vdd2_opp", &vdd2_dev);
+
 		resource_set_opp_level(PRCM_VDD1, target_level, 0);
 		/*
 		 * For VDD1 OPP3 and above, make sure the interconnect
@@ -361,9 +376,7 @@ int set_opp(struct shared_resource *resp, u32 target_level)
 		 * throughput in KiB/s for 100 Mhz = 100 * 1000 * 4.
 		 */
 		if (target_level >= 3)
-			resource_request("vdd2_opp", &vdd2_dev, 400000);
-		else
-			resource_release("vdd2_opp", &vdd2_dev);
+			resource_request_locked("vdd2_opp", &vdd2_dev, 400000);
 	} else if (resp == vdd2_resp) {
 		tput = target_level;
 
@@ -428,10 +441,10 @@ int set_freq(struct shared_resource *resp, u32 target_level)
 
 	if (strcmp(resp->name, "mpu_freq") == 0) {
 		vdd1_opp = get_opp(mpu_opps + MAX_VDD1_OPP, target_level);
-		resource_request("vdd1_opp", &dummy_mpu_dev, vdd1_opp);
+		resource_request_locked("vdd1_opp", &dummy_mpu_dev, vdd1_opp);
 	} else if (strcmp(resp->name, "dsp_freq") == 0) {
 		vdd1_opp = get_opp(dsp_opps + MAX_VDD1_OPP, target_level);
-		resource_request("vdd1_opp", &dummy_dsp_dev, vdd1_opp);
+		resource_request_locked("vdd1_opp", &dummy_dsp_dev, vdd1_opp);
 	}
 	resp->curr_level = target_level;
 	return 0;

@@ -2660,8 +2660,11 @@ static int l2cap_recv_acldata(struct hci_conn *hcon, struct sk_buff *skb, u16 fl
 		BT_DBG("Cont: frag len %d (expecting %d)", skb->len, conn->rx_len);
 
 		if (!conn->rx_len) {
+			/* Hack hack - workaround for bcm2048 bug. It sends
+			empty frames every now and then without reason.
 			BT_ERR("Unexpected continuation frame (len %d)", skb->len);
 			l2cap_conn_unreliable(conn, ECOMM);
+			*/
 			goto drop;
 		}
 

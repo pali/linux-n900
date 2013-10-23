@@ -89,10 +89,10 @@ static int omap_target(struct cpufreq_policy *policy,
 
 	/* Ensure desired rate is within allowed range.  Some govenors
 	 * (ondemand) will just pass target_freq=0 to get the minimum. */
-	if (target_freq < policy->cpuinfo.min_freq)
-		target_freq = policy->cpuinfo.min_freq;
-	if (target_freq > policy->cpuinfo.max_freq)
-		target_freq = policy->cpuinfo.max_freq;
+	if (target_freq < policy->min)
+		target_freq = policy->min;
+	if (target_freq > policy->max)
+		target_freq = policy->max;
 
 #ifdef CONFIG_ARCH_OMAP1
 	freqs.old = omap_getspeed(0);

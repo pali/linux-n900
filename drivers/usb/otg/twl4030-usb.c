@@ -475,13 +475,20 @@ static void twl4030_phy_power(struct twl4030_usb *twl, int on)
 	}
 }
 
+extern void musb_save_ctx_and_suspend(struct usb_gadget *gadget, int overwrite);
+extern void musb_restore_ctx_and_resume(struct usb_gadget *gadget);
+
 static void twl4030_phy_suspend(struct twl4030_usb *twl, int controller_off)
 {
 	if (twl->asleep)
 		return;
 
 	twl4030_phy_power(twl, 0);
-	twl->asleep = 1;
+	if (!controller_off)
+		twl->asleep = 1;
+
+	if (twl->otg.gadget)
+		musb_save_ctx_and_suspend(twl->otg.gadget, 0);
 }
 
 static void twl4030_phy_resume(struct twl4030_usb *twl)
@@ -495,6 +502,9 @@ static void twl4030_phy_resume(struct twl4030_usb *twl)
 	if (twl->usb_mode == T2_USB_MODE_ULPI)
 		twl4030_i2c_access(twl, 0);
 	twl->asleep = 0;
+
+	if (twl->otg.gadget)
+		musb_restore_ctx_and_resume(twl->otg.gadget);
 }
 
 static int twl4030_usb_ldo_init(struct twl4030_usb *twl)
@@ -569,6 +579,34 @@ static ssize_t twl4030_usb_vbus_show(struct device *dev,
 }
 static DEVICE_ATTR(vbus, 0444, twl4030_usb_vbus_show, NULL);
 
+static ssize_t twl4030_usb_linkstat_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct twl4030_usb *twl = dev_get_drvdata(dev);
+	unsigned long flags;
+	char *link;
+
+	spin_lock_irqsave(&twl->lock, flags);
+	switch (twl->linkstat) {
+	case USB_LINK_VBUS:
+		link = "vbus";
+		break;
+	case USB_LINK_ID:
+		link = "idpin";
+		break;
+	case USB_LINK_NONE:
+		link = "none";
+		break;
+	default:
+		link = "unknown";
+		break;
+	}
+	spin_unlock_irqrestore(&twl->lock, flags);
+
+	return sprintf(buf, "%s\n", link);
+}
+static DEVICE_ATTR(linkstat, 0444, twl4030_usb_linkstat_show, NULL);
+
 static irqreturn_t twl4030_usb_irq(int irq, void *_twl)
 {
 	struct twl4030_usb *twl = _twl;
@@ -604,6 +642,7 @@ static irqreturn_t twl4030_usb_irq(int irq, void *_twl)
 			twl4030_phy_resume(twl);
 	}
 	sysfs_notify(&twl->dev->kobj, NULL, "vbus");
+	sysfs_notify(&twl->dev->kobj, NULL, "linkstat");
 
 	return IRQ_HANDLED;
 }
@@ -689,7 +728,10 @@ static int __init twl4030_usb_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, twl);
 	if (device_create_file(&pdev->dev, &dev_attr_vbus))
-		dev_warn(&pdev->dev, "could not create sysfs file\n");
+		dev_warn(&pdev->dev, "could not create vbus sysfs file\n");
+
+	if (device_create_file(&pdev->dev, &dev_attr_linkstat))
+		dev_warn(&pdev->dev, "could not create linkstat sysfs file\n");
 
 	/* Our job is to use irqs and status from the power module
 	 * to keep the transceiver disabled when nothing's connected.
@@ -731,6 +773,7 @@ static int __exit twl4030_usb_remove(struct platform_device *pdev)
 
 	free_irq(twl->irq, twl);
 	device_remove_file(twl->dev, &dev_attr_vbus);
+	device_remove_file(twl->dev, &dev_attr_linkstat);
 
 	/* set transceiver mode to power on defaults */
 	twl4030_usb_set_mode(twl, -1);

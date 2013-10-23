@@ -60,8 +60,6 @@
 
 #define OMAP34XXCAM_VIDEODEVS		4
 
-/* #define OMAP34XXCAM_POWEROFF_DELAY (2 * HZ) */
-
 struct omap34xxcam_device;
 struct omap34xxcam_videodev;
 
@@ -142,13 +140,6 @@ struct omap34xxcam_videodev {
 	int index;
 	atomic_t users;
 	enum v4l2_power power_state[OMAP34XXCAM_SLAVE_FLASH + 1];
-#ifdef OMAP34XXCAM_POWEROFF_DELAY
-	enum v4l2_power power_state_wish;
-	int power_state_mask;
-	struct timer_list poweroff_timer;
-	struct work_struct poweroff_work;
-#endif /* OMAP34XXCAM_POWEROFF_DELAY */
-
 #define vdev_sensor_config slave_config[OMAP34XXCAM_SLAVE_SENSOR].u.sensor
 #define vdev_lens_config slave_config[OMAP34XXCAM_SLAVE_LENS].u.lens
 #define vdev_flash_config slave_config[OMAP34XXCAM_SLAVE_FLASH].u.flash

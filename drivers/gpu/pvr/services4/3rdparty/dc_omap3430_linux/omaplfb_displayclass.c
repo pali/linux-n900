@@ -1065,49 +1065,11 @@ ExitTrueUnlock:
 	return IMG_TRUE;	
 }
 
-
-static PVRSRV_ERROR InitDev(OMAPLFB_DEVINFO *psDevInfo)
+static void SetDevinfo(OMAPLFB_DEVINFO *psDevInfo)
 {
-	struct fb_info *psLINFBInfo;
-	struct module *psLINFBOwner;
 	OMAPLFB_FBINFO *psPVRFBInfo = &psDevInfo->sFBInfo;
-	PVRSRV_ERROR eError = PVRSRV_ERROR_GENERIC;
+	struct fb_info *psLINFBInfo = psDevInfo->psLINFBInfo;
 	unsigned long FBSize;
-
-	acquire_console_sem();
-
-	if (fb_idx < 0 || fb_idx >= num_registered_fb)
-	{
-		eError = PVRSRV_ERROR_INVALID_DEVICE;
-		goto errRelSem;
-	}
-
-	psLINFBInfo = registered_fb[fb_idx];
-
-	psLINFBOwner = psLINFBInfo->fbops->owner;
-	if (!try_module_get(psLINFBOwner))
-	{
-		printk(KERN_INFO DRIVER_PREFIX
-			": Couldn't get framebuffer module\n");
-
-		goto errRelSem;
-	}
-
-	if (psLINFBInfo->fbops->fb_open != NULL)
-	{
-		int res;
-
-		res = psLINFBInfo->fbops->fb_open(psLINFBInfo, 0);
-		if (res != 0)
-		{
-			printk(KERN_INFO DRIVER_PREFIX
-				": Couldn't open framebuffer: %d\n", res);
-
-			goto errModPut;
-		}
-	}
-
-	psDevInfo->psLINFBInfo = psLINFBInfo;
 
 	FBSize = (psLINFBInfo->screen_size) != 0 ?
 					psLINFBInfo->screen_size :
@@ -1145,7 +1107,9 @@ static PVRSRV_ERROR InitDev(OMAPLFB_DEVINFO *psDevInfo)
 	psPVRFBInfo->ui32Height = psLINFBInfo->var.yres;
 	psPVRFBInfo->ui32ByteStride =  psLINFBInfo->fix.line_length;
 	psPVRFBInfo->ui32FBSize = FBSize;
-	psPVRFBInfo->ui32BufferSize = max(psPVRFBInfo->ui32Width, psPVRFBInfo->ui32Height) * psPVRFBInfo->ui32ByteStride;
+	psPVRFBInfo->ui32BufferSize =
+		max(psPVRFBInfo->ui32Height, psPVRFBInfo->ui32Width)
+		* psPVRFBInfo->ui32ByteStride;
 	
 	psPVRFBInfo->ui32RoundedBufferSize = OMAPLFB_PAGE_ROUNDUP(psPVRFBInfo->ui32BufferSize);
 
@@ -1187,6 +1151,81 @@ static PVRSRV_ERROR InitDev(OMAPLFB_DEVINFO *psDevInfo)
 	{
 		printk("Unknown FB format\n");
 	}
+		psDevInfo->sDisplayFormat.pixelformat =
+			psDevInfo->sFBInfo.ePixelFormat;
+		psDevInfo->sDisplayDim.ui32Width = psDevInfo->sFBInfo.ui32Width;
+		psDevInfo->sDisplayDim.ui32Height =
+			psDevInfo->sFBInfo.ui32Height;
+		psDevInfo->sDisplayDim.ui32ByteStride =
+			psDevInfo->sFBInfo.ui32ByteStride;
+		psDevInfo->sSystemBuffer.sSysAddr = psDevInfo->sFBInfo.sSysAddr;
+		psDevInfo->sSystemBuffer.sCPUVAddr =
+			psDevInfo->sFBInfo.sCPUVAddr;
+		psDevInfo->sSystemBuffer.ui32BufferSize =
+			psDevInfo->sFBInfo.ui32RoundedBufferSize;
+}
+
+static struct FB_EVENTS
+{
+	struct notifier_block notif;
+	OMAPLFB_DEVINFO *psDevInfo;
+} gFBEventsData;
+
+static int FBEvents(struct notifier_block *psNotif,
+		unsigned long event, void *data)
+{
+	if (event == FB_EVENT_MODE_CHANGE) {
+		struct FB_EVENTS *psEvents =
+			container_of(psNotif, struct FB_EVENTS, notif);
+		SetDevinfo(psEvents->psDevInfo);
+	}
+	return 0;
+}
+
+static PVRSRV_ERROR InitDev(OMAPLFB_DEVINFO *psDevInfo)
+{
+	struct fb_info *psLINFBInfo;
+	struct module *psLINFBOwner;
+	OMAPLFB_FBINFO *psPVRFBInfo = &psDevInfo->sFBInfo;
+	PVRSRV_ERROR eError = PVRSRV_ERROR_GENERIC;
+
+	acquire_console_sem();
+
+	if (fb_idx < 0 || fb_idx >= num_registered_fb) {
+		eError = PVRSRV_ERROR_INVALID_DEVICE;
+		goto errRelSem;
+	}
+
+	psLINFBInfo = registered_fb[fb_idx];
+
+	psLINFBOwner = psLINFBInfo->fbops->owner;
+	if (!try_module_get(psLINFBOwner)) {
+		printk(KERN_INFO DRIVER_PREFIX
+			": Couldn't get framebuffer module\n");
+
+		goto errRelSem;
+	}
+
+	if (psLINFBInfo->fbops->fb_open != NULL) {
+		int res;
+
+		res = psLINFBInfo->fbops->fb_open(psLINFBInfo, 0);
+		if (res != 0) {
+			printk(KERN_INFO DRIVER_PREFIX
+				": Couldn't open framebuffer: %d\n", res);
+
+			goto errModPut;
+		}
+	}
+
+	psDevInfo->psLINFBInfo = psLINFBInfo;
+
+	SetDevinfo(psDevInfo);
+
+	gFBEventsData.notif.notifier_call = FBEvents;
+	gFBEventsData.psDevInfo = psDevInfo;
+	fb_register_client(&gFBEventsData.notif);
+
 
 	
 	psDevInfo->sFBInfo.sSysAddr.uiAddr = psPVRFBInfo->sSysAddr.uiAddr;
@@ -1287,19 +1326,12 @@ PVRSRV_ERROR OMAPLFBInit(IMG_VOID)
 
 		strncpy(psDevInfo->sDisplayInfo.szDisplayName, DISPLAY_DEVICE_NAME, MAX_DISPLAY_NAME_SIZE);
 	
-		psDevInfo->sDisplayFormat.pixelformat = psDevInfo->sFBInfo.ePixelFormat;
-		psDevInfo->sDisplayDim.ui32Width =  psDevInfo->sFBInfo.ui32Width;
-		psDevInfo->sDisplayDim.ui32Height =  psDevInfo->sFBInfo.ui32Height;
-		psDevInfo->sDisplayDim.ui32ByteStride =  psDevInfo->sFBInfo.ui32ByteStride;
 
 		DEBUG_PRINTK((KERN_INFO DRIVER_PREFIX
 			": Maximum number of swap chain buffers: %lu\n",
 			psDevInfo->sDisplayInfo.ui32MaxSwapChainBuffers));
 
 		
-		psDevInfo->sSystemBuffer.sSysAddr = psDevInfo->sFBInfo.sSysAddr;
-		psDevInfo->sSystemBuffer.sCPUVAddr = psDevInfo->sFBInfo.sCPUVAddr;
-		psDevInfo->sSystemBuffer.ui32BufferSize = (psDevInfo->sFBInfo.ui32RoundedBufferSize);
 
 		
 

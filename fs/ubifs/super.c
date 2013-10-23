@@ -796,7 +796,7 @@ static int alloc_wbufs(struct ubifs_info *c)
 	 * does not need to be synchronized by timer.
 	 */
 	c->jheads[GCHD].wbuf.dtype = UBI_LONGTERM;
-	c->jheads[GCHD].wbuf.timeout = 0;
+	c->jheads[GCHD].wbuf.no_timer = 1;
 
 	return 0;
 }
@@ -964,7 +964,7 @@ static int ubifs_parse_options(struct ubifs_info *c, char *options,
 		switch (token) {
 		/*
 		 * %Opt_fast_unmount and %Opt_norm_unmount options are ignored.
-		 * We accepte them in order to be backware-compatible. But this
+		 * We accept them in order to be backward-compatible. But this
 		 * should be removed at some point.
 		 */
 		case Opt_fast_unmount:
@@ -1646,7 +1646,7 @@ static void ubifs_remount_ro(struct ubifs_info *c)
 
 	for (i = 0; i < c->jhead_cnt; i++) {
 		ubifs_wbuf_sync(&c->jheads[i].wbuf);
-		del_timer_sync(&c->jheads[i].wbuf.timer);
+		hrtimer_cancel(&c->jheads[i].wbuf.timer);
 	}
 
 	c->mst_node->flags &= ~cpu_to_le32(UBIFS_MST_DIRTY);
@@ -1704,10 +1704,8 @@ static void ubifs_put_super(struct super_block *sb)
 
 		/* Synchronize write-buffers */
 		if (c->jheads)
-			for (i = 0; i < c->jhead_cnt; i++) {
+			for (i = 0; i < c->jhead_cnt; i++)
 				ubifs_wbuf_sync(&c->jheads[i].wbuf);
-				del_timer_sync(&c->jheads[i].wbuf.timer);
-			}
 
 		/*
 		 * On fatal errors c->ro_media is set to 1, in which case we do

@@ -38,9 +38,21 @@ static struct platform_device n800_onenand_device = {
 	},
 };
 
+static unsigned short omap2_onenand_readw(void __iomem *addr)
+{
+	return readw(addr);
+}
+
+static void omap2_onenand_writew(unsigned short value, void __iomem *addr)
+{
+	writew(value, addr);
+}
+
 static int omap2_onenand_set_async_mode(int cs, void __iomem *onenand_base)
 {
 	struct gpmc_timings t;
+	u32 reg;
+	int err;
 
 	const int t_cer = 15;
 	const int t_avdp = 12;
@@ -52,6 +64,11 @@ static int omap2_onenand_set_async_mode(int cs, void __iomem *onenand_base)
 	const int t_ds = 30;
 	const int t_wpl = 40;
 	const int t_wph = 30;
+
+	/* Ensure sync read and sync write are disabled */
+	reg = omap2_onenand_readw(onenand_base + ONENAND_REG_SYS_CFG1);
+	reg &= ~ONENAND_SYS_CFG1_SYNC_READ & ~ONENAND_SYS_CFG1_SYNC_WRITE;
+	omap2_onenand_writew(reg, onenand_base + ONENAND_REG_SYS_CFG1);
 
 	memset(&t, 0, sizeof(t));
 	t.sync_clk = 0;
@@ -84,17 +101,16 @@ static int omap2_onenand_set_async_mode(int cs, void __iomem *onenand_base)
 			  GPMC_CONFIG1_DEVICESIZE_16 |
 			  GPMC_CONFIG1_MUXADDDATA);
 
-	return gpmc_cs_set_timings(cs, &t);
-}
+	err = gpmc_cs_set_timings(cs, &t);
+	if (err)
+		return err;
 
-static unsigned short omap2_onenand_readw(void __iomem *addr)
-{
-	return readw(addr);
-}
+	/* Ensure sync read and sync write are disabled */
+	reg = omap2_onenand_readw(onenand_base + ONENAND_REG_SYS_CFG1);
+	reg &= ~ONENAND_SYS_CFG1_SYNC_READ & ~ONENAND_SYS_CFG1_SYNC_WRITE;
+	omap2_onenand_writew(reg, onenand_base + ONENAND_REG_SYS_CFG1);
 
-static void omap2_onenand_writew(unsigned short value, void __iomem *addr)
-{
-	writew(value, addr);
+	return 0;
 }
 
 static void set_onenand_cfg(void __iomem *onenand_base, int latency,

@@ -251,7 +251,7 @@ void __fsync_super(struct super_block *sb)
 	sync_inodes_sb(sb, 0);
 	DQUOT_SYNC(sb);
 	lock_super(sb);
-	if (sb->s_dirt && sb->s_op->write_super)
+	if (is_sb_dirty(sb) && sb->s_op->write_super)
 		sb->s_op->write_super(sb);
 	unlock_super(sb);
 	if (sb->s_op->sync_fs)
@@ -298,7 +298,7 @@ void generic_shutdown_super(struct super_block *sb)
 		invalidate_inodes(sb);
 		lock_kernel();
 
-		if (sop->write_super && sb->s_dirt)
+		if (sop->write_super && is_sb_dirty(sb))
 			sop->write_super(sb);
 		if (sop->put_super)
 			sop->put_super(sb);
@@ -388,7 +388,7 @@ EXPORT_SYMBOL(drop_super);
 static inline void write_super(struct super_block *sb)
 {
 	lock_super(sb);
-	if (sb->s_root && sb->s_dirt)
+	if (sb->s_root && is_sb_dirty(sb))
 		if (sb->s_op->write_super)
 			sb->s_op->write_super(sb);
 	unlock_super(sb);
@@ -406,7 +406,7 @@ void sync_supers(void)
 	spin_lock(&sb_lock);
 restart:
 	list_for_each_entry(sb, &super_blocks, s_list) {
-		if (sb->s_dirt) {
+		if (is_sb_dirty(sb)) {
 			sb->s_count++;
 			spin_unlock(&sb_lock);
 			down_read(&sb->s_umount);
@@ -461,7 +461,7 @@ restart:
 		sb->s_count++;
 		spin_unlock(&sb_lock);
 		down_read(&sb->s_umount);
-		if (sb->s_root && (wait || sb->s_dirt))
+		if (sb->s_root && (wait || is_sb_dirty(sb)))
 			sb->s_op->sync_fs(sb, wait);
 		up_read(&sb->s_umount);
 		/* restart only when sb is no longer on the list */

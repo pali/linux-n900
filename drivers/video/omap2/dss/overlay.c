@@ -92,8 +92,13 @@ static ssize_t overlay_manager_store(struct omap_overlay *ovl, const char *buf, 
 		}
 	}
 
-	if (ovl->manager && (r = ovl->manager->apply(ovl->manager)))
-		return r;
+	if (ovl->manager) {
+		omap_dss_lock();
+		r = ovl->manager->apply(ovl->manager);
+		omap_dss_unlock();
+		if (r)
+			return r;
+	}
 
 	return size;
 }
@@ -134,8 +139,13 @@ static ssize_t overlay_position_store(struct omap_overlay *ovl,
 	if ((r = ovl->set_overlay_info(ovl, &info)))
 		return r;
 
-	if (ovl->manager && (r = ovl->manager->apply(ovl->manager)))
-		return r;
+	if (ovl->manager) {
+		omap_dss_lock();
+		r = ovl->manager->apply(ovl->manager);
+		omap_dss_unlock();
+		if (r)
+			return r;
+	}
 
 	return size;
 }
@@ -165,8 +175,13 @@ static ssize_t overlay_output_size_store(struct omap_overlay *ovl,
 	if ((r = ovl->set_overlay_info(ovl, &info)))
 		return r;
 
-	if (ovl->manager && (r = ovl->manager->apply(ovl->manager)))
-		return r;
+	if (ovl->manager) {
+		omap_dss_lock();
+		r = ovl->manager->apply(ovl->manager);
+		omap_dss_unlock();
+		if (r)
+			return r;
+	}
 
 	return size;
 }
@@ -188,8 +203,50 @@ static ssize_t overlay_enabled_store(struct omap_overlay *ovl, const char *buf, 
 	if ((r = ovl->set_overlay_info(ovl, &info)))
 		return r;
 
-	if (ovl->manager && (r = ovl->manager->apply(ovl->manager)))
+	if (ovl->manager) {
+		omap_dss_lock();
+		r = ovl->manager->apply(ovl->manager);
+		omap_dss_unlock();
+
+		if (r)
+			return r;
+	}
+
+	return size;
+}
+
+static ssize_t overlay_global_alpha_show(struct omap_overlay *ovl, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n",
+			ovl->info.global_alpha);
+}
+
+static ssize_t overlay_global_alpha_store(struct omap_overlay *ovl,
+		const char *buf, size_t size)
+{
+	int r;
+	struct omap_overlay_info info;
+
+	ovl->get_overlay_info(ovl, &info);
+
+	/* Video1 plane does not support global alpha
+	 * to always make it 255 completely opaque
+	 */
+	if (ovl->id == OMAP_DSS_VIDEO1)
+		info.global_alpha = 255;
+	else
+		info.global_alpha = simple_strtoul(buf, NULL, 10);
+
+	if ((r = ovl->set_overlay_info(ovl, &info)))
 		return r;
+
+	if (ovl->manager) {
+		omap_dss_lock();
+		r = ovl->manager->apply(ovl->manager);
+		omap_dss_unlock();
+		if (r)
+			return r;
+	}
 
 	return size;
 }
@@ -215,6 +272,8 @@ static OVERLAY_ATTR(output_size, S_IRUGO|S_IWUSR,
 		overlay_output_size_show, overlay_output_size_store);
 static OVERLAY_ATTR(enabled, S_IRUGO|S_IWUSR,
 		overlay_enabled_show, overlay_enabled_store);
+static OVERLAY_ATTR(global_alpha, S_IRUGO|S_IWUSR,
+		overlay_global_alpha_show, overlay_global_alpha_store);
 
 static struct attribute *overlay_sysfs_attrs[] = {
 	&overlay_attr_name.attr,
@@ -224,6 +283,7 @@ static struct attribute *overlay_sysfs_attrs[] = {
 	&overlay_attr_position.attr,
 	&overlay_attr_output_size.attr,
 	&overlay_attr_enabled.attr,
+	&overlay_attr_global_alpha.attr,
 	NULL
 };
 
@@ -421,12 +481,12 @@ void dss_overlay_setup_dispc_manager(struct omap_overlay_manager *mgr)
 	mgr->overlays = dispc_overlays;
 }
 
-void dss_init_overlays(struct platform_device *pdev, const char *def_disp_name)
+void dss_init_overlays(struct platform_device *pdev)
 {
 	int i, r;
 	struct omap_overlay_manager *lcd_mgr;
 	struct omap_overlay_manager *tv_mgr;
-	struct omap_overlay_manager *def_mgr = NULL;
+	struct omap_dss_board_info *pdata = pdev->dev.platform_data;
 
 	INIT_LIST_HEAD(&overlay_list);
 
@@ -442,22 +502,43 @@ void dss_init_overlays(struct platform_device *pdev, const char *def_disp_name)
 		case 0:
 			ovl->name = "gfx";
 			ovl->id = OMAP_DSS_GFX;
-			ovl->supported_modes = OMAP_DSS_COLOR_GFX_OMAP3;
+			ovl->supported_modes = cpu_is_omap34xx() ?
+				OMAP_DSS_COLOR_GFX_OMAP3 :
+				OMAP_DSS_COLOR_GFX_OMAP2;
 			ovl->caps = OMAP_DSS_OVL_CAP_DISPC;
+			ovl->info.global_alpha = 255;
+			ovl->info.fifo_threshold_low =
+				pdata->fifo_thresholds[OMAP_DSS_GFX].low;
+			ovl->info.fifo_threshold_high =
+				pdata->fifo_thresholds[OMAP_DSS_GFX].high;
 			break;
 		case 1:
 			ovl->name = "vid1";
 			ovl->id = OMAP_DSS_VIDEO1;
-			ovl->supported_modes = OMAP_DSS_COLOR_VID_OMAP3;
+			ovl->supported_modes = cpu_is_omap34xx() ?
+				OMAP_DSS_COLOR_VID1_OMAP3 :
+				OMAP_DSS_COLOR_VID_OMAP2;
 			ovl->caps = OMAP_DSS_OVL_CAP_SCALE |
 				OMAP_DSS_OVL_CAP_DISPC;
+			ovl->info.global_alpha = 255;
+			ovl->info.fifo_threshold_low =
+				pdata->fifo_thresholds[OMAP_DSS_VIDEO1].low;
+			ovl->info.fifo_threshold_high =
+				pdata->fifo_thresholds[OMAP_DSS_VIDEO1].high;
 			break;
 		case 2:
 			ovl->name = "vid2";
 			ovl->id = OMAP_DSS_VIDEO2;
-			ovl->supported_modes = OMAP_DSS_COLOR_VID_OMAP3;
+			ovl->supported_modes = cpu_is_omap34xx() ?
+				OMAP_DSS_COLOR_VID2_OMAP3 :
+				OMAP_DSS_COLOR_VID_OMAP2;
 			ovl->caps = OMAP_DSS_OVL_CAP_SCALE |
 				OMAP_DSS_OVL_CAP_DISPC;
+			ovl->info.global_alpha = 255;
+			ovl->info.fifo_threshold_low =
+				pdata->fifo_thresholds[OMAP_DSS_VIDEO2].low;
+			ovl->info.fifo_threshold_high =
+				pdata->fifo_thresholds[OMAP_DSS_VIDEO2].high;
 			break;
 		}
 
@@ -481,67 +562,6 @@ void dss_init_overlays(struct platform_device *pdev, const char *def_disp_name)
 
 	lcd_mgr = omap_dss_get_overlay_manager(OMAP_DSS_OVL_MGR_LCD);
 	tv_mgr = omap_dss_get_overlay_manager(OMAP_DSS_OVL_MGR_TV);
-
-	if (def_disp_name) {
-		for (i = 0; i < omap_dss_get_num_displays() ; i++) {
-			struct omap_display *display = dss_get_display(i);
-
-			if (strcmp(display->name, def_disp_name) == 0) {
-				if (display->type != OMAP_DISPLAY_TYPE_VENC) {
-					lcd_mgr->set_display(lcd_mgr, display);
-					def_mgr = lcd_mgr;
-				} else {
-					lcd_mgr->set_display(tv_mgr, display);
-					def_mgr = tv_mgr;
-				}
-
-				break;
-			}
-		}
-
-		if (!def_mgr)
-			DSSWARN("default display %s not found\n",
-					def_disp_name);
-	}
-
-	if (def_mgr != lcd_mgr) {
-		/* connect lcd manager to first non-VENC display found */
-		for (i = 0; i < omap_dss_get_num_displays(); i++) {
-			struct omap_display *display = dss_get_display(i);
-			if (display->type != OMAP_DISPLAY_TYPE_VENC) {
-				lcd_mgr->set_display(lcd_mgr, display);
-
-				if (!def_mgr)
-					def_mgr = lcd_mgr;
-
-				break;
-			}
-		}
-	}
-
-	if (def_mgr != tv_mgr) {
-		/* connect tv manager to first VENC display found */
-		for (i = 0; i < omap_dss_get_num_displays(); i++) {
-			struct omap_display *display = dss_get_display(i);
-			if (display->type == OMAP_DISPLAY_TYPE_VENC) {
-				tv_mgr->set_display(tv_mgr, display);
-
-				if (!def_mgr)
-					def_mgr = tv_mgr;
-
-				break;
-			}
-		}
-	}
-
-	/* connect all dispc overlays to def_mgr */
-	if (def_mgr) {
-		for (i = 0; i < 3; i++) {
-			struct omap_overlay *ovl;
-			ovl = omap_dss_get_overlay(i);
-			omap_dss_set_manager(ovl, def_mgr);
-		}
-	}
 
 #ifdef L4_EXAMPLE
 	/* setup L4 overlay as an example */
@@ -572,6 +592,49 @@ void dss_init_overlays(struct platform_device *pdev, const char *def_disp_name)
 		omap_dss_set_manager(&ovl, &mgr);
 	}
 #endif
+}
+
+/* connect overlays to the new device, if not already connected. if force
+ * selected, connect always. */
+void dss_recheck_connections(struct omap_display *display, bool force)
+{
+	int i;
+	struct omap_overlay_manager *lcd_mgr;
+	struct omap_overlay_manager *tv_mgr;
+	struct omap_overlay_manager *mgr = NULL;
+
+	lcd_mgr = omap_dss_get_overlay_manager(OMAP_DSS_OVL_MGR_LCD);
+	tv_mgr = omap_dss_get_overlay_manager(OMAP_DSS_OVL_MGR_TV);
+
+	if (display->type != OMAP_DISPLAY_TYPE_VENC) {
+		if (!lcd_mgr->display || force) {
+			if (lcd_mgr->display)
+				lcd_mgr->unset_display(lcd_mgr);
+			lcd_mgr->set_display(lcd_mgr, display);
+			mgr = lcd_mgr;
+		}
+	}
+
+	if (display->type == OMAP_DISPLAY_TYPE_VENC) {
+		if (!tv_mgr->display || force) {
+			if (tv_mgr->display)
+				tv_mgr->unset_display(tv_mgr);
+			tv_mgr->set_display(tv_mgr, display);
+			mgr = tv_mgr;
+		}
+	}
+
+	if (mgr) {
+		for (i = 0; i < 3; i++) {
+			struct omap_overlay *ovl;
+			ovl = omap_dss_get_overlay(i);
+			if (!ovl->manager || force) {
+				if (ovl->manager)
+					omap_dss_unset_manager(ovl);
+				omap_dss_set_manager(ovl, mgr);
+			}
+		}
+	}
 }
 
 void dss_uninit_overlays(struct platform_device *pdev)

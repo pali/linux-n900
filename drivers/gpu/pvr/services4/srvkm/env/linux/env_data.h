@@ -29,6 +29,7 @@
 
 #include <linux/interrupt.h>
 #include <linux/pci.h>
+#include <linux/workqueue.h>
 
 #define PVRSRV_MAX_BRIDGE_IN_SIZE	0x1000
 #define PVRSRV_MAX_BRIDGE_OUT_SIZE	0x1000
@@ -48,7 +49,11 @@ typedef struct _ENV_DATA_TAG
 	IMG_BOOL		bMISRInstalled;
 	IMG_UINT32		ui32IRQ;
 	IMG_VOID		*pvISRCookie;
-	struct tasklet_struct	sMISRTasklet;
+	struct workqueue_struct	*psMISRWorkqueue;
+	struct work_struct	sMISRWork;
+	struct workqueue_struct *psPerfWorkqueue;
+	struct delayed_work	sPerfWork;
+	IMG_VOID		*pvSysData; /*for MISR work*/
 } ENV_DATA;
 
 #endif 

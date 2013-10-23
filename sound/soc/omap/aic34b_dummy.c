@@ -37,6 +37,13 @@
 #include "../codecs/tlv320aic3x.h"
 
 struct i2c_client *aic34b_client;
+static DEFINE_MUTEX(aic34b_mutex);
+static DEFINE_MUTEX(button_press_mutex);
+static ktime_t button_press_denial_start;
+static int aic34b_volume;
+static int button_press_denied;
+static int aic34b_bias;
+
 
 static int aic34b_read(struct i2c_client *client, unsigned int reg,
 		       u8 *value)
@@ -59,12 +66,71 @@ static int aic34b_write(struct i2c_client *client, unsigned int reg,
 	return (i2c_master_send(client, data, 2) == 2) ? 0 : -EIO;
 }
 
+/*
+ * Introduce a derivative FIR filter to detect unnecessary button
+ * presses caused by a change in the MICBIAS. The filter returns
+ * TRUE in the event there has not been a change in MICBIAS within
+ * the time window (500ms). If the rate of change within the window
+ * is >= 1, all button presses are denied. In addition, if bias is
+ * zero, then all button presses are also denied explicitly.
+ */
+int allow_button_press(void)
+{
+	/* If bias is not on, no chance for button presses */
+	if (!aic34b_bias)
+		return 0;
+
+	/* If explicitly granted a button press */
+	if (!button_press_denied) {
+		return 1;
+	} else	{
+		int64_t delta;
+		/* This is the FIR portion with specified time window */
+		mutex_lock(&button_press_mutex);
+		delta = ktime_to_ns(ktime_sub(ktime_get(),
+					button_press_denial_start));
+
+		if (delta < 0) {
+			button_press_denied = 0;
+			/* If the clock ever wraps */
+			button_press_denial_start.tv.sec = 0;
+			button_press_denial_start.tv.nsec = 0;
+			mutex_unlock(&button_press_mutex);
+			return 1;
+		}
+		do_div(delta, 1000000);
+		/* Time window is 500ms */
+		if (delta >= 500) {
+			button_press_denied = 0;
+			mutex_unlock(&button_press_mutex);
+			return 1;
+		}
+		mutex_unlock(&button_press_mutex);
+	}
+
+	/* There was a change in MICBIAS within time window */
+	return 0;
+}
+EXPORT_SYMBOL(allow_button_press);
+
+static void deny_button_press(void)
+{
+	mutex_lock(&button_press_mutex);
+	button_press_denied = 1;
+	button_press_denial_start = ktime_get();
+	mutex_unlock(&button_press_mutex);
+}
+
 void aic34b_set_mic_bias(int bias)
 {
 	if (aic34b_client == NULL)
 		return;
 
+	mutex_lock(&aic34b_mutex);
 	aic34b_write(aic34b_client, MICBIAS_CTRL, (bias & 0x3) << 6);
+	aic34b_bias = bias;
+	deny_button_press();
+	mutex_unlock(&aic34b_mutex);
 }
 EXPORT_SYMBOL(aic34b_set_mic_bias);
 
@@ -75,6 +141,8 @@ int aic34b_set_volume(u8 volume)
 	if (aic34b_client == NULL)
 		return 0;
 
+	mutex_lock(&aic34b_mutex);
+
 	/* Volume control for Right PGA to HPLOUT */
 	aic34b_read(aic34b_client, 49, &val);
 	val &= ~0x7f;
@@ -84,6 +152,9 @@ int aic34b_set_volume(u8 volume)
 	aic34b_read(aic34b_client, 56, &val);
 	val &= ~0x7f;
 	aic34b_write(aic34b_client, 56, val | (~volume & 0x7f));
+
+	aic34b_volume = volume;
+	mutex_unlock(&aic34b_mutex);
 
 	return 0;
 }
@@ -96,6 +167,7 @@ void aic34b_ear_enable(int enable)
 	if (aic34b_client == NULL)
 		return;
 
+	mutex_lock(&aic34b_mutex);
 	if (enable) {
 		/* Connect LINE2R to RADC */
 		aic34b_write(aic34b_client, LINE2R_2_RADC_CTRL, 0x80);
@@ -117,16 +189,26 @@ void aic34b_ear_enable(int enable)
 		/* Mute Right ADC-PGA */
 		aic34b_write(aic34b_client, RADC_VOL, 0x80);
 		/* Detach Right PGA from HPLOUT */
-		aic34b_read(aic34b_client, 49, &val);
-		aic34b_write(aic34b_client, 49, val & ~0x80);
+		aic34b_write(aic34b_client, 49, (~aic34b_volume & 0x7f));
 		/* Power down HPLOUT */
 		aic34b_write(aic34b_client, HPLOUT_CTRL, 0x06);
 		/* Detach Right PGA from HPLCOM */
-		aic34b_read(aic34b_client, 56, &val);
-		aic34b_write(aic34b_client, 56, val & ~0x80);
+		aic34b_write(aic34b_client, 56, (~aic34b_volume & 0x7f));
 		/* Power down HPLCOM */
 		aic34b_write(aic34b_client, HPLCOM_CTRL, 0x06);
+		/* Deny any possible keypresses for a second */
+		deny_button_press();
+		/* To regain low power consumption, reset is needed */
+		aic34b_write(aic34b_client, AIC3X_RESET, SOFT_RESET);
+		/* And need to restore volume level */
+		aic34b_write(aic34b_client, 49, (~aic34b_volume & 0x7f));
+		aic34b_write(aic34b_client, 56, (~aic34b_volume & 0x7f));
+		/* Need to restore MICBIAS if set */
+		if (aic34b_bias)
+			aic34b_write(aic34b_client, MICBIAS_CTRL,
+					(aic34b_bias & 0x3) << 6);
 	}
+	mutex_unlock(&aic34b_mutex);
 }
 EXPORT_SYMBOL(aic34b_ear_enable);
 

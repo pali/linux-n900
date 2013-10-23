@@ -28,6 +28,8 @@
 
 #define MAILBOX_FIFOSTATUS(m) (0x80 + 4 * (m))
 
+extern unsigned short min_active_opp;
+
 static inline unsigned int fifo_full(void __iomem *mbox_base, int mbox_id)
 {
 	return __raw_readl(mbox_base + MAILBOX_FIFOSTATUS(mbox_id)) & 0x1;
@@ -98,72 +100,72 @@ DSP_STATUS CHNLSM_DisableInterrupt(struct WMD_DEV_CONTEXT *pDevContext)
 DSP_STATUS CHNLSM_InterruptDSP2(struct WMD_DEV_CONTEXT *pDevContext,
 				u16 wMbVal)
 {
-#ifdef CONFIG_BRIDGE_DVFS
-	struct dspbridge_platform_data *pdata =
-		omap_dspbridge_dev->dev.platform_data;
-	u32 opplevel = 0;
-#endif
 	struct CFG_HOSTRES resources;
 	DSP_STATUS status = DSP_SOK;
 	unsigned long timeout;
 	u32 temp;
 
-	status = CFG_GetHostResources((struct CFG_DEVNODE *)DRV_GetFirstDevExtension(),
-				      &resources);
+	status = CFG_GetHostResources((struct CFG_DEVNODE *)
+			DRV_GetFirstDevExtension(), &resources);
 	if (DSP_FAILED(status))
 		return DSP_EFAIL;
+
+	if (pDevContext->dwBrdState == BRD_DSP_HIBERNATION ||
+	    pDevContext->dwBrdState == BRD_HIBERNATION) {
 #ifdef CONFIG_BRIDGE_DVFS
-	if (pDevContext->dwBrdState == BRD_DSP_HIBERNATION ||
-	    pDevContext->dwBrdState == BRD_HIBERNATION) {
-		if (pdata->dsp_get_opp)
-			opplevel = (*pdata->dsp_get_opp)();
-		if (opplevel == 1) {
-			if (pdata->dsp_set_min_opp)
-				(*pdata->dsp_set_min_opp)(opplevel+1);
-		}
-	}
+		struct dspbridge_platform_data *pdata =
+			omap_dspbridge_dev->dev.platform_data;
+		/*
+		 * When Smartreflex is ON, DSP requires at least OPP level 3
+		 * to operate reliably. So boost lower OPP levels to OPP3.
+		 */
+		if (pdata->dsp_set_min_opp)
+			(*pdata->dsp_set_min_opp)(min_active_opp);
 #endif
+		/* Restart the peripheral clocks */
+		DSP_PeripheralClocks_Enable(pDevContext, NULL);
 
-	if (pDevContext->dwBrdState == BRD_DSP_HIBERNATION ||
-	    pDevContext->dwBrdState == BRD_HIBERNATION) {
+		/*
+		 * 2:0 AUTO_IVA2_DPLL - Enabling IVA2 DPLL auto control
+		 *     in CM_AUTOIDLE_PLL_IVA2 register
+		 */
+		*(REG_UWORD32 *)(resources.dwCmBase + 0x34) = 0x1;
+
+		/*
+		 * 7:4 IVA2_DPLL_FREQSEL - IVA2 internal frq set to
+		 *     0.75 MHz - 1.0 MHz
+		 * 2:0 EN_IVA2_DPLL - Enable IVA2 DPLL in lock mode
+		 */
+		temp = *(REG_UWORD32 *)(resources.dwCmBase + 0x4);
+		temp = (temp & 0xFFFFFF08) | 0x37;
+		*(REG_UWORD32 *)(resources.dwCmBase + 0x4) = temp;
+
+		/*
+		 * This delay is needed to avoid mailbox timed out
+		 * issue experienced while SmartReflex is ON.
+		 * TODO: Instead of 1 ms calculate proper value.
+		 */
+		mdelay(1);
+
 		/* Restore mailbox settings */
-		/* Restart the peripheral clocks that were disabled only
-		 * in DSP initiated Hibernation case.*/
-		if (pDevContext->dwBrdState == BRD_DSP_HIBERNATION) {
-			DSP_PeripheralClocks_Enable(pDevContext, NULL);
-			/* Enabling Dpll in lock mode*/
-			temp = (u32) *((REG_UWORD32 *)
-				       ((u32) (resources.dwCmBase) + 0x34));
-			temp = (temp & 0xFFFFFFFE) | 0x1;
-			*((REG_UWORD32 *) ((u32) (resources.dwCmBase) + 0x34)) =
-				(u32) temp;
-			temp = (u32) *((REG_UWORD32 *)
-				       ((u32) (resources.dwCmBase) + 0x4));
-			temp = (temp & 0xFFFFFC8) | 0x37;
-
-			*((REG_UWORD32 *) ((u32) (resources.dwCmBase) + 0x4)) =
-				(u32) temp;
-		}
 		HW_MBOX_restoreSettings(resources.dwMboxBase);
 
-		/*  Access MMU SYS CONFIG register to generate a short wakeup */
-		temp = (u32) *((REG_UWORD32 *) ((u32)
-						(resources.dwDmmuBase) + 0x10));
+		/* Access MMU SYS CONFIG register to generate a short wakeup */
+		temp = *(REG_UWORD32 *)(resources.dwDmmuBase + 0x10);
 
 		pDevContext->dwBrdState = BRD_RUNNING;
 	}
+
 	timeout = jiffies + msecs_to_jiffies(1);
 	while (fifo_full((void __iomem *) resources.dwMboxBase, 0)) {
 		if (time_after(jiffies, timeout)) {
-			printk(KERN_ERR "dspbridge: timed out waiting for mailbox\n");
+			pr_err("dspbridge: timed out waiting for mailbox\n");
 			return WMD_E_TIMEOUT;
 		}
 	}
-	DBG_Trace(DBG_LEVEL3, "writing %x to Mailbox\n",
-		  wMbVal);
 
-	HW_MBOX_MsgWrite(resources.dwMboxBase, MBOX_ARM2DSP,
-			 wMbVal);
+	DBG_Trace(DBG_LEVEL3, "writing %x to Mailbox\n", wMbVal);
+	HW_MBOX_MsgWrite(resources.dwMboxBase, MBOX_ARM2DSP, wMbVal);
 	return DSP_SOK;
 }
 

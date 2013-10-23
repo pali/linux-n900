@@ -196,6 +196,67 @@ static int restore_iwmmxt_context(struct iwmmxt_sigframe *frame)
 
 #endif
 
+#ifdef CONFIG_VFP
+
+static int preserve_vfp_context(struct vfp_sigframe __user *frame)
+{
+	struct thread_info *thread = current_thread_info();
+	struct vfp_hard_struct *h = &thread->vfpstate.hard;
+	const unsigned long magic = VFP_MAGIC;
+	const unsigned long size = VFP_STORAGE_SIZE;
+	int err = 0;
+
+	vfp_sync_state(thread);
+	__put_user_error(magic, &frame->magic, err);
+	__put_user_error(size, &frame->size, err);
+
+	/*
+	 * Copy the floating point registers. There can be unused
+	 * registers see asm/hwcap.h for details.
+	 */
+	err |= __copy_to_user(&frame->ufp.fpregs, &h->fpregs,
+			      sizeof(h->fpregs));
+	/*
+	 * Copy the status and control register.
+	 */
+	__put_user_error(h->fpscr, &frame->ufp.fpscr, err);
+
+	return err ? -EFAULT : 0;
+}
+
+static int restore_vfp_context(struct vfp_sigframe __user *frame)
+{
+	struct thread_info *thread = current_thread_info();
+	struct vfp_hard_struct *h = &thread->vfpstate.hard;
+	unsigned long magic;
+	unsigned long size;
+	int err = 0;
+
+	vfp_sync_state(thread);
+	__get_user_error(magic, &frame->magic, err);
+	__get_user_error(size, &frame->size, err);
+
+	if (err)
+		return -EFAULT;
+	if (magic != VFP_MAGIC || size != VFP_STORAGE_SIZE)
+		return -EINVAL;
+
+	/*
+	 * Copy the floating point registers. There can be unused
+	 * registers see asm/hwcap.h for details.
+	 */
+	err |= __copy_from_user(&h->fpregs, &frame->ufp.fpregs,
+				sizeof(h->fpregs));
+	/*
+	 * Copy the status and control register.
+	 */
+	__get_user_error(h->fpscr, &frame->ufp.fpscr, err);
+
+	return err ? -EFAULT : 0;
+}
+
+#endif
+
 /*
  * Do a signal return; undo the signal stack.  These are aligned to 64-bit.
  */
@@ -254,8 +315,8 @@ static int restore_sigframe(struct pt_regs *regs, struct sigframe __user *sf)
 		err |= restore_iwmmxt_context(&aux->iwmmxt);
 #endif
 #ifdef CONFIG_VFP
-//	if (err == 0)
-//		err |= vfp_restore_state(&sf->aux.vfp);
+	if (err == 0)
+		err |= restore_vfp_context(&aux->vfp);
 #endif
 
 	return err;
@@ -369,8 +430,8 @@ setup_sigframe(struct sigframe __user *sf, struct pt_regs *regs, sigset_t *set)
 		err |= preserve_iwmmxt_context(&aux->iwmmxt);
 #endif
 #ifdef CONFIG_VFP
-//	if (err == 0)
-//		err |= vfp_save_state(&sf->aux.vfp);
+	if (err == 0)
+		err |= preserve_vfp_context(&aux->vfp);
 #endif
 	__put_user_error(0, &aux->end_magic, err);
 

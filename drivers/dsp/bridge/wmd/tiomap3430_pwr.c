@@ -57,6 +57,9 @@
 
 #include <dspbridge/pwr_sh.h>
 
+/*  ----------------------------------- Mini Driver */
+#include <dspbridge/wmddeh.h>
+
 /*  ----------------------------------- specific to this file */
 #include "_tiomap.h"
 #include "_tiomap_pwr.h"
@@ -69,6 +72,7 @@
 #endif
 extern struct MAILBOX_CONTEXT mboxsetting;
 extern unsigned short enable_off_mode;
+extern unsigned short min_active_opp;
 /*
  *  ======== handle_constraints_set ========
  *  	Sets new DSP constraint
@@ -77,24 +81,33 @@ DSP_STATUS handle_constraints_set(struct WMD_DEV_CONTEXT *pDevContext,
 				  IN void *pArgs)
 {
 #ifdef CONFIG_BRIDGE_DVFS
-	u32 *pConstraintVal;
-       DSP_STATUS status = DSP_SOK;
-       struct CFG_HOSTRES resources;
-       struct dspbridge_platform_data *pdata =
-	       omap_dspbridge_dev->dev.platform_data;
-       status = CFG_GetHostResources(
-                (struct CFG_DEVNODE *)DRV_GetFirstDevExtension(), &resources);
+	u32 pConstraintVal;
+	DSP_STATUS status = DSP_SOK;
+	struct CFG_HOSTRES resources;
+	struct dspbridge_platform_data *pdata =
+		omap_dspbridge_dev->dev.platform_data;
+	status = CFG_GetHostResources(
+		(struct CFG_DEVNODE *)DRV_GetFirstDevExtension(), &resources);
 
-	pConstraintVal = (u32 *)(pArgs);
+	pConstraintVal = *(((u32 *)pArgs) + 1);
 	/* Read the target value requested by DSP  */
-       DBG_Trace(DBG_LEVEL7, "handle_constraints_set:"
-               "opp requested = 0x%x\n", (u32)*(pConstraintVal+1));
-       status = HW_MBOX_saveSettings(resources.dwMboxBase);
+	DBG_Trace(DBG_LEVEL7, "handle_constraints_set:"
+		"opp requested = 0x%x\n", pConstraintVal);
+	status = HW_MBOX_saveSettings(resources.dwMboxBase);
 
 	/* Set the new opp value */
-	if (pdata->dsp_set_min_opp)
-                       (*pdata->dsp_set_min_opp)((u32)*(pConstraintVal+1));
-	return DSP_SOK;
+	if (pdata->dsp_set_min_opp) {
+		/*
+		 * When Smartreflex is ON, DSP requires at least OPP level 3
+		 * to operate reliably. So boost lower OPP levels to OPP3.
+		 */
+		if (pConstraintVal < min_active_opp) {
+			pr_debug("DSPBRIDGE: VDD1 OPP%x elevated to OPP%x\n",
+					pConstraintVal, min_active_opp);
+			(*pdata->dsp_set_min_opp)(min_active_opp);
+		} else
+			(*pdata->dsp_set_min_opp)(pConstraintVal);
+	}
 #endif /* #ifdef CONFIG_BRIDGE_DVFS */
 	return DSP_SOK;
 }
@@ -156,17 +169,19 @@ DSP_STATUS handle_hibernation_fromDSP(struct WMD_DEV_CONTEXT *pDevContext)
 			if (DSP_FAILED(status))
 				return status;
 			IO_SHMsetting(hIOMgr, SHM_GETOPP, &opplevel);
-			/* Set the OPP to low level before moving to OFF mode */
 			if (opplevel != VDD1_OPP1) {
 				DBG_Trace(DBG_LEVEL5,
-					"Tiomap_pwr.c - DSP requested"
-					" OPP = %d, MPU requesting low"
-					" OPP %d instead\n", opplevel,
-					VDD1_OPP1);
-				if (pdata->dsp_set_min_opp)
-					(*pdata->dsp_set_min_opp)(VDD1_OPP1);
-				status = DSP_SOK;
+					" DSP requested OPP = %d, MPU"
+					" requesting low OPP %d instead\n",
+					opplevel, VDD1_OPP1);
 			}
+			/*
+			 * Set the OPP to low level before moving to OFF
+			 * mode
+			 */
+			if (pdata->dsp_set_min_opp)
+				(*pdata->dsp_set_min_opp)(VDD1_OPP1);
+			status = DSP_SOK;
 #endif /* CONFIG_BRIDGE_DVFS */
 		} else {
 			DBG_Trace(DBG_LEVEL7,
@@ -187,21 +202,23 @@ DSP_STATUS SleepDSP(struct WMD_DEV_CONTEXT *pDevContext, IN u32 dwCmd,
 	DSP_STATUS status = DSP_SOK;
 #ifdef CONFIG_PM
 	struct CFG_HOSTRES resources;
+	struct DEH_MGR *hDehMgr;
 	u16 usCount = TIHELEN_ACKTIMEOUT;
-	enum HW_PwrState_t pwrState;
-	enum HW_PwrState_t targetPwrState;
+	enum HW_PwrState_t pwrState, targetPwrState;
+
+	DBG_Trace(DBG_LEVEL7, "SleepDSP- Enter function \n");
+
+	/* Check if sleep code is valid */
+	if ((dwCmd != PWR_DEEPSLEEP) && (dwCmd != PWR_EMERGENCYDEEPSLEEP)) {
+		DBG_Trace(DBG_LEVEL7, "SleepDSP- Illegal sleep command\n");
+		return DSP_EINVALIDARG;
+	}
 
 	status = CFG_GetHostResources(
 		 (struct CFG_DEVNODE *)DRV_GetFirstDevExtension(), &resources);
 	if (DSP_FAILED(status))
 		return status;
-	DBG_Trace(DBG_LEVEL7, "SleepDSP- Enter function \n");
 
-		/* next, check if sleep code is valid... */
-	if ((dwCmd != PWR_DEEPSLEEP) && (dwCmd != PWR_EMERGENCYDEEPSLEEP)) {
-		DBG_Trace(DBG_LEVEL7, "SleepDSP- Illegal sleep command\n");
-		return DSP_EINVALIDARG;
-	}
 	switch (pDevContext->dwBrdState) {
 	case BRD_RUNNING:
 		status = HW_MBOX_saveSettings(resources.dwMboxBase);
@@ -229,7 +246,6 @@ DSP_STATUS SleepDSP(struct WMD_DEV_CONTEXT *pDevContext, IN u32 dwCmd,
 		break;
 	case BRD_HIBERNATION:
 	case BRD_DSP_HIBERNATION:
-               status = HW_MBOX_saveSettings(resources.dwMboxBase);
 		/* Already in Hibernation, so just return */
 		DBG_Trace(DBG_LEVEL7, "SleepDSP- DSP already in "
 			 "hibernation\n");
@@ -243,34 +259,56 @@ DSP_STATUS SleepDSP(struct WMD_DEV_CONTEXT *pDevContext, IN u32 dwCmd,
 			 "SleepDSP- Bridge in Illegal state\n");
 			return DSP_EFAIL;
 	}
+
 	/* Get the PRCM DSP power domain status */
 	HW_PWR_IVA2StateGet(resources.dwPrmBase, HW_PWR_DOMAIN_DSP,
-			    &pwrState);
-	/* Wait for DSP to move into Standby state,  how much time
-	 * should we wait?*/
+			&pwrState);
+
+	/*
+	 * Wait for DSP to move into Standby state,  how much time
+	 * should we wait?
+	 */
 	while ((pwrState != targetPwrState) && --usCount) {
 		udelay(500);
 		HW_PWR_IVA2StateGet(resources.dwPrmBase, HW_PWR_DOMAIN_DSP,
 				    &pwrState);
 	}
-	if (usCount == 0) {
+
+	if (!usCount) {
 		DBG_Trace(DBG_LEVEL7, "SleepDSP: Timed out Waiting for DSP"
 			 " STANDBY %x \n", pwrState);
+		DEV_GetDehMgr(pDevContext->hDevObject, &hDehMgr);
+		WMD_DEH_Notify(hDehMgr, DSP_PWRERROR, 0);
 		return WMD_E_TIMEOUT;
 	} else {
 		DBG_Trace(DBG_LEVEL7, "SleepDSP: DSP STANDBY Pwr state %x \n",
 			 pwrState);
+
 		/* Update the Bridger Driver state */
 		if (enable_off_mode)
 			pDevContext->dwBrdState = BRD_HIBERNATION;
 		else
 			pDevContext->dwBrdState = BRD_RETENTION;
+
 		/* Turn off DSP Peripheral clocks  */
 		status = DSP_PeripheralClocks_Disable(pDevContext, NULL);
-		if (DSP_FAILED(status))
+		if (DSP_FAILED(status)) {
 			DBG_Trace(DBG_LEVEL7, "SleepDSP- FAILED\n");
+			return status;
+		}
+#ifdef CONFIG_BRIDGE_DVFS
+		else if (targetPwrState == HW_PWR_STATE_OFF) {
+			struct dspbridge_platform_data *pdata =
+				omap_dspbridge_dev->dev.platform_data;
+			/*
+			 * Set the OPP to low level before moving to OFF mode
+			 */
+			if (pdata->dsp_set_min_opp)
+				(*pdata->dsp_set_min_opp)(VDD1_OPP1);
+		}
+#endif /* CONFIG_BRIDGE_DVFS */
 	}
-#endif
+#endif /* CONFIG_PM */
 	return status;
 }
 
@@ -281,59 +319,40 @@ DSP_STATUS SleepDSP(struct WMD_DEV_CONTEXT *pDevContext, IN u32 dwCmd,
  */
 DSP_STATUS WakeDSP(struct WMD_DEV_CONTEXT *pDevContext, IN void *pArgs)
 {
-	DSP_STATUS status = DSP_SOK;
 #ifdef CONFIG_PM
-	struct CFG_HOSTRES resources;
+	DSP_STATUS status = DSP_SOK;
+#ifdef CONFIG_BRIDGE_DEBUG
 	enum HW_PwrState_t pwrState;
-       u32 temp;
+	struct CFG_HOSTRES resources;
 
 	status = CFG_GetHostResources(
 		 (struct CFG_DEVNODE *)DRV_GetFirstDevExtension(), &resources);
 	if (DSP_FAILED(status))
 		return status;
-	/* check the BRD/WMD state, if it is not 'SLEEP' then return failure */
+#endif /* CONFIG_BRIDGE_DEBUG */
+
+	/* Check the BRD/WMD state, if it is not 'SLEEP' then return failure */
 	if (pDevContext->dwBrdState == BRD_RUNNING ||
-		pDevContext->dwBrdState == BRD_STOPPED ||
-		pDevContext->dwBrdState == BRD_DSP_HIBERNATION) {
+	    pDevContext->dwBrdState == BRD_STOPPED) {
 		/* The Device is in 'RET' or 'OFF' state and WMD state is not
 		 * 'SLEEP', this means state inconsistency, so return  */
-		status = DSP_SOK;
-		return status;
+		return DSP_SOK;
 	}
-	/* Enable the DSP peripheral clocks and load monitor timer
-	 * before waking the DSP */
-	DBG_Trace(DBG_LEVEL6, "WakeDSP: enable DSP Peripheral Clks = 0x%x \n",
-		 pDevContext->uDspPerClks);
-	status = DSP_PeripheralClocks_Enable(pDevContext, NULL);
 
-       /* Enablifg Dppll in lock mode*/
-               temp = (u32) *((REG_UWORD32 *)
-                       ((u32) (resources.dwCmBase) + 0x34));
-               temp = (temp & 0xFFFFFFFE) | 0x1;
-               *((REG_UWORD32 *) ((u32) (resources.dwCmBase) + 0x34)) =
-                                               (u32) temp;
-               temp = (u32) *((REG_UWORD32 *)
-                       ((u32) (resources.dwCmBase) + 0x4));
-               temp = (temp & 0xFFFFFC8) | 0x37;
+	/* Send a wakeup message to DSP */
+	CHNLSM_InterruptDSP2(pDevContext, MBX_PM_DSPWAKEUP);
 
-               *((REG_UWORD32 *) ((u32) (resources.dwCmBase) + 0x4)) =
-               (u32) temp;
+#ifdef CONFIG_BRIDGE_DEBUG
+	HW_PWR_IVA2StateGet(resources.dwPrmBase, HW_PWR_DOMAIN_DSP,
+			&pwrState);
+	DBG_Trace(DBG_LEVEL7,
+			"\nWakeDSP: Power State After sending Interrupt "
+			"to DSP %x\n", pwrState);
+#endif /* CONFIG_BRIDGE_DEBUG */
 
-	udelay(10);
-	if (DSP_SUCCEEDED(status)) {
-		/* Send a message to DSP to wake up */
-		CHNLSM_InterruptDSP2(pDevContext, MBX_PM_DSPWAKEUP);
-		HW_PWR_IVA2StateGet(resources.dwPrmBase, HW_PWR_DOMAIN_DSP,
-				    &pwrState);
-		DBG_Trace(DBG_LEVEL7,
-			 "\nWakeDSP: Power State After sending Interrupt "
-			 "to DSP %x\n", pwrState);
-		/* set the device state to RUNNIG */
-		pDevContext->dwBrdState = BRD_RUNNING;
-	} else {
-		DBG_Trace(DBG_LEVEL6, "WakeDSP: FAILED\n");
-	}
-#endif
+	/* Set the device state to RUNNIG */
+	pDevContext->dwBrdState = BRD_RUNNING;
+#endif /* CONFIG_PM */
 	return status;
 }
 
@@ -390,7 +409,7 @@ DSP_STATUS DSPPeripheralClkCtrl(struct WMD_DEV_CONTEXT *pDevContext,
 			 "DSPPeripheralClkCtrl : Disable CLK for \n");
 		status1 = CLK_Disable(BPWR_Clks[clkIdIndex].intClk);
 		status = CLK_Disable(BPWR_Clks[clkIdIndex].funClk);
-               DSPClkWakeupEventCtrl(BPWR_Clks[clkIdIndex].clkId, false);
+		DSPClkWakeupEventCtrl(BPWR_Clks[clkIdIndex].clkId, false);
 		if ((DSP_SUCCEEDED(status)) && (DSP_SUCCEEDED(status1))) {
 			(pDevContext->uDspPerClks) &=
 				(~((u32) (1 << clkIdIndex)));
@@ -404,7 +423,7 @@ DSP_STATUS DSPPeripheralClkCtrl(struct WMD_DEV_CONTEXT *pDevContext,
 			 "DSPPeripheralClkCtrl : Enable CLK for \n");
 		status1 = CLK_Enable(BPWR_Clks[clkIdIndex].intClk);
 		status = CLK_Enable(BPWR_Clks[clkIdIndex].funClk);
-               DSPClkWakeupEventCtrl(BPWR_Clks[clkIdIndex].clkId, true);
+		DSPClkWakeupEventCtrl(BPWR_Clks[clkIdIndex].clkId, true);
 		if ((DSP_SUCCEEDED(status)) && (DSP_SUCCEEDED(status1))) {
 			(pDevContext->uDspPerClks) |= (1 << clkIdIndex);
 		} else {
@@ -438,13 +457,13 @@ DSP_STATUS PreScale_DSP(struct WMD_DEV_CONTEXT *pDevContext, IN void *pArgs)
 
 	DBG_Trace(DBG_LEVEL7, "PreScale_DSP: voltage_domain = %x, level = "
 		 "0x%x\n", voltage_domain, level);
-       if ((pDevContext->dwBrdState == BRD_HIBERNATION) ||
-               (pDevContext->dwBrdState == BRD_RETENTION) ||
-               (pDevContext->dwBrdState == BRD_DSP_HIBERNATION)) {
+	if ((pDevContext->dwBrdState == BRD_HIBERNATION) ||
+			(pDevContext->dwBrdState == BRD_RETENTION) ||
+			(pDevContext->dwBrdState == BRD_DSP_HIBERNATION)) {
 		DBG_Trace(DBG_LEVEL7, "PreScale_DSP: IVA in sleep. "
 			 "No notification to DSP\n");
 		return DSP_SOK;
-       } else if ((pDevContext->dwBrdState == BRD_RUNNING)) {
+	} else if ((pDevContext->dwBrdState == BRD_RUNNING)) {
 		/* Send a prenotificatio to DSP */
 		DBG_Trace(DBG_LEVEL7,
 			 "PreScale_DSP: Sent notification to DSP\n");
@@ -477,11 +496,11 @@ DSP_STATUS PostScale_DSP(struct WMD_DEV_CONTEXT *pDevContext, IN void *pArgs)
 	voltage_domain = *((u32 *)pArgs);
 	level = *((u32 *)pArgs + 1);
 	DBG_Trace(DBG_LEVEL7,
-               "PostScale_DSP: voltage_domain = %x, level = 0x%x\n",
-               voltage_domain, level);
-       if ((pDevContext->dwBrdState == BRD_HIBERNATION) ||
-                       (pDevContext->dwBrdState == BRD_RETENTION) ||
-                       (pDevContext->dwBrdState == BRD_DSP_HIBERNATION)) {
+		"PostScale_DSP: voltage_domain = %x, level = 0x%x\n",
+		voltage_domain, level);
+	if ((pDevContext->dwBrdState == BRD_HIBERNATION) ||
+			(pDevContext->dwBrdState == BRD_RETENTION) ||
+			(pDevContext->dwBrdState == BRD_DSP_HIBERNATION)) {
 		/* Update the OPP value in shared memory */
 		IO_SHMsetting(hIOMgr, SHM_CURROPP, &level);
 		DBG_Trace(DBG_LEVEL7,
@@ -494,12 +513,12 @@ DSP_STATUS PostScale_DSP(struct WMD_DEV_CONTEXT *pDevContext, IN void *pArgs)
 		/* Send a post notification to DSP */
 		CHNLSM_InterruptDSP2(pDevContext, MBX_PM_SETPOINT_POSTNOTIFY);
 		DBG_Trace(DBG_LEVEL7,
-                       "PostScale_DSP: Wrote to shared memory Sent post"
-                       " notification to DSP\n");
+			"PostScale_DSP: Wrote to shared memory Sent post"
+			" notification to DSP\n");
 		return DSP_SOK;
 	} else {
 		DBG_Trace(DBG_LEVEL7, "PostScale_DSP: Failed - DSP BRD state "
-                       "in wrong state");
+			"in wrong state");
 		return DSP_EFAIL;
 	}
 #endif /* #ifdef CONFIG_BRIDGE_DVFS */
@@ -546,194 +565,186 @@ DSP_STATUS DSP_PeripheralClocks_Enable(struct WMD_DEV_CONTEXT *pDevContext,
 				      IN void *pArgs)
 {
 	u32 clkIdx;
-	DSP_STATUS status = DSP_SOK;
+	DSP_STATUS int_clk_status = DSP_EFAIL, fun_clk_status = DSP_EFAIL;
 
 	for (clkIdx = 0; clkIdx < MBX_PM_MAX_RESOURCES; clkIdx++) {
 		if (((pDevContext->uDspPerClks) >> clkIdx) & 0x01) {
 			/* Enable the interface clock of the peripheral */
-			status = CLK_Enable(BPWR_Clks[clkIdx].intClk);
-			if (DSP_FAILED(status)) {
-				DBG_Trace(DBG_LEVEL7,
-					 "Failed to Enable the DSP Peripheral"
-					 "Clk 0x%x \n", BPWR_Clks[clkIdx]);
-			}
+			int_clk_status = CLK_Enable(BPWR_Clks[clkIdx].intClk);
 			/* Enable the functional clock of the periphearl */
-			status = CLK_Enable(BPWR_Clks[clkIdx].funClk);
-			if (DSP_FAILED(status)) {
-				DBG_Trace(DBG_LEVEL7,
-					 "Failed to Enable the DSP Peripheral"
-					 "Clk 0x%x \n", BPWR_Clks[clkIdx]);
-			}
+			fun_clk_status = CLK_Enable(BPWR_Clks[clkIdx].funClk);
 		}
 	}
-	return status;
+	if ((int_clk_status | fun_clk_status) != DSP_SOK)
+		return DSP_EFAIL;
+	return DSP_SOK;
 }
 
 void DSPClkWakeupEventCtrl(u32 ClkId, bool enable)
 {
-       struct CFG_HOSTRES resources;
-       DSP_STATUS status = DSP_SOK;
-       u32 iva2_grpsel;
-       u32 mpu_grpsel;
+	struct CFG_HOSTRES resources;
+	DSP_STATUS status = DSP_SOK;
+	u32 iva2_grpsel;
+	u32 mpu_grpsel;
 
-       status = CFG_GetHostResources(
-                (struct CFG_DEVNODE *)DRV_GetFirstDevExtension(), &resources);
-       if (DSP_FAILED(status))
-               return;
+	status = CFG_GetHostResources(
+		(struct CFG_DEVNODE *)DRV_GetFirstDevExtension(), &resources);
+	if (DSP_FAILED(status))
+		return;
 
-       switch (ClkId) {
-       case BPWR_GPTimer5:
-               iva2_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA8));
-               mpu_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA4));
-               if (enable) {
-                       iva2_grpsel |= OMAP3430_GRPSEL_GPT5;
-                       mpu_grpsel &= ~OMAP3430_GRPSEL_GPT5;
-               } else {
-                       mpu_grpsel |= OMAP3430_GRPSEL_GPT5;
-                       iva2_grpsel &= ~OMAP3430_GRPSEL_GPT5;
-               }
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8))
-                               = iva2_grpsel;
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4))
-                               = mpu_grpsel;
-       break;
-       case BPWR_GPTimer6:
-               iva2_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA8));
-               mpu_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA4));
-               if (enable) {
-                       iva2_grpsel |= OMAP3430_GRPSEL_GPT6;
-                       mpu_grpsel &= ~OMAP3430_GRPSEL_GPT6;
-               } else {
-                       mpu_grpsel |= OMAP3430_GRPSEL_GPT6;
-                       iva2_grpsel &= ~OMAP3430_GRPSEL_GPT6;
-               }
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8))
-                                                       = iva2_grpsel;
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4))
-                                                       = mpu_grpsel;
-       break;
-       case BPWR_GPTimer7:
-               iva2_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA8));
-               mpu_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA4));
-               if (enable) {
-                       iva2_grpsel |= OMAP3430_GRPSEL_GPT7;
-                       mpu_grpsel &= ~OMAP3430_GRPSEL_GPT7;
-               } else {
-                       mpu_grpsel |= OMAP3430_GRPSEL_GPT7;
-                       iva2_grpsel &= ~OMAP3430_GRPSEL_GPT7;
-               }
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8))
-                                                       = iva2_grpsel;
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4))
-                                                       = mpu_grpsel;
-       break;
-       case BPWR_GPTimer8:
-               iva2_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA8));
-               mpu_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA4));
-               if (enable) {
-                       iva2_grpsel |= OMAP3430_GRPSEL_GPT8;
-                       mpu_grpsel &= ~OMAP3430_GRPSEL_GPT8;
-               } else {
-                       mpu_grpsel |= OMAP3430_GRPSEL_GPT8;
-                       iva2_grpsel &= ~OMAP3430_GRPSEL_GPT8;
-               }
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8))
-                                                       = iva2_grpsel;
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4))
-                                                       = mpu_grpsel;
-       break;
-       case BPWR_MCBSP1:
-               iva2_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwCorePmBase) + 0xA8));
-               mpu_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwCorePmBase) + 0xA4));
-               if (enable) {
-                       iva2_grpsel |= OMAP3430_GRPSEL_MCBSP1;
-                       mpu_grpsel &= ~OMAP3430_GRPSEL_MCBSP1;
-               } else {
-                       mpu_grpsel |= OMAP3430_GRPSEL_MCBSP1;
-                       iva2_grpsel &= ~OMAP3430_GRPSEL_MCBSP1;
-               }
-               *((REG_UWORD32 *) ((u32) (resources.dwCorePmBase) + 0xA8))
-                                                       = iva2_grpsel;
-               *((REG_UWORD32 *) ((u32) (resources.dwCorePmBase) + 0xA4))
-                                                       = mpu_grpsel;
-       break;
-       case BPWR_MCBSP2:
-               iva2_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA8));
-               mpu_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA4));
-               if (enable) {
-                       iva2_grpsel |= OMAP3430_GRPSEL_MCBSP2;
-                       mpu_grpsel &= ~OMAP3430_GRPSEL_MCBSP2;
-               } else {
-                       mpu_grpsel |= OMAP3430_GRPSEL_MCBSP2;
-                       iva2_grpsel &= ~OMAP3430_GRPSEL_MCBSP2;
-               }
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8))
-                                                       = iva2_grpsel;
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4))
-                                                       = mpu_grpsel;
-       break;
-       case BPWR_MCBSP3:
-               iva2_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA8));
-               mpu_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA4));
-               if (enable) {
-                       iva2_grpsel |= OMAP3430_GRPSEL_MCBSP3;
-                       mpu_grpsel &= ~OMAP3430_GRPSEL_MCBSP3;
-               } else {
-                       mpu_grpsel |= OMAP3430_GRPSEL_MCBSP3;
-                       iva2_grpsel &= ~OMAP3430_GRPSEL_MCBSP3;
-               }
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8))
-                                                       = iva2_grpsel;
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4))
-                                                       = mpu_grpsel;
-       break;
-       case BPWR_MCBSP4:
-               iva2_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA8));
-               mpu_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA4));
-               if (enable) {
-                       iva2_grpsel |= OMAP3430_GRPSEL_MCBSP4;
-                       mpu_grpsel &= ~OMAP3430_GRPSEL_MCBSP4;
-               } else {
-                       mpu_grpsel |= OMAP3430_GRPSEL_MCBSP4;
-                       iva2_grpsel &= ~OMAP3430_GRPSEL_MCBSP4;
-               }
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8))
-                                                       = iva2_grpsel;
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4))
-                                                       = mpu_grpsel;
-       break;
-       case BPWR_MCBSP5:
-               iva2_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwCorePmBase) + 0xA8));
-               mpu_grpsel = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwCorePmBase) + 0xA4));
-               if (enable) {
-                       iva2_grpsel |= OMAP3430_GRPSEL_MCBSP5;
-                       mpu_grpsel &= ~OMAP3430_GRPSEL_MCBSP5;
-               } else {
-                       mpu_grpsel |= OMAP3430_GRPSEL_MCBSP5;
-                       iva2_grpsel &= ~OMAP3430_GRPSEL_MCBSP5;
-               }
-               *((REG_UWORD32 *) ((u32) (resources.dwCorePmBase) + 0xA8))
-                                                       = iva2_grpsel;
-               *((REG_UWORD32 *) ((u32) (resources.dwCorePmBase) + 0xA4))
-                                                       = mpu_grpsel;
-       break;
-       }
+	switch (ClkId) {
+	case BPWR_GPTimer5:
+		iva2_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwPerPmBase) + 0xA8));
+		mpu_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwPerPmBase) + 0xA4));
+		if (enable) {
+			iva2_grpsel |= OMAP3430_GRPSEL_GPT5;
+			mpu_grpsel &= ~OMAP3430_GRPSEL_GPT5;
+		} else {
+			mpu_grpsel |= OMAP3430_GRPSEL_GPT5;
+			iva2_grpsel &= ~OMAP3430_GRPSEL_GPT5;
+		}
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8))
+				= iva2_grpsel;
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4))
+				= mpu_grpsel;
+	break;
+	case BPWR_GPTimer6:
+		iva2_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwPerPmBase) + 0xA8));
+		mpu_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwPerPmBase) + 0xA4));
+		if (enable) {
+			iva2_grpsel |= OMAP3430_GRPSEL_GPT6;
+			mpu_grpsel &= ~OMAP3430_GRPSEL_GPT6;
+		} else {
+			mpu_grpsel |= OMAP3430_GRPSEL_GPT6;
+			iva2_grpsel &= ~OMAP3430_GRPSEL_GPT6;
+		}
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8))
+							= iva2_grpsel;
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4))
+							= mpu_grpsel;
+	break;
+	case BPWR_GPTimer7:
+		iva2_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwPerPmBase) + 0xA8));
+		mpu_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwPerPmBase) + 0xA4));
+		if (enable) {
+			iva2_grpsel |= OMAP3430_GRPSEL_GPT7;
+			mpu_grpsel &= ~OMAP3430_GRPSEL_GPT7;
+		} else {
+			mpu_grpsel |= OMAP3430_GRPSEL_GPT7;
+			iva2_grpsel &= ~OMAP3430_GRPSEL_GPT7;
+		}
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8))
+							= iva2_grpsel;
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4))
+							= mpu_grpsel;
+	break;
+	case BPWR_GPTimer8:
+		iva2_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwPerPmBase) + 0xA8));
+		mpu_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwPerPmBase) + 0xA4));
+		if (enable) {
+			iva2_grpsel |= OMAP3430_GRPSEL_GPT8;
+			mpu_grpsel &= ~OMAP3430_GRPSEL_GPT8;
+		} else {
+			mpu_grpsel |= OMAP3430_GRPSEL_GPT8;
+			iva2_grpsel &= ~OMAP3430_GRPSEL_GPT8;
+		}
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8))
+							= iva2_grpsel;
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4))
+							= mpu_grpsel;
+	break;
+	case BPWR_MCBSP1:
+		iva2_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwCorePmBase) + 0xA8));
+		mpu_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwCorePmBase) + 0xA4));
+		if (enable) {
+			iva2_grpsel |= OMAP3430_GRPSEL_MCBSP1;
+			mpu_grpsel &= ~OMAP3430_GRPSEL_MCBSP1;
+		} else {
+			mpu_grpsel |= OMAP3430_GRPSEL_MCBSP1;
+			iva2_grpsel &= ~OMAP3430_GRPSEL_MCBSP1;
+		}
+		*((REG_UWORD32 *) ((u32) (resources.dwCorePmBase) + 0xA8))
+							= iva2_grpsel;
+		*((REG_UWORD32 *) ((u32) (resources.dwCorePmBase) + 0xA4))
+							= mpu_grpsel;
+	break;
+	case BPWR_MCBSP2:
+		iva2_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwPerPmBase) + 0xA8));
+		mpu_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwPerPmBase) + 0xA4));
+		if (enable) {
+			iva2_grpsel |= OMAP3430_GRPSEL_MCBSP2;
+			mpu_grpsel &= ~OMAP3430_GRPSEL_MCBSP2;
+		} else {
+			mpu_grpsel |= OMAP3430_GRPSEL_MCBSP2;
+			iva2_grpsel &= ~OMAP3430_GRPSEL_MCBSP2;
+		}
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8))
+							= iva2_grpsel;
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4))
+							= mpu_grpsel;
+	break;
+	case BPWR_MCBSP3:
+		iva2_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwPerPmBase) + 0xA8));
+		mpu_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwPerPmBase) + 0xA4));
+		if (enable) {
+			iva2_grpsel |= OMAP3430_GRPSEL_MCBSP3;
+			mpu_grpsel &= ~OMAP3430_GRPSEL_MCBSP3;
+		} else {
+			mpu_grpsel |= OMAP3430_GRPSEL_MCBSP3;
+			iva2_grpsel &= ~OMAP3430_GRPSEL_MCBSP3;
+		}
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8))
+							= iva2_grpsel;
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4))
+							= mpu_grpsel;
+	break;
+	case BPWR_MCBSP4:
+		iva2_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwPerPmBase) + 0xA8));
+		mpu_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwPerPmBase) + 0xA4));
+		if (enable) {
+			iva2_grpsel |= OMAP3430_GRPSEL_MCBSP4;
+			mpu_grpsel &= ~OMAP3430_GRPSEL_MCBSP4;
+		} else {
+			mpu_grpsel |= OMAP3430_GRPSEL_MCBSP4;
+			iva2_grpsel &= ~OMAP3430_GRPSEL_MCBSP4;
+		}
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8))
+							= iva2_grpsel;
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4))
+							= mpu_grpsel;
+	break;
+	case BPWR_MCBSP5:
+		iva2_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwCorePmBase) + 0xA8));
+		mpu_grpsel = (u32) *((REG_UWORD32 *)
+				((u32) (resources.dwCorePmBase) + 0xA4));
+		if (enable) {
+			iva2_grpsel |= OMAP3430_GRPSEL_MCBSP5;
+			mpu_grpsel &= ~OMAP3430_GRPSEL_MCBSP5;
+		} else {
+			mpu_grpsel |= OMAP3430_GRPSEL_MCBSP5;
+			iva2_grpsel &= ~OMAP3430_GRPSEL_MCBSP5;
+		}
+		*((REG_UWORD32 *) ((u32) (resources.dwCorePmBase) + 0xA8))
+							= iva2_grpsel;
+		*((REG_UWORD32 *) ((u32) (resources.dwCorePmBase) + 0xA4))
+							= mpu_grpsel;
+	break;
+	}
 }

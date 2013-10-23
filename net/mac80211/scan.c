@@ -759,7 +759,12 @@ ieee80211_scan_result(struct ieee80211_local *local,
 	struct iw_event iwe;
 	char *buf;
 
-	if (time_after(jiffies,
+	/*
+	 * we don't return old entries, unless the bss is in hold state due
+	 * to beacon filter
+	 */
+	if (!bss->hold &&
+	    time_after(jiffies,
 		       bss->last_update + IEEE80211_SCAN_RESULT_EXPIRE))
 		return current_ev;
 

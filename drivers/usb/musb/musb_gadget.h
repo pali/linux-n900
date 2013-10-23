@@ -42,6 +42,7 @@ struct musb_request {
 	u8 tx;			/* endpoint direction */
 	u8 epnum;
 	u8 mapped;
+	u8 complete;		/* true when completed and zero-length needed */
 };
 
 static inline struct musb_request *to_musb_request(struct usb_request *req)
@@ -76,7 +77,8 @@ struct musb_ep {
 	struct list_head		req_list;
 
 	/* true if lock must be dropped but req_list may not be advanced */
-	u8				busy;
+	u8				busy:1;
+	u8				rx_pending:1;
 
 	/* true if endpoint is stalled */
 	unsigned			stalled:1;
@@ -97,7 +99,7 @@ static inline struct usb_request *next_request(struct musb_ep *ep)
 }
 
 extern void musb_g_tx(struct musb *musb, u8 epnum);
-extern void musb_g_rx(struct musb *musb, u8 epnum);
+extern void musb_g_rx(struct musb *musb, u8 epnum, bool);
 
 extern const struct usb_ep_ops musb_g_ep0_ops;
 

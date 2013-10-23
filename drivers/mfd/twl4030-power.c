@@ -25,6 +25,7 @@
 
 #include <linux/module.h>
 #include <linux/pm.h>
+#include <linux/delay.h>
 #include <linux/i2c/twl4030.h>
 #include <linux/platform_device.h>
 
@@ -72,36 +73,37 @@ static u8 triton_next_free_address = 0x2b;
 
 #define DEVGROUP_OFFSET		0
 #define TYPE_OFFSET		1
+#define REMAP_OFFSET		2
 
-static int __initdata res_config_addrs[] = {
-	[1] = 0x17,
-	[2] = 0x1b,
-	[3] = 0x1f,
-	[4] = 0x23,
-	[5] = 0x27,
-	[6] = 0x2b,
-	[7] = 0x2f,
-	[8] = 0x33,
-	[9] = 0x37,
-	[10] = 0x3b,
-	[11] = 0x3f,
-	[12] = 0x43,
-	[13] = 0x47,
-	[14] = 0x4b,
-	[15] = 0x55,
-	[16] = 0x63,
-	[17] = 0x71,
-	[18] = 0x74,
-	[19] = 0x77,
-	[20] = 0x7a,
-	[21] = 0x7f,
-	[22] = 0x82,
-	[23] = 0x85,
-	[24] = 0x88,
-	[25] = 0x8b,
-	[26] = 0x8e,
-	[27] = 0x91,
-	[28] = 0x94,
+static int res_config_addrs[] = {
+	[RES_VAUX1] 	= 0x17,
+	[RES_VAUX2] 	= 0x1b,
+	[RES_VAUX3] 	= 0x1f,
+	[RES_VAUX4] 	= 0x23,
+	[RES_VMMC1] 	= 0x27,
+	[RES_VMMC2] 	= 0x2b,
+	[RES_VPLL1] 	= 0x2f,
+	[RES_VPLL2] 	= 0x33,
+	[RES_VSIM] 	= 0x37,
+	[RES_VDAC] 	= 0x3b,
+	[RES_VINTANA1] 	= 0x3f,
+	[RES_VINTANA2] 	= 0x43,
+	[RES_VINTDIG] 	= 0x47,
+	[RES_VIO] 	= 0x4b,
+	[RES_VDD1] 	= 0x55,
+	[RES_VDD2] 	= 0x63,
+	[RES_VUSB_1v5] 	= 0x71,
+	[RES_VUSB_1v8] 	= 0x74,
+	[RES_VUSB_3v1] 	= 0x77,
+	[RES_VUSBCP] 	= 0x7a,
+	[RES_REGEN] 	= 0x7f,
+	[RES_NRES_PWRON] = 0x82,
+	[RES_CLKEN] 	= 0x85,
+	[RES_SYSEN] 	= 0x88,
+	[RES_HFCLKOUT] 	= 0x8b,
+	[RES_32KCLKOUT] = 0x8e,
+	[RES_RESET] 	= 0x91,
+	[RES_Main_Ref] 	= 0x94,
 };
 
 static int __init twl4030_write_script_byte(u8 address, u8 byte)
@@ -155,12 +157,16 @@ static int __init config_wakeup3_sequence(u8 address)
 {
 
 	int err = 0;
+	u8 data;
 
 	/* Set SLEEP to ACTIVE SEQ address for P3 */
 	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, address,
 				  R_SEQ_ADD_S2A3);
 
-	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, LVL_WAKEUP,
+	err |= twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &data,
+					R_P3_SW_EVENTS);
+	data |= LVL_WAKEUP;
+	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, data,
 					R_P3_SW_EVENTS);
 	if (err)
 		printk(KERN_ERR "TWL4030 wakeup sequence for P3" \
@@ -172,19 +178,26 @@ static int __init config_wakeup3_sequence(u8 address)
 static int __init config_wakeup12_sequence(u8 address)
 {
 	int err = 0;
+	u8 data;
 
 	/* Set SLEEP to ACTIVE SEQ address for P1 and P2 */
 	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, address,
 				  R_SEQ_ADD_SA12);
 
-	/* P1/P2/P3 LVL_WAKEUP should be on LEVEL */
-	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, LVL_WAKEUP,
+	/* P1/P2 LVL_WAKEUP should be on LEVEL */
+	err |= twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &data,
 					R_P1_SW_EVENTS);
-	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, LVL_WAKEUP,
+	data |= LVL_WAKEUP;
+	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, data,
+					R_P1_SW_EVENTS);
+
+	err |= twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &data,
+					R_P2_SW_EVENTS);
+	data |= LVL_WAKEUP;
+	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, data,
 					R_P2_SW_EVENTS);
 
 	if (machine_is_omap_3430sdp() || machine_is_omap_ldp()) {
-		u8 data;
 		/* Disabling AC charger effect on sleep-active transitions */
 		err |= twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &data,
 						R_CFG_P1_TRANSITION);
@@ -203,14 +216,6 @@ static int __init config_wakeup12_sequence(u8 address)
 static int __init config_sleep_sequence(u8 address)
 {
 	int err = 0;
-
-	/*
-	 * CLKREQ is pulled high on the 2430SDP, therefore, we need to take
-	 * it out of the HFCLKOUT DEV_GRP for P1 else HFCLKOUT can't be stopped.
-	 */
-
-	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
-				  0x20, R_HFCLKOUT_DEV_GRP);
 
 	/* Set ACTIVE to SLEEP SEQ address in T2 memory*/
 	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, address,
@@ -261,6 +266,7 @@ static int __init load_triton_script(struct twl4030_script *tscript)
 {
 	u8 address = triton_next_free_address;
 	int err;
+	int i;
 
 	err = twl4030_write_script(address, tscript->script, tscript->size);
 	if (err)
@@ -268,51 +274,89 @@ static int __init load_triton_script(struct twl4030_script *tscript)
 
 	triton_next_free_address += tscript->size;
 
-	if (tscript->flags & TRITON_WRST_SCRIPT)
-		err |= config_warmreset_sequence(address);
+	for (i = 0; i < tscript->number_of_events; i++) {
 
-	if (tscript->flags & TRITON_WAKEUP12_SCRIPT)
-		err |= config_wakeup12_sequence(address);
+		/* Check if script is going beyond last valid address */
+		if (address + tscript->size > END_OF_SCRIPT) {
 
-	if (tscript->flags & TRITON_WAKEUP3_SCRIPT)
-		err |= config_wakeup3_sequence(address);
+			WARN(1, "TWL4030 script event %d" \
+				 " do not fit in memory\n"
+				, tscript->events[i].event);
+			return -EINVAL;
+		}
 
-	if (tscript->flags & TRITON_SLEEP_SCRIPT)
-		err |= config_sleep_sequence(address);
+		/* Check if event pointer is in script area */
+		if (tscript->events[i].offset >= tscript->size) {
 
+			WARN(1,	"TWL4030 script event %d has invalid start" \
+				" at 0x%x in the script ending at 0x%x\n",
+				 tscript->events[i].event,
+				 address + tscript->events[i].offset,
+				 address + tscript->size);
+			return -EINVAL;
+		}
+
+		switch (tscript->events[i].event) {
+		case TRITON_WRST:
+			err |= config_warmreset_sequence(address
+						+ tscript->events[i].offset);
+			break;
+		case TRITON_WAKEUP12:
+			err |= config_wakeup12_sequence(address
+						+ tscript->events[i].offset);
+			break;
+		case TRITON_WAKEUP3:
+			err |= config_wakeup3_sequence(address
+						+ tscript->events[i].offset);
+			break;
+		case TRITON_SLEEP:
+			err |= config_sleep_sequence(address
+						+ tscript->events[i].offset);
+			break;
+		default:
+			WARN(1, "Event number %d unknown\n"
+				, tscript->events[i].event);
+			return  -EINVAL;
+		}
+	}
 	return err;
 }
 
-static void __init twl4030_configure_resource(struct twl4030_resconfig *rconfig)
+static int __init twl4030_configure_resource(struct twl4030_resconfig *rconfig)
 {
 	int rconfig_addr;
+	int err;
 	u8 type;
 
 	if (rconfig->resource > NUM_OF_RESOURCES) {
 		printk(KERN_ERR
 			"TWL4030 Resource %d does not exist\n",
 			rconfig->resource);
-		return;
+		return -EINVAL;
 	}
 
 	rconfig_addr = res_config_addrs[rconfig->resource];
 
 	/* Set resource group */
-
-	if (rconfig->devgroup >= 0)
-		twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
+	if (rconfig->devgroup >= 0) {
+		err = twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
 					rconfig->devgroup << 5,
 					rconfig_addr + DEVGROUP_OFFSET);
+		if (err < 0) {
+			printk(KERN_ERR
+				"TWL4030 failed to program devgroup");
+			return err;
+		}
+	}
 
 	/* Set resource types */
-
-	if (twl4030_i2c_read_u8(TWL4030_MODULE_PM_RECEIVER,
-					&type,
-					rconfig_addr + TYPE_OFFSET) < 0) {
+	err = twl4030_i2c_read_u8(TWL4030_MODULE_PM_RECEIVER, &type,
+				       rconfig_addr + TYPE_OFFSET);
+	if (err < 0) {
 		printk(KERN_ERR
-			"TWL4030 Resource %d type could not read\n",
-			rconfig->resource);
-		return;
+		       "TWL4030 Resource %d type could not read\n",
+		       rconfig->resource);
+		return err;
 	}
 
 	if (rconfig->type >= 0) {
@@ -325,9 +369,103 @@ static void __init twl4030_configure_resource(struct twl4030_resconfig *rconfig)
 		type |= rconfig->type2 << 3;
 	}
 
-	twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
+	err = twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
 				type, rconfig_addr + TYPE_OFFSET);
+	if (err < 0) {
+		printk(KERN_ERR
+		       "TWL4030 failed to program resource type");
+		return err;
+	}
+
+	if (rconfig->remap >= 0) {
+		err = twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
+				rconfig->remap,
+				rconfig_addr + REMAP_OFFSET);
+		if (err < 0) {
+			printk(KERN_ERR "TWL4030 failed to program remap");
+			return err;
+		}
+	}
+
+	return 0;
 }
+
+struct twl4030_reg_data {
+	int usecount;
+	u8 resource;
+	u8 base;
+	u8 offstate;
+	u8 initdone;
+	int delay;
+};
+struct twl4030_reg_data twl4030_custom_regs[] = {
+	{ 0, RES_VAUX1, TWL4030_VAUX1_DEV_GRP, 0x88, 0, 500 },
+	{ 0, RES_VMMC2, TWL4030_VMMC2_DEV_GRP, 0x88, 0, 100 },
+	{ 0, 0, 0, 0, 0 },
+};
+static DEFINE_MUTEX(reg_mutex);
+
+static int twl4030_set_regulator_state(int res, int enable)
+{
+	u8 val;
+	int ret;
+	struct twl4030_reg_data *reg_data = twl4030_custom_regs;
+
+	while (1) {
+		if (!reg_data->resource)
+			return -EINVAL;
+		if (reg_data->resource == res)
+			break;
+		reg_data++;
+	}
+	if (enable && !(reg_data->usecount++))
+		val = 0xee;
+	else if (!enable && !(--reg_data->usecount))
+		val = reg_data->offstate;
+	else
+		return 0;
+
+	ret = twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
+			val, reg_data->base + 2);
+
+	if (!ret && !reg_data->initdone) {
+		ret = twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
+			0, reg_data->base);
+		if (!ret)
+			reg_data->initdone = 1;
+	}
+
+	if (ret) {
+		if (enable)
+			reg_data->usecount--;
+		else
+			reg_data->usecount++;
+	}
+	/* Wait until voltage stabilizes */
+	if (enable)
+		udelay(reg_data->delay);
+	return ret;
+}
+
+int twl4030_enable_regulator(int res)
+{
+	int ret;
+	mutex_lock(&reg_mutex);
+	ret = twl4030_set_regulator_state(res, 1);
+	mutex_unlock(&reg_mutex);
+	return ret;
+}
+EXPORT_SYMBOL(twl4030_enable_regulator);
+
+int twl4030_disable_regulator(int res)
+{
+	int ret;
+	mutex_lock(&reg_mutex);
+	ret = twl4030_set_regulator_state(res, 0);
+	mutex_unlock(&reg_mutex);
+	return ret;
+}
+EXPORT_SYMBOL(twl4030_disable_regulator);
 
 void __init twl4030_power_init(struct twl4030_power_data *triton2_scripts)
 {
@@ -345,15 +483,22 @@ void __init twl4030_power_init(struct twl4030_power_data *triton2_scripts)
 
 	for (i = 0; i < triton2_scripts->scripts_size; i++) {
 		err = load_triton_script(triton2_scripts->scripts[i]);
-		if (err)
+		if (err < 0) {
+			printk(KERN_ERR "TWL4030 failed to load scripts");
 			break;
+		}
 	}
 
 	resconfig = triton2_scripts->resource_config;
 	if (resconfig) {
 		while (resconfig->resource) {
-			twl4030_configure_resource(resconfig);
+			err = twl4030_configure_resource(resconfig);
 			resconfig++;
+			if (err < 0) {
+				printk(KERN_ERR
+				       "TWL4030 failed to configure resource");
+				break;
+			}
 		}
 	}
 

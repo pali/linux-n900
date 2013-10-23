@@ -23,16 +23,66 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <media/v4l2-dev.h>
-#include <asm/cacheflush.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
 
 #include "isp.h"
-#include "ispmmu.h"
 #include "ispreg.h"
-#include "omap_previewer_hack.h"
+#include "isppreview.h"
 
-#define OMAP_PREV_NAME		"omap-previewer"
+#define PREV_IOC_BASE			'P'
+#define PREV_REQBUF			_IOWR(PREV_IOC_BASE, 1,\
+						struct v4l2_requestbuffers)
+#define PREV_QUERYBUF			_IOWR(PREV_IOC_BASE, 2,\
+							struct v4l2_buffer)
+#define PREV_SET_PARAM			_IOW(PREV_IOC_BASE, 3,\
+							struct prev_params)
+#define PREV_PREVIEW			_IOR(PREV_IOC_BASE, 5, int)
+#define PREV_GET_CROPSIZE		_IOR(PREV_IOC_BASE, 7,\
+							struct prev_cropsize)
+#define PREV_QUEUEBUF			_IOWR(PREV_IOC_BASE, 8,\
+							struct v4l2_buffer)
+#define PREV_IOC_MAXNR			8
+
+#define MAX_IMAGE_WIDTH			3300
+
+#define PREV_INWIDTH_8BIT		0	/* pixel width of 8 bitS */
+#define PREV_INWIDTH_10BIT		1	/* pixel width of 10 bits */
+
+#define PREV_32BYTES_ALIGN_MASK		0xFFFFFFE0
+#define PREV_16PIX_ALIGN_MASK		0xFFFFFFF0
+
+/* list of structures */
+
+/* device structure keeps track of global information */
+struct prev_device {
+	unsigned char opened;			/* state of the device */
+	struct completion wfc;
+	struct mutex prevwrap_mutex;
+	/* spinlock for in/out videbuf queue */
+	spinlock_t inout_vbq_lock;
+	/* spinlock for lsc videobuf queues */
+	spinlock_t lsc_vbq_lock;
+	struct videobuf_queue_ops vbq_ops;	/* videobuf queue operations */
+	dma_addr_t isp_addr_read;		/* Input/Output address */
+	dma_addr_t isp_addr_lsc;  /* lsc address */
+	struct device *isp;
+	struct prev_size_params size_params;
+};
+
+/* per-filehandle data structure */
+struct prev_fh {
+	/* in/out videobuf queue */
+	enum v4l2_buf_type inout_type;
+	struct videobuf_queue inout_vbq;
+	/* lsc videobuf queue */
+	enum v4l2_buf_type lsc_type;
+	struct videobuf_queue lsc_vbq;
+	/* device structure */
+	struct prev_device *device;
+};
+
+#define OMAP_PREV_NAME		"omap-previewer" /* "omap3hack"  */
 
 #define BIT_SET(var,shift,mask,val)		\
 	do {					\
@@ -40,23 +90,17 @@
 			| (val << shift);	\
 	} while (0)
 
-#if 0
-#define OMAP_ISP_PREVIEWER_DEBUG
-#else
-#undef OMAP_ISP_PREVIEWER_DEBUG
-#endif
-
-#ifdef OMAP_ISP_PREVIEWER_DEBUG
-#define DPRINTK_PREVIEWER(format,...) \
-	printk("PREV: " format, ## __VA_ARGS__)
-#else
-	#define DPRINTK_PREVIEWER(format,...)
-#endif
 
 #define ISP_CTRL_SBL_SHARED_RPORTB	(1 << 28)
 #define ISP_CTRL_SBL_SHARED_RPORTA	(1 << 27)
 #define SBL_SHARED_RPORTB			28
 #define SBL_RD_RAM_EN				18
+
+/* structure to know crop size */
+struct prev_cropsize {
+	int hcrop;
+	int vcrop;
+};
 
 static struct isp_interface_config prevwrap_config = {
 	.ccdc_par_ser = ISP_NONE,
@@ -90,45 +134,18 @@ static int prev_calculate_crop(struct prev_device *device,
 {
 	struct isp_device *isp = dev_get_drvdata(device->isp);
 	int ret;
+	struct isp_pipeline pipe;
 
-	dev_dbg(prev_dev, "prev_calculate_crop E\n");
+	pipe.ccdc_out_w = pipe.ccdc_out_w_img =
+		device->size_params.hsize;
+	pipe.ccdc_out_h = device->size_params.vsize;
 
-	if (!device || !crop) {
-		dev_err(prev_dev, "Erron in argument\n");
-		return -EINVAL;
-	}
+	ret = isppreview_try_pipeline(&isp->isp_prev, &pipe);
 
-	ret = isppreview_try_size(&isp->isp_prev,
-					device->params->size_params.hsize,
-					device->params->size_params.vsize,
-					&crop->hcrop, &crop->vcrop);
-
-	crop->hcrop &= PREV_16PIX_ALIGN_MASK;
-
-	dev_dbg(prev_dev, "prev_calculate_crop L\n");
+	crop->hcrop = pipe.prv_out_w;
+	crop->vcrop = pipe.prv_out_h;
 
 	return ret;
-}
-
-/**
- * prev_get_status - Get status of ISP preview module
- * @status: Structure containing the busy state.
- *
- * Checks if the ISP preview module is busy.
- *
- * Returns 0 if successful, or -EINVAL if the status parameter is invalid.
- **/
-static int prev_get_status(struct prev_status *status)
-{
-	struct prev_device *device = prevdevice;
-	struct isp_device *isp = dev_get_drvdata(device->isp);
-
-	if (!status) {
-		dev_err(prev_dev, "get_status: invalid parameter\n");
-		return -EINVAL;
-	}
-	status->hw_busy = (char)isppreview_busy(&isp->isp_prev);
-	return 0;
 }
 
 /**
@@ -145,8 +162,6 @@ static int prev_hw_setup(struct prev_params *config)
 	struct prev_device *device = prevdevice;
 	struct isp_device *isp = dev_get_drvdata(device->isp);
 	struct isp_prev_device *isp_prev = &isp->isp_prev;
-
-	dev_dbg(prev_dev, "prev_hw_setup E\n");
 
 	if (config->features & PREV_AVERAGER)
 		isppreview_config_averager(isp_prev, config->average);
@@ -165,10 +180,6 @@ static int prev_hw_setup(struct prev_params *config)
 		isppreview_enable_hmed(isp_prev, 0);
 
 	if (config->features & PREV_DARK_FRAME_SUBTRACT) {
-		DPRINTK_PREVIEWER("[%s] darkaddr %08x, darklineoffset %d\n", __func__,
-			config->drkf_params.addr,
-			config->drkf_params.offset);
-
 		isppreview_set_darkaddr(isp_prev, config->drkf_params.addr);
 		isppreview_config_darklineoffset(isp_prev,
 						 config->drkf_params.offset);
@@ -183,7 +194,6 @@ static int prev_hw_setup(struct prev_params *config)
 	} else
 		isppreview_enable_shadcomp(isp_prev, 0);
 
-	dev_dbg(prev_dev, "prev_hw_setup L\n");
 	return 0;
 }
 
@@ -349,6 +359,12 @@ static void prev_unset_isp_ctrl(void)
 	isp_reg_writel(device->isp, val, OMAP3_ISP_IOMEM_MAIN, ISP_CTRL);
 }
 
+static void isp_enable_interrupts(struct device *dev, int is_raw)
+{
+	isp_reg_writel(dev, IRQ0ENABLE_PRV_DONE_IRQ,
+		       OMAP3_ISP_IOMEM_MAIN, ISP_IRQ0ENABLE);
+}
+
 /**
  * prev_do_preview - Performs the Preview process
  * @device: Structure containing ISP preview wrapper global information
@@ -356,71 +372,65 @@ static void prev_unset_isp_ctrl(void)
  *
  * Returns 0 if successful, or -EINVAL if the sent parameters are invalid.
  **/
-static int prev_do_preview(struct prev_device *device, int *arg)
+static int prev_do_preview(struct prev_device *device)
 {
 	struct isp_device *isp = dev_get_drvdata(device->isp);
 	struct isp_prev_device *isp_prev = &isp->isp_prev;
+	struct prev_params *config = &isp_prev->params;
 	int bpp, size;
 	int ret = 0;
-	u32 out_hsize, out_vsize, out_line_offset;
+	struct isp_pipeline pipe;
 
-	dev_dbg(prev_dev, "prev_do_preview E\n");
+	memset(&pipe, 0, sizeof(pipe));
+	pipe.pix.pixelformat = V4L2_PIX_FMT_UYVY;
 
-	if (!device) {
-		dev_err(prev_dev, "preview: invalid parameters\n");
-		return -EINVAL;
-	}
+	prev_set_isp_ctrl(config->features);
 
-	prev_set_isp_ctrl(device->params->features);
-
-	if (device->params->size_params.pixsize == PREV_INWIDTH_8BIT)
+	if (device->size_params.pixsize == PREV_INWIDTH_8BIT)
 		bpp = 1;
 	else
 		bpp = 2;
 
-	size = device->params->size_params.hsize *
-			device->params->size_params.vsize * bpp;
+	size = device->size_params.hsize *
+			device->size_params.vsize * bpp;
 
-	isppreview_config_datapath(isp_prev, PRV_RAW_MEM, PREVIEW_MEM);
+	pipe.prv_in = PRV_RAW_MEM;
+	pipe.prv_out = PREVIEW_MEM;
 
 	isppreview_set_skip(isp_prev, 2, 0);
 
-	ret = isppreview_try_size(isp_prev, device->params->size_params.hsize,
-				  device->params->size_params.vsize,
-				  &out_hsize, &out_vsize);
+	pipe.ccdc_out_w = pipe.ccdc_out_w_img
+		= device->size_params.hsize;
+	pipe.ccdc_out_h = device->size_params.vsize & ~0xf;
+
+	ret = isppreview_try_pipeline(&isp->isp_prev, &pipe);
 	if (ret) {
 		dev_err(prev_dev, "ERROR while try size!\n");
 		goto out;
 	}
 
-	ret = isppreview_config_inlineoffset(isp_prev,
-					     device->params->size_params.hsize
-					     * bpp);
-	if (ret) {
-		dev_err(prev_dev, "ERROR while config inline offset!\n");
-		goto out;
-	}
-
-	out_line_offset = (out_hsize * bpp) & PREV_32BYTES_ALIGN_MASK;
-
-	ret = isppreview_config_outlineoffset(isp_prev, out_line_offset);
-	if (ret) {
-		dev_err(prev_dev, "ERROR while config outline offset!\n");
-		goto out;
-	}
-
-	ret = isppreview_config_size(isp_prev,
-				     device->params->size_params.hsize,
-				     device->params->size_params.vsize,
-				     out_hsize, out_vsize);
+	ret = isppreview_s_pipeline(isp_prev, &pipe);
 	if (ret) {
 		dev_err(prev_dev, "ERROR while config size!\n");
 		goto out;
 	}
 
-	device->params->drkf_params.addr = device->isp_addr_lsc;
+	ret = isppreview_config_inlineoffset(isp_prev, pipe.prv_out_w * bpp);
+	if (ret) {
+		dev_err(prev_dev, "ERROR while config inline offset!\n");
+		goto out;
+	}
 
-	prev_hw_setup(device->params);
+	ret = isppreview_config_outlineoffset(isp_prev,
+					      pipe.prv_out_w * bpp - 32);
+	if (ret) {
+		dev_err(prev_dev, "ERROR while config outline offset!\n");
+		goto out;
+	}
+
+	config->drkf_params.addr = device->isp_addr_lsc;
+
+	prev_hw_setup(config);
 
 	ret = isppreview_set_inaddr(isp_prev, device->isp_addr_read);
 	if (ret) {
@@ -440,8 +450,11 @@ static int prev_do_preview(struct prev_device *device, int *arg)
 		dev_err(prev_dev, "ERROR while setting Previewer callback!\n");
 		goto out;
 	}
-
 	isp_configure_interface(device->isp, &prevwrap_config);
+
+	isp_start(device->isp);
+
+	isp_enable_interrupts(device->isp, 0);
 
 	isppreview_enable(isp_prev, 1);
 
@@ -458,9 +471,50 @@ static int prev_do_preview(struct prev_device *device, int *arg)
 
 	prev_unset_isp_ctrl();
 
-	dev_dbg(prev_dev, "prev_do_preview L\n");
+	isp_stop(device->isp);
+
 out:
 	return ret;
+}
+
+static int previewer_vb_lock_vma(struct videobuf_buffer *vb, int lock)
+{
+	unsigned long start, end;
+	struct vm_area_struct *vma;
+	int rval = 0;
+
+	if (vb->memory == V4L2_MEMORY_MMAP)
+		return 0;
+
+	end = vb->baddr + vb->bsize;
+
+	down_write(&current->mm->mmap_sem);
+	spin_lock(&current->mm->page_table_lock);
+	for (start = vb->baddr; ; ) {
+		unsigned int newflags;
+
+		vma = find_vma(current->mm, start);
+		if (!vma || vma->vm_start > start) {
+			rval = -ENOMEM;
+			goto out;
+		}
+
+		newflags = vma->vm_flags | VM_LOCKED;
+		if (!lock)
+			newflags &= ~VM_LOCKED;
+
+		vma->vm_flags = newflags;
+
+		if (vma->vm_end >= end)
+			break;
+
+		start = vma->vm_end;
+	}
+
+out:
+	spin_unlock(&current->mm->page_table_lock);
+	up_write(&current->mm->mmap_sem);
+	return rval;
 }
 
 /**
@@ -475,25 +529,25 @@ static void previewer_vbq_release(struct videobuf_queue *q,
 	struct prev_device *device = fh->device;
 
 	if (q->type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
-		ispmmu_vunmap(device->isp_addr_read);
+		ispmmu_vunmap(device->isp, device->isp_addr_read);
 		device->isp_addr_read = 0;
 		spin_lock(&device->inout_vbq_lock);
 		vb->state = VIDEOBUF_NEEDS_INIT;
 		spin_unlock(&device->inout_vbq_lock);
 	} else if (q->type == V4L2_BUF_TYPE_PRIVATE) {
-		ispmmu_vunmap(device->isp_addr_lsc);
+		ispmmu_vunmap(device->isp, device->isp_addr_lsc);
 		device->isp_addr_lsc = 0;
 		spin_lock(&device->lsc_vbq_lock);
 		vb->state = VIDEOBUF_NEEDS_INIT;
 		spin_unlock(&device->lsc_vbq_lock);
 	}
 
+	previewer_vb_lock_vma(vb, 0);
 	if (vb->memory != V4L2_MEMORY_MMAP) {
 		videobuf_dma_unmap(q, videobuf_to_dma(vb));
 		videobuf_dma_free(videobuf_to_dma(vb));
 	}
 
-	dev_dbg(prev_dev, "previewer_vbq_release\n");
 }
 
 /**
@@ -521,18 +575,18 @@ static int previewer_vbq_setup(struct videobuf_queue *q,
 		if (*cnt > VIDEO_MAX_FRAME)
 			*cnt = VIDEO_MAX_FRAME;
 
-		if (!device->params->size_params.hsize ||
-				!device->params->size_params.vsize) {
+		if (!device->size_params.hsize ||
+				!device->size_params.vsize) {
 			dev_err(prev_dev, "Can't setup inout buffer size\n");
 			spin_unlock(&device->inout_vbq_lock);
 			return -EINVAL;
 		}
 
-		if (device->params->size_params.pixsize == PREV_INWIDTH_10BIT)
+		if (device->size_params.pixsize == PREV_INWIDTH_10BIT)
 			bpp = 2;
 
-		*size = prev_bufsize = bpp * device->params->size_params.hsize
-					* device->params->size_params.vsize;
+		*size = prev_bufsize = bpp * device->size_params.hsize
+					* device->size_params.vsize;
 		spin_unlock(&device->inout_vbq_lock);
 
 	} else if (q->type == V4L2_BUF_TYPE_PRIVATE) {
@@ -543,8 +597,8 @@ static int previewer_vbq_setup(struct videobuf_queue *q,
 		if (*cnt > 1)
 			*cnt = 1;
 
-		if (!device->params->size_params.hsize ||
-				!device->params->size_params.vsize) {
+		if (!device->size_params.hsize ||
+				!device->size_params.vsize) {
 			dev_err(prev_dev, "Can't setup lsc buffer size\n");
 			spin_unlock(&device->lsc_vbq_lock);
 			return -EINVAL;
@@ -552,15 +606,14 @@ static int previewer_vbq_setup(struct videobuf_queue *q,
 
 		/* upsampled lsc table size - for now bpp = 2 */
 		bpp = 2;
-		*size = lsc_bufsize = bpp * device->params->size_params.hsize *
-								device->params->size_params.vsize;
+		*size = lsc_bufsize = bpp * device->size_params.hsize *
+					    device->size_params.vsize;
 
 		spin_unlock(&device->lsc_vbq_lock);
 	} else {
 		return -EINVAL;
 	}
 
-	dev_dbg(prev_dev, "previewer_vbq_setup\n");
 	return 0;
 }
 
@@ -583,8 +636,6 @@ static int previewer_vbq_prepare(struct videobuf_queue *q,
 	unsigned int isp_addr;
 	struct videobuf_dmabuf *dma = videobuf_to_dma(vb);
 
-	dev_dbg(prev_dev, "previewer_vbq_prepare E\n");
-
 	if (q->type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
 
 		spin_lock(&device->inout_vbq_lock);
@@ -592,40 +643,39 @@ static int previewer_vbq_prepare(struct videobuf_queue *q,
 		if (vb->baddr) {
 			vb->size = prev_bufsize;
 			vb->bsize = prev_bufsize;
-			DPRINTK_PREVIEWER("%s: bsize = %d\n", __func__, vb->bsize);
 		} else {
 			spin_unlock(&device->inout_vbq_lock);
 			dev_err(prev_dev, "No user buffer allocated\n");
 			goto out;
 		}
 
-		vb->width = device->params->size_params.hsize;
-		vb->height = device->params->size_params.vsize;
+		vb->width = device->size_params.hsize;
+		vb->height = device->size_params.vsize;
 		vb->field = field;
 		spin_unlock(&device->inout_vbq_lock);
 
 		if (vb->state == VIDEOBUF_NEEDS_INIT) {
-			DPRINTK_PREVIEWER("%s: baddr = %08x\n", __func__, (int)vb->baddr);
+			err = previewer_vb_lock_vma(vb, 1);
+			if (err)
+				goto buf_init_err1;
+
 			err = videobuf_iolock(q, vb, NULL);
-			if (!err) {
-				isp_addr = ispmmu_vmap(dma->sglist, dma->sglen);
+			if (err)
+				goto buf_init_err1;
 
-				if (!isp_addr) {
-				    err = -EIO;
-				} else {
-					device->isp_addr_read = isp_addr;
-					DPRINTK_PREVIEWER("%s: isp_addr_read = %08x\n",
-								__func__, isp_addr);
-				}
-			}
+			isp_addr = ispmmu_vmap(device->isp,
+					       dma->sglist, dma->sglen);
+			if (!isp_addr)
+				err = -EIO;
+			else
+				device->isp_addr_read = isp_addr;
 		}
 
-		if (!err) {
+buf_init_err1:
+		if (!err)
 			vb->state = VIDEOBUF_PREPARED;
-			flush_cache_user_range(NULL, vb->baddr, (vb->baddr + vb->bsize));
-		} else {
+		else
 			previewer_vbq_release(q, vb);
-		}
 
 	} else if (q->type == V4L2_BUF_TYPE_PRIVATE) {
 
@@ -634,51 +684,50 @@ static int previewer_vbq_prepare(struct videobuf_queue *q,
 		if (vb->baddr) {
 			vb->size = lsc_bufsize;
 			vb->bsize = lsc_bufsize;
-			DPRINTK_PREVIEWER("%s: bsize = %d\n", __func__, vb->bsize);
 		} else {
 			spin_unlock(&device->lsc_vbq_lock);
 			dev_err(prev_dev, "No user buffer allocated\n");
 			goto out;
 		}
 
-		vb->width = device->params->size_params.hsize;
-		vb->height = device->params->size_params.vsize;
+		vb->width = device->size_params.hsize;
+		vb->height = device->size_params.vsize;
 		vb->field = field;
 		spin_unlock(&device->lsc_vbq_lock);
 
 		if (vb->state == VIDEOBUF_NEEDS_INIT) {
-			DPRINTK_PREVIEWER("%s: baddr = %08x\n", __func__, (int)vb->baddr);
+			err = previewer_vb_lock_vma(vb, 1);
+			if (err)
+				goto buf_init_err2;
+
 			err = videobuf_iolock(q, vb, NULL);
-			if (!err) {
-				isp_addr = ispmmu_vmap(dma->sglist, dma->sglen);
-				if (!isp_addr) {
-					err = -EIO;
-				} else {
-					device->isp_addr_lsc = isp_addr;
-					DPRINTK_PREVIEWER("%s: isp_addr_lsc = %08x\n",
-								__func__, isp_addr);
-				}
-			}
+			if (err)
+				goto buf_init_err2;
+
+			isp_addr = ispmmu_vmap(device->isp,
+					       dma->sglist, dma->sglen);
+			if (!isp_addr)
+				err = -EIO;
+			else
+				device->isp_addr_lsc = isp_addr;
 		}
 
-		if (!err) {
+buf_init_err2:
+		if (!err)
 			vb->state = VIDEOBUF_PREPARED;
-			flush_cache_user_range(NULL, vb->baddr, (vb->baddr + vb->bsize));
-		} else {
+		else
 			previewer_vbq_release(q, vb);
-		}
 
 	} else {
 		return -EINVAL;
 	}
 
-	dev_dbg(prev_dev, "previewer_vbq_prepare L\n");
 out:
 	return err;
 }
 
 static void previewer_vbq_queue(struct videobuf_queue *q,
-						        struct videobuf_buffer *vb)
+					struct videobuf_buffer *vb)
 {
 	return;
 }
@@ -696,14 +745,13 @@ static int previewer_open(struct inode *inode, struct file *filp)
 {
 	int ret = 0;
 	struct prev_device *device = prevdevice;
-	struct prev_params *config;
 	struct prev_fh *fh;
 	struct device *isp;
 	struct isp_device *isp_dev;
 
 	if (device->opened || (filp->f_flags & O_NONBLOCK)) {
 		dev_err(prev_dev, "previewer_open: device is already "
-								"opened\n");
+					"opened\n");
 		return -EBUSY;
 	}
 
@@ -722,21 +770,12 @@ static int previewer_open(struct inode *inode, struct file *filp)
 	device->isp = isp;
 	isp_dev = dev_get_drvdata(isp);
 
-	config = isppreview_get_config(&isp_dev->isp_prev);
-	if (!config) {
-		dev_err(prev_dev, "Unable to initialize default config "
-			"from isppreviewer\n\n");
-		ret = -EACCES;
-		goto err_prev;
-	}
-
 	ret = isppreview_request(&isp_dev->isp_prev);
 	if (ret) {
 		dev_err(prev_dev, "Can't acquire isppreview\n");
 		goto err_prev;
 	}
 
-	device->params = config;
 	device->opened = 1;
 
 	filp->private_data = fh;
@@ -784,7 +823,6 @@ static int previewer_release(struct inode *inode, struct file *filp)
 	struct isp_device *isp = dev_get_drvdata(device->isp);
 
 	device->opened = 0;
-	device->params = NULL;
 	videobuf_mmap_free(q1);
 	videobuf_mmap_free(q2);
 	isppreview_free(&isp->isp_prev);
@@ -794,7 +832,6 @@ static int previewer_release(struct inode *inode, struct file *filp)
 	filp->private_data = NULL;
 	kfree(fh);
 
-	dev_dbg(prev_dev, "previewer_release\n");
 	return 0;
 }
 
@@ -818,6 +855,106 @@ static int previewer_mmap(struct file *file, struct vm_area_struct *vma)
 	return -EINVAL;
 }
 
+#define COPY_USERTABLE(dst, src, size)					\
+	if (src) {							\
+		if (!dst)						\
+			return -EACCES;					\
+		if (copy_from_user(dst, src, (size) * sizeof(*(dst))))	\
+			return -EFAULT;					\
+	}
+
+/* Copy preview module configuration into use */
+static int previewer_set_param(struct prev_device *device,
+			       struct prev_params __user *uparams)
+{
+	struct isp_device *isp_dev = dev_get_drvdata(device->isp);
+	struct prev_params *config = &isp_dev->isp_prev.params;
+	/* Here it should be safe to allocate 420 bytes from stack */
+	struct prev_params p;
+	struct prev_params *params = &p;
+	int ret;
+
+	if (copy_from_user(params, uparams, sizeof(*params)))
+		return -EFAULT;
+	ret = prev_validate_params(params);
+	if (ret < 0)
+		return -EINVAL;
+
+	config->features = params->features;
+	config->pix_fmt = params->pix_fmt;
+	config->cfa.cfafmt = params->cfa.cfafmt;
+
+	/* struct ispprev_cfa */
+	config->cfa.cfa_gradthrs_vert = params->cfa.cfa_gradthrs_vert;
+	config->cfa.cfa_gradthrs_horz = params->cfa.cfa_gradthrs_horz;
+	COPY_USERTABLE(config->cfa.cfa_table, params->cfa.cfa_table,
+			ISPPRV_CFA_TBL_SIZE);
+
+	/* struct ispprev_csup csup */
+	config->csup.gain = params->csup.gain;
+	config->csup.thres = params->csup.thres;
+	config->csup.hypf_en = params->csup.hypf_en;
+
+	COPY_USERTABLE(config->ytable, params->ytable, ISPPRV_YENH_TBL_SIZE);
+
+	/* struct ispprev_nf nf */
+	config->nf.spread = params->nf.spread;
+	memcpy(&config->nf.table, &params->nf.table, sizeof(config->nf.table));
+
+	/* struct ispprev_dcor dcor */
+	config->dcor.couplet_mode_en = params->dcor.couplet_mode_en;
+	memcpy(&config->dcor.detect_correct, &params->dcor.detect_correct,
+		sizeof(config->dcor.detect_correct));
+
+	/* struct ispprev_gtable gtable */
+	COPY_USERTABLE(config->gtable.redtable, params->gtable.redtable,
+		ISPPRV_GAMMA_TBL_SIZE);
+	COPY_USERTABLE(config->gtable.greentable, params->gtable.greentable,
+		ISPPRV_GAMMA_TBL_SIZE);
+	COPY_USERTABLE(config->gtable.bluetable, params->gtable.bluetable,
+		ISPPRV_GAMMA_TBL_SIZE);
+
+	/* struct ispprev_wbal wbal */
+	config->wbal.dgain = params->wbal.dgain;
+	config->wbal.coef3 = params->wbal.coef3;
+	config->wbal.coef2 = params->wbal.coef2;
+	config->wbal.coef1 = params->wbal.coef1;
+	config->wbal.coef0 = params->wbal.coef0;
+
+	/* struct ispprev_blkadj blk_adj */
+	config->blk_adj.red = params->blk_adj.red;
+	config->blk_adj.green = params->blk_adj.green;
+	config->blk_adj.blue = params->blk_adj.blue;
+
+	/* struct ispprev_rgbtorgb rgb2rgb */
+	memcpy(&config->rgb2rgb.matrix, &params->rgb2rgb.matrix,
+		sizeof(config->rgb2rgb.matrix));
+	memcpy(&config->rgb2rgb.offset, &params->rgb2rgb.offset,
+		sizeof(config->rgb2rgb.offset));
+
+	/* struct ispprev_csc rgb2ycbcr */
+	memcpy(&config->rgb2ycbcr.matrix, &params->rgb2ycbcr.matrix,
+		sizeof(config->rgb2ycbcr.matrix));
+	memcpy(&config->rgb2ycbcr.offset, &params->rgb2ycbcr.offset,
+		sizeof(config->rgb2ycbcr.offset));
+
+	/* struct ispprev_hmed hmf_params */
+	config->hmf_params.odddist = params->hmf_params.odddist;
+	config->hmf_params.evendist = params->hmf_params.evendist;
+	config->hmf_params.thres = params->hmf_params.thres;
+
+	/* struct prev_darkfrm_params drkf_params not set here */
+
+	config->lens_shading_shift = params->lens_shading_shift;
+	config->average = params->average;
+	config->contrast = params->contrast;
+	config->brightness = params->brightness;
+
+	device->size_params = params->size_params;
+
+	return 0;
+}
+
 /**
  * previewer_ioctl - I/O control function for Preview Wrapper
  * @inode: Inode structure associated with the Preview Wrapper.
@@ -833,129 +970,109 @@ static int previewer_ioctl(struct inode *inode, struct file *file,
 					unsigned int cmd, unsigned long arg)
 {
 	int ret = 0;
-	struct prev_params params;
 	struct prev_fh *fh = file->private_data;
 	struct prev_device *device = fh->device;
 
-	dev_dbg(prev_dev, "Entering previewer_ioctl()\n");
-
-	if ((_IOC_TYPE(cmd) != PREV_IOC_BASE)
-					|| (_IOC_NR(cmd) > PREV_IOC_MAXNR)) {
-		dev_err(prev_dev, "Bad command Value \n");
-		goto err_minusone;
-	}
-
-	if (_IOC_DIR(cmd) & _IOC_READ)
-		ret = !access_ok(VERIFY_WRITE, (void *)arg, _IOC_SIZE(cmd));
-	else if (_IOC_DIR(cmd) & _IOC_WRITE)
-		ret = !access_ok(VERIFY_READ, (void *)arg, _IOC_SIZE(cmd));
-	if (ret) {
-		dev_err(prev_dev, "access denied\n");
-		goto err_minusone;
-	}
-
 	switch (cmd) {
 	case PREV_REQBUF: {
-		struct v4l2_requestbuffers *req;
+		struct v4l2_requestbuffers req;
+
+		if (copy_from_user(&req, (void *)arg, sizeof(req)))
+			goto err_efault;
 
 		if (mutex_lock_interruptible(&device->prevwrap_mutex))
 			goto err_eintr;
 
-		req = (struct v4l2_requestbuffers *) arg;
-
-		if (req->type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
-			ret = videobuf_reqbufs(&fh->inout_vbq, (void *) arg);
-		else if (req->type == V4L2_BUF_TYPE_PRIVATE)
-			ret = videobuf_reqbufs(&fh->lsc_vbq, (void *) arg);
+		if (req.type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
+			ret = videobuf_reqbufs(&fh->inout_vbq, &req);
+		else if (req.type == V4L2_BUF_TYPE_PRIVATE)
+			ret = videobuf_reqbufs(&fh->lsc_vbq, &req);
 		else
 			ret = -EINVAL;
 
 		mutex_unlock(&device->prevwrap_mutex);
+
+		if (ret)
+			goto out;
+
+		if (copy_to_user((void *)arg, &req, sizeof(req)))
+			goto err_efault;
+
 		break;
 	}
 
 	case PREV_QUERYBUF: {
-		struct v4l2_buffer *b;
+		struct v4l2_buffer b;
+
+		if (copy_from_user(&b, (void *)arg, sizeof(b)))
+			goto err_efault;
 
 		if (mutex_lock_interruptible(&device->prevwrap_mutex))
 			goto err_eintr;
-		b = (struct v4l2_buffer *) arg;
 
-		if (b->type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
-			ret = videobuf_querybuf(&fh->inout_vbq, (void *) arg);
-		else if (b->type == V4L2_BUF_TYPE_PRIVATE)
-			ret = videobuf_querybuf(&fh->lsc_vbq, (void *) arg);
+		if (b.type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
+			ret = videobuf_querybuf(&fh->inout_vbq, &b);
+		else if (b.type == V4L2_BUF_TYPE_PRIVATE)
+			ret = videobuf_querybuf(&fh->lsc_vbq, &b);
 		else
 			ret = -EINVAL;
 
 		mutex_unlock(&device->prevwrap_mutex);
+
+		if (ret)
+			goto out;
+
+		if (copy_to_user((void *)arg, &b, sizeof(b)))
+			goto err_efault;
+
 		break;
 	}
 
 	case PREV_QUEUEBUF: {
-		struct v4l2_buffer *b;
+		struct v4l2_buffer b;
+
+		if (copy_from_user(&b, (void *)arg, sizeof(b)))
+			goto err_efault;
 
 		if (mutex_lock_interruptible(&device->prevwrap_mutex))
 			goto err_eintr;
 
-		b = (struct v4l2_buffer *) arg;
-		if (b->type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
-			ret = videobuf_qbuf(&fh->inout_vbq, (void *) arg);
-		else if (b->type == V4L2_BUF_TYPE_PRIVATE)
-			ret = videobuf_qbuf(&fh->lsc_vbq, (void *) arg);
+		if (b.type == V4L2_BUF_TYPE_VIDEO_CAPTURE)
+			ret = videobuf_qbuf(&fh->inout_vbq, &b);
+		else if (b.type == V4L2_BUF_TYPE_PRIVATE)
+			ret = videobuf_qbuf(&fh->lsc_vbq, &b);
 		else
 			ret = -EINVAL;
 
 		mutex_unlock(&device->prevwrap_mutex);
+
+		if (ret)
+			goto out;
+
+		if (copy_to_user((void *)arg, &b, sizeof(b)))
+			goto err_efault;
+
 		break;
 	}
 
 	case PREV_SET_PARAM:
 		if (mutex_lock_interruptible(&device->prevwrap_mutex))
 			goto err_eintr;
-		if (copy_from_user(&params, (struct prev_params *)arg,
-						sizeof(struct prev_params))) {
-			mutex_unlock(&device->prevwrap_mutex);
-			return -EFAULT;
-		}
-		ret = prev_validate_params(&params);
-		if (ret < 0) {
-			dev_err(prev_dev, "Error validating parameters!\n");
-			mutex_unlock(&device->prevwrap_mutex);
-			goto out;
-		}
-		if (device->params)
-			memcpy(device->params, &params,
-						sizeof(struct prev_params));
-		else {
-			mutex_unlock(&device->prevwrap_mutex);
-			return -EINVAL;
-		}
-
-/*		ret = prev_hw_setup(device->params); */
+		ret = previewer_set_param(device, (struct prev_params *)arg);
 		mutex_unlock(&device->prevwrap_mutex);
-		break;
-
-	case PREV_GET_PARAM:
-		if (copy_to_user((struct prev_params *)arg, device->params,
-						sizeof(struct prev_params)))
-			ret = -EFAULT;
-		break;
-
-	case PREV_GET_STATUS:
-		ret = prev_get_status((struct prev_status *)arg);
 		break;
 
 	case PREV_PREVIEW:
 		if (mutex_lock_interruptible(&device->prevwrap_mutex))
 			goto err_eintr;
-		ret = prev_do_preview(device, (int *)arg);
+		ret = prev_do_preview(device);
 		mutex_unlock(&device->prevwrap_mutex);
 		break;
 
 	case PREV_GET_CROPSIZE: {
 		struct prev_cropsize outputsize;
 
+		memset(&outputsize, 0, sizeof(outputsize));
 		ret = prev_calculate_crop(device, &outputsize);
 		if (ret)
 			break;
@@ -972,8 +1089,8 @@ static int previewer_ioctl(struct inode *inode, struct file *file,
 	}
 out:
 	return ret;
-err_minusone:
-	return -1;
+err_efault:
+	return -EFAULT;
 err_eintr:
 	return -EINTR;
 }
@@ -986,7 +1103,6 @@ err_eintr:
  **/
 static void previewer_platform_release(struct device *device)
 {
-	dev_dbg(prev_dev, "previewer_platform_release()\n");
 }
 
 static struct file_operations prev_fops = {
@@ -1050,28 +1166,30 @@ static int __init omap_previewer_init(void)
 
 	device = kzalloc(sizeof(struct prev_device), GFP_KERNEL);
 	if (!device) {
-		dev_err(prev_dev, OMAP_PREV_NAME ": could not allocate memory\n");
+		printk(KERN_ERR OMAP_PREV_NAME
+				" could not allocate memory\n");
 		return -ENOMEM;
 	}
 	prev_major = register_chrdev(0, OMAP_PREV_NAME, &prev_fops);
 
 	if (prev_major < 0) {
-		dev_err(prev_dev, OMAP_PREV_NAME ": initialization "
+		printk(KERN_ERR OMAP_PREV_NAME " initialization "
 				"failed. could not register character "
 				"device\n");
+		kfree(device);
 		return -ENODEV;
 	}
 
 	ret = platform_driver_register(&omap_previewer_driver);
 	if (ret) {
-		dev_err(prev_dev, OMAP_PREV_NAME
-			": failed to register platform driver!\n");
+		printk(KERN_ERR OMAP_PREV_NAME
+				"failed to register platform driver!\n");
 		goto fail2;
 	}
 	ret = platform_device_register(&omap_previewer_device);
 	if (ret) {
-		dev_err(prev_dev, OMAP_PREV_NAME
-			": failed to register platform device!\n");
+		printk(KERN_ERR OMAP_PREV_NAME
+			" failed to register platform device!\n");
 		goto fail3;
 	}
 
@@ -1082,7 +1200,6 @@ static int __init omap_previewer_init(void)
 	prev_dev = device_create(prev_class, prev_dev, MKDEV(prev_major, 0),
 				NULL, OMAP_PREV_NAME);
 
-	dev_dbg(prev_dev, OMAP_PREV_NAME ": Registered Previewer Wrapper\n");
 	device->opened = 0;
 
 	device->vbq_ops.buf_setup = previewer_vbq_setup;
@@ -1100,6 +1217,8 @@ fail3:
 	platform_driver_unregister(&omap_previewer_driver);
 fail2:
 	unregister_chrdev(prev_major, OMAP_PREV_NAME);
+
+	kfree(device);
 
 	return ret;
 }

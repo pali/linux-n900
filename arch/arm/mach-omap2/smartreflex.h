@@ -48,7 +48,8 @@
 
 /* PRM_VP1_CONFIG */
 #define PRM_VP1_CONFIG_ERROROFFSET	(0x00 << 24)
-#define PRM_VP1_CONFIG_ERRORGAIN	(0x20 << 16)
+#define PRM_VP1_CONFIG_ERRORGAIN_LOWOPP		(0x0C << 16)  /* OPPs 1,2 */
+#define PRM_VP1_CONFIG_ERRORGAIN_HIGHOPP	(0x18 << 16)  /* OPPs 3,4,5 */
 
 #define PRM_VP1_CONFIG_INITVOLTAGE	(0x30 << 8) /* 1.2 volt */
 #define PRM_VP1_CONFIG_TIMEOUTEN	(0x1 << 3)
@@ -66,12 +67,13 @@
 
 /* PRM_VP1_VLIMITTO */
 #define PRM_VP1_VLIMITTO_VDDMAX		(0x3C << 24)
-#define PRM_VP1_VLIMITTO_VDDMIN		(0x0 << 16)
-#define PRM_VP1_VLIMITTO_TIMEOUT	(0xFFFF << 0)
+#define PRM_VP1_VLIMITTO_VDDMIN		(0x14 << 16)
+#define PRM_VP1_VLIMITTO_TIMEOUT	(0xF00 << 0)
 
 /* PRM_VP2_CONFIG */
 #define PRM_VP2_CONFIG_ERROROFFSET	(0x00 << 24)
-#define PRM_VP2_CONFIG_ERRORGAIN	(0x20 << 16)
+#define PRM_VP2_CONFIG_ERRORGAIN_LOWOPP		(0x0C << 16)  /* OPPs 1,2 */
+#define PRM_VP2_CONFIG_ERRORGAIN_HIGHOPP	(0x18 << 16)  /* OPPs 3,4,5 */
 
 #define PRM_VP2_CONFIG_INITVOLTAGE	(0x30 << 8) /* 1.2 volt */
 #define PRM_VP2_CONFIG_TIMEOUTEN	(0x1 << 3)
@@ -89,8 +91,8 @@
 
 /* PRM_VP2_VLIMITTO */
 #define PRM_VP2_VLIMITTO_VDDMAX		(0x2C << 24)
-#define PRM_VP2_VLIMITTO_VDDMIN		(0x0 << 16)
-#define PRM_VP2_VLIMITTO_TIMEOUT	(0xFFFF << 0)
+#define PRM_VP2_VLIMITTO_VDDMIN		(0x18 << 16)
+#define PRM_VP2_VLIMITTO_TIMEOUT	(0xF00 << 0)
 
 /* SRCONFIG */
 #define SR1_SRCONFIG_ACCUMDATA		(0x1F4 << 22)
@@ -139,13 +141,34 @@
 #define ERRCONFIG_VPBOUNDINTEN		(0x1 << 31)
 #define ERRCONFIG_VPBOUNDINTST		(0x1 << 30)
 
+#define ERRCONFIG_MCUDISACKINTEN	(0x1 << 23)
+#define ERRCONFIG_MCUDISACKINTST	(0x1 << 22)
+
+/* Status Bits */
+#define ERRCONFIG_MCUACCUMINTST		(0x1 << 28)
+#define ERRCONFIG_MCUVALIDINTST		(0x1 << 26)
+#define ERRCONFIG_MCUBOUNDINTST		(0x1 << 24)
+#define ERRCONFIG_RESERVED		(0x1 << 19)
+
+/* WARNING: Ensure all access to errconfig register skips
+ * clearing intst bits to ensure that we dont clear status
+ * bits unwantedly.. esp vpbound
+ */
+#define ERRCONFIG_INTERRUPT_STATUS_MASK  (ERRCONFIG_VPBOUNDINTST |\
+		ERRCONFIG_MCUACCUMINTST |\
+		ERRCONFIG_MCUVALIDINTST |\
+		ERRCONFIG_MCUBOUNDINTST |\
+		ERRCONFIG_MCUDISACKINTST | ERRCONFIG_RESERVED)
+
 #define SR1_ERRWEIGHT			(0x07 << 16)
 #define SR1_ERRMAXLIMIT			(0x02 << 8)
-#define SR1_ERRMINLIMIT			(0xFA << 0)
+#define SR1_ERRMINLIMIT_LOWOPP		(0xF4 << 0)	/* OPP1, 2 */
+#define SR1_ERRMINLIMIT_HIGHOPP		(0xF9 << 0)	/* OPP3, 4, 5 */
 
 #define SR2_ERRWEIGHT			(0x07 << 16)
 #define SR2_ERRMAXLIMIT			(0x02 << 8)
-#define SR2_ERRMINLIMIT			(0xF9 << 0)
+#define SR2_ERRMINLIMIT_LOWOPP		(0xF4 << 0)	/* OPP1, 2 */
+#define SR2_ERRMINLIMIT_HIGHOPP		(0xF9 << 0)	/* OPP3, 4, 5 */
 
 /* T2 SMART REFLEX */
 #define R_SRI2C_SLAVE_ADDR		0x12
@@ -230,6 +253,9 @@
 #define PRCM_NO_VDD2_OPPS	3
 /* XXX: end remove/move */
 
+/* SR_MAX_LOW_OPP: the highest of the "low OPPs", 1 and 2. */
+#define SR_MAX_LOW_OPP		2
+
 /* XXX: find more appropriate place for these once DVFS is in place */
 extern u32 current_vdd1_opp;
 extern u32 current_vdd2_opp;
@@ -248,7 +274,7 @@ extern u32 current_vdd2_opp;
 #ifdef CONFIG_OMAP_SMARTREFLEX
 void enable_smartreflex(int srid);
 void disable_smartreflex(int srid);
-int sr_voltagescale_vcbypass(u32 target_opp, u8 vsel);
+int sr_voltagescale_vcbypass(u32 t_opp, u32 c_opp, u8 t_vsel, u8 c_vsel);
 void sr_start_vddautocomap(int srid, u32 target_opp_no);
 int sr_stop_vddautocomap(int srid);
 #else

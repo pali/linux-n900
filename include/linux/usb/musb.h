@@ -59,6 +59,16 @@ struct musb_hdrc_config {
 
 };
 
+struct musb_board_data {
+	/* reset the transceiver */
+	int		(*xceiv_reset)(void);
+
+	int		(*xceiv_power)(bool power);
+
+	/* related to omap3 power management */
+	void		(*set_pm_limits)(struct device *dev, bool set);
+};
+
 struct musb_hdrc_platform_data {
 	/* MUSB_HOST, MUSB_PERIPHERAL, or MUSB_OTG */
 	u8		mode;
@@ -86,6 +96,9 @@ struct musb_hdrc_platform_data {
 
 	/* MUSB configuration-specific details */
 	struct musb_hdrc_config	*config;
+
+	/* MUSB board-specific details */
+	struct musb_board_data	*board;
 };
 
 

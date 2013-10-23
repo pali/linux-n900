@@ -44,6 +44,7 @@ extern "C" {
 	IMG_UINT32			ui32SrcSyncCount;	
 	PVRSRV_SYNC_OBJECT	*psDstSync;			
 	PVRSRV_SYNC_OBJECT	*psSrcSync;			
+	IMG_UINT32	ui32AllocSize;
  }COMMAND_COMPLETE_DATA, *PCOMMAND_COMPLETE_DATA;
 
 #if !defined(USE_CODE)

@@ -405,7 +405,7 @@ int jffs2_remount_fs (struct super_block *sb, int *flags, char *data)
 void jffs2_write_super (struct super_block *sb)
 {
 	struct jffs2_sb_info *c = JFFS2_SB_INFO(sb);
-	sb->s_dirt = 0;
+	mark_sb_clean(sb);
 
 	if (sb->s_flags & MS_RDONLY)
 		return;

@@ -6,6 +6,7 @@
  * Copyright (C) 2009 Texas Instruments, Inc.
  *
  * Contributors:
+ * 	David Cohen <david.cohen@nokia.com>
  *	Sergio Aguirre <saaguirre@ti.com>
  *	Troy Laramy
  *
@@ -22,15 +23,11 @@
 #define OMAP_ISP_HIST_H
 
 #include <mach/isp_user.h>
+#include <mach/dma.h>
 
-#define MAX_REGIONS		0x4
-#define MAX_WB_GAIN		255
-#define MIN_WB_GAIN		0x0
-#define MAX_BIT_WIDTH		14
-#define MIN_BIT_WIDTH		8
+#include "ispstat.h"
 
 #define ISPHIST_PCR_EN		(1 << 0)
-#define HIST_MEM_SIZE		1024
 #define ISPHIST_CNT_CLR_EN	(1 << 7)
 
 #define WRITE_SOURCE(reg, source)			\
@@ -61,19 +58,23 @@
 	(reg = (reg & ~(ISPHIST_CNT_BINS_MASK))		\
 	 | (num_bins << ISPHIST_CNT_BINS_SHIFT))
 
-#define WRITE_WB_R(reg, reg_wb_gain)				\
+#define WRITE_CFA(reg, cfa)				\
+	(reg = (reg & ~(ISPHIST_CNT_CFA_MASK))		\
+	 | (cfa << ISPHIST_CNT_CFA_SHIFT))
+
+#define WRITE_WG0(reg, reg_wb_gain)				\
 	reg = ((reg & ~(ISPHIST_WB_GAIN_WG00_MASK))		\
 	       | (reg_wb_gain << ISPHIST_WB_GAIN_WG00_SHIFT))
 
-#define WRITE_WB_RG(reg, reg_wb_gain)			\
+#define WRITE_WG1(reg, reg_wb_gain)			\
 	(reg = (reg & ~(ISPHIST_WB_GAIN_WG01_MASK))	\
 	 | (reg_wb_gain << ISPHIST_WB_GAIN_WG01_SHIFT))
 
-#define WRITE_WB_B(reg, reg_wb_gain)			\
+#define WRITE_WG2(reg, reg_wb_gain)			\
 	(reg = (reg & ~(ISPHIST_WB_GAIN_WG02_MASK))	\
 	 | (reg_wb_gain << ISPHIST_WB_GAIN_WG02_SHIFT))
 
-#define WRITE_WB_BG(reg, reg_wb_gain)			\
+#define WRITE_WG3(reg, reg_wb_gain)			\
 	(reg = (reg & ~(ISPHIST_WB_GAIN_WG03_MASK))	\
 	 | (reg_wb_gain << ISPHIST_WB_GAIN_WG03_SHIFT))
 
@@ -90,16 +91,8 @@
  * @pcr: Peripheral control register.
  * @cnt: Histogram control register.
  * @wb_gain: Histogram white balance gain register.
- * @r0_h: Region 0 horizontal register.
- * @r0_v: Region 0 vertical register.
- * @r1_h: Region 1 horizontal register.
- * @r1_v: Region 1 vertical register.
- * @r2_h: Region 2 horizontal register.
- * @r2_v: Region 2 vertical register.
- * @r3_h: Region 3 horizontal register.
- * @r3_v: Region 3 vertical register.
- * @hist_addr: Histogram address register.
- * @hist_data: Histogram data.
+ * @reg_hor[]: Region N horizontal register.
+ * @reg_ver[]: Region N vertical register.
  * @hist_radd: Address register. When input data comes from mem.
  * @hist_radd_off: Address offset register. When input data comes from mem.
  * @h_v_info: Image size register. When input data comes from mem.
@@ -108,16 +101,8 @@ struct isp_hist_regs {
 	u32 pcr;
 	u32 cnt;
 	u32 wb_gain;
-	u32 r0_h;
-	u32 r0_v;
-	u32 r1_h;
-	u32 r1_v;
-	u32 r2_h;
-	u32 r2_v;
-	u32 r3_h;
-	u32 r3_v;
-	u32 hist_addr;
-	u32 hist_data;
+	u32 reg_hor[HIST_MAX_REGIONS];
+	u32 reg_ver[HIST_MAX_REGIONS];
 	u32 hist_radd;
 	u32 hist_radd_off;
 	u32 h_v_info;
@@ -126,38 +111,49 @@ struct isp_hist_regs {
 /**
  * struct isp_hist_status - Histogram status.
  * @hist_enable: Enables the histogram module.
- * @initialized: Flag to indicate that the module is correctly initializated.
+ * @initialized: Flag to indicate that the module is correctly initialized.
  * @frame_cnt: Actual frame count.
- * @frame_req: Frame requested by user.
+ * @num_acc_frames: Num accumulated image frames per hist frame
  * @completed: Flag to indicate if a frame request is completed.
  */
 struct isp_hist_device {
-	u8 hist_enable;
-	u8 pm_state;
-	u8 initialized;
-	u8 frame_cnt;
-	u8 frame_req;
-	u8 completed;
+	u8 enabled;
+	u8 update;
+	u8 num_acc_frames;
+	u8 waiting_dma;
+	u8 invalid_buf;
+	u8 use_dma;
+	int dma_ch;
+	struct timeval ts;
+
+	struct omap_dma_channel_params dma_config;
 	struct isp_hist_regs regs;
-	struct device *dev;
+	struct isp_hist_config config;
+	struct ispstat_buffer *active_buf;
+	unsigned int buf_size;
+	struct ispstat stat;
+
+	spinlock_t lock;	/* serialize access to hist device's fields */
 };
 
-void isp_hist_enable(struct isp_hist_device *isp_hist, u8 enable);
+#define HIST_BUF_DONE		0
+#define HIST_NO_BUF		1
+#define HIST_BUF_WAITING_DMA	2
 
 int isp_hist_busy(struct isp_hist_device *isp_hist);
-
-int isp_hist_configure(struct isp_hist_device *isp_hist,
-		       struct isp_hist_config *histcfg);
-
-int isp_hist_request_statistics(struct isp_hist_device *isp_hist,
-				struct isp_hist_data *histdata);
-
-void isphist_save_context(struct device *dev);
-
+void isp_hist_enable(struct isp_hist_device *isp_hist, u8 enable);
+void isp_hist_try_enable(struct isp_hist_device *isp_hist);
+int isp_hist_busy(struct isp_hist_device *isp_hist);
+int isp_hist_buf_process(struct isp_hist_device *isp_hist);
+void isp_hist_mark_invalid_buf(struct isp_hist_device *isp_hist);
+void isp_hist_config_registers(struct isp_hist_device *isp_hist);
 void isp_hist_suspend(struct isp_hist_device *isp_hist);
-
 void isp_hist_resume(struct isp_hist_device *isp_hist);
-
+void isphist_save_context(struct device *dev);
 void isphist_restore_context(struct device *dev);
+int omap34xx_isp_hist_config(struct isp_hist_device *isp_hist,
+			     struct isp_hist_config *histcfg);
+int omap34xx_isp_hist_request_statistics(struct isp_hist_device *isp_hist,
+					 struct isp_hist_data *histdata);
 
 #endif				/* OMAP_ISP_HIST */

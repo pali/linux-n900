@@ -34,7 +34,7 @@
  */
 
 #include <linux/highmem.h>
-#include <asm-generic/iomap.h>
+#include <asm/io.h>
 #include "drmP.h"
 
 static struct {

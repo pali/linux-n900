@@ -294,6 +294,7 @@ int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
 #define MSG_SINGULAR(devgrp, id, state) \
 	((devgrp) << 13 | 0 << 12 | (id) << 4 | (state))
 
+
 /*----------------------------------------------------------------------*/
 
 struct twl4030_bci_platform_data {
@@ -355,14 +356,26 @@ struct twl4030_ins {
 	u8 delay;
 };
 
+#define MAX_EVENTS 4
+
+enum twl4030_event {
+	TRITON_SLEEP 	= 1,
+	TRITON_WAKEUP12 = 2,
+	TRITON_WAKEUP3  = 3,
+	TRITON_WRST 	= 4,
+};
+
+struct twl4030_script_event {
+	/* offset from the start of the script allow overlapping */
+	u8 offset;
+	enum twl4030_event event;
+};
+
 struct twl4030_script {
 	struct twl4030_ins *script;
 	unsigned size;
-	u8 flags;
-#define TRITON_WRST_SCRIPT	(1<<0)
-#define TRITON_WAKEUP12_SCRIPT	(1<<1)
-#define TRITON_WAKEUP3_SCRIPT	(1<<2)
-#define TRITON_SLEEP_SCRIPT	(1<<3)
+	unsigned number_of_events;
+	struct twl4030_script_event events[MAX_EVENTS];
 };
 
 struct twl4030_resconfig {
@@ -370,6 +383,7 @@ struct twl4030_resconfig {
 	int devgroup;
 	int type;
 	int type2;
+	int remap;
 };
 
 struct twl4030_power_data {
@@ -425,6 +439,10 @@ int twl4030_sih_setup(int module);
 #define TWL4030_VAUX4_TYPE		0x24
 #define TWL4030_VAUX4_REMAP		0x25
 #define TWL4030_VAUX4_DEDICATED		0x26
+#define TWL4030_VMMC2_DEV_GRP		0x2b
+#define TWL4030_VMMC2_TYPE		0x2c
+#define TWL4030_VMMC2_REMAP		0x2d
+#define TWL4030_VMMC2_DEDICATED		0x2e
 
 #if defined(CONFIG_TWL4030_BCI_BATTERY) || \
 	defined(CONFIG_TWL4030_BCI_BATTERY_MODULE)
@@ -467,4 +485,6 @@ int twl4030_sih_setup(int module);
 #define TWL4030_REG_VUSB1V8	18
 #define TWL4030_REG_VUSB3V1	19
 
+extern int twl4030_enable_regulator(int res);
+extern int twl4030_disable_regulator(int res);
 #endif /* End of __TWL4030_H */

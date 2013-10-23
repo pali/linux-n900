@@ -51,6 +51,9 @@
 #define N800_DAV_IRQ_GPIO		103
 #define N800_TSC2301_RESET_GPIO		118
 
+#define N810_TSC2005_IRQ_GPIO		106
+#define N810_TSC2005_RESET_GPIO		94
+
 #ifdef CONFIG_MACH_NOKIA_N810
 static s16 rx44_keymap[LM8323_KEYMAP_SIZE] = {
 	[0x01] = KEY_Q,
@@ -123,7 +126,7 @@ static struct lm8323_platform_data lm8323_pdata = {
 
 void __init nokia_n800_init_irq(void)
 {
-	omap2_init_common_hw(NULL, NULL, NULL, NULL);
+	omap2_init_common_hw(NULL, NULL, NULL, NULL, NULL);
 	omap_init_irq();
 	omap_gpio_init();
 
@@ -363,8 +366,9 @@ static struct omap2_mcspi_device_config cx3110x_mcspi_config = {
 
 #ifdef CONFIG_TOUCHSCREEN_TSC2005
 static struct tsc2005_platform_data tsc2005_config = {
-	.reset_gpio = 94,
-	.dav_gpio = 106
+	.esd_timeout	= 8*1000, /* ms of inactivity before we check */
+
+	.set_reset	= NULL
 };
 
 static struct omap2_mcspi_device_config tsc2005_mcspi_config = {
@@ -463,6 +467,35 @@ static void __init tsc2005_set_config(void)
 		}
 #endif
 	}
+}
+
+#ifdef CONFIG_TOUCHSCREEN_TSC2005
+static void n810_tsc2005_set_reset(bool enable)
+{
+	gpio_set_value(N810_TSC2005_RESET_GPIO, enable);
+}
+#endif
+
+static void __init n810_init_tsc2005(void)
+{
+#ifdef CONFIG_TOUCHSCREEN_TSC2005
+	int r;
+
+	r = gpio_request(N810_TSC2005_IRQ_GPIO, "tsc2005 DAV IRQ");
+	if (r >= 0)
+		gpio_direction_input(N810_TSC2005_IRQ_GPIO);
+	else
+		printk(KERN_ERR "unable to get DAV GPIO\n");
+
+	r = gpio_request(N810_TSC2005_RESET_GPIO, "tsc2005 reset");
+	if (r >= 0) {
+		gpio_direction_output(N810_TSC2005_RESET_GPIO, 1);
+		tsc2005_config.set_reset = n810_tsc2005_set_reset;
+	} else {
+		printk(KERN_ERR "unable to get tsc2005 reset GPIO\n");
+		tsc2005_config.esd_timeout = 0;
+	}
+#endif
 }
 
 #if defined(CONFIG_CBUS_RETU) && defined(CONFIG_LEDS_OMAP_PWM)
@@ -676,6 +709,7 @@ void __init nokia_n800_common_init(void)
 				ARRAY_SIZE(n800_spi_board_info));
 	if (machine_is_nokia_n810()) {
 		tsc2005_set_config();
+		n810_init_tsc2005();
 		spi_register_board_info(n810_spi_board_info,
 				ARRAY_SIZE(n810_spi_board_info));
 	}

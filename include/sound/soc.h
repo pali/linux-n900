@@ -162,7 +162,6 @@ enum snd_soc_bias_level {
 #define SND_SOC_DAIFMT_DSP_A	3	/* L data msb after FRM or LRC */
 #define SND_SOC_DAIFMT_DSP_B	4	/* L data msb during FRM or LRC */
 #define SND_SOC_DAIFMT_AC97		5	/* AC97 */
-#define SND_SOC_DAIFMT_DSP	6
 
 #define SND_SOC_DAIFMT_MSB 	SND_SOC_DAIFMT_LEFT_J
 #define SND_SOC_DAIFMT_LSB	SND_SOC_DAIFMT_RIGHT_J

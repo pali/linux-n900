@@ -808,6 +808,8 @@ void gether_cleanup(void)
 	if (!the_dev)
 		return;
 
+	netif_stop_queue(the_dev->net);
+	netif_carrier_off(the_dev->net);
 	unregister_netdev(the_dev->net);
 	free_netdev(the_dev->net);
 

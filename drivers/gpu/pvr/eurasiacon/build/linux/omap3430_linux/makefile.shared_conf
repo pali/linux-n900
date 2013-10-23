@@ -42,7 +42,7 @@ DISPLAY_CONTROLLER =	omaplfb
 ARCH_CFLAGS		= -march=armv7-a
 
 # SYS_FLAGS contains any flags specific to this system
-SYS_CFLAGS		= 
+SYS_CFLAGS		= -DSGX_DYNAMIC_TIMING_INFO
 
 # The version of the kernel that is required for compilation
 REQUIREDKERNELVERSION = 2.6.24

@@ -371,7 +371,13 @@ DSP_STATUS SYNC_WaitOnMultipleEvents(struct SYNC_OBJECT **hSyncEvents,
 		if (down_interruptible(&(Wp->sem))) {
 			GT_0trace(SYNC_debugMask, GT_7CLASS, "SYNC: "
 				"WaitOnMultipleEvents Interrupted by signal\n");
-			status = DSP_EFAIL;
+			/*
+			 * Most probably we are interrupted by a fake signal
+			 * from freezer. Return -ERESTARTSYS so that this
+			 * ioctl is restarted, and user space doesn't notice
+			 * it.
+			 */
+			status = -ERESTARTSYS;
 		}
 		if (dwTimeout != SYNC_INFINITE) {
 			if (in_interrupt()) {

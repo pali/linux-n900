@@ -75,8 +75,7 @@ static int smia_ioctl_enum_framesizes(struct v4l2_int_device *s,
 				      struct v4l2_frmsizeenum *frm);
 static int smia_ioctl_enum_frameintervals(struct v4l2_int_device *s,
 					  struct v4l2_frmivalenum *frm);
-static int smia_ioctl_enum_slaves(struct v4l2_int_device *s,
-				  struct v4l2_slave_info *si);
+static int smia_ioctl_dev_init(struct v4l2_int_device *s);
 
 static struct v4l2_int_ioctl_desc smia_ioctl_desc[] = {
 	{ vidioc_int_enum_fmt_cap_num,
@@ -105,8 +104,8 @@ static struct v4l2_int_ioctl_desc smia_ioctl_desc[] = {
 	  (v4l2_int_ioctl_func *)smia_ioctl_enum_framesizes },
 	{ vidioc_int_enum_frameintervals_num,
 	  (v4l2_int_ioctl_func *)smia_ioctl_enum_frameintervals },
-	{ vidioc_int_enum_slaves_num,
-	  (v4l2_int_ioctl_func *)smia_ioctl_enum_slaves },
+	{ vidioc_int_dev_init_num,
+	  (v4l2_int_ioctl_func *)smia_ioctl_dev_init },
 };
 
 static struct v4l2_int_slave smia_slave = {
@@ -199,15 +198,28 @@ static int smia_exposure_rows_to_us(struct smia_sensor *sensor, int rows)
 	return (smia_get_row_time(sensor) * rows + (1 << 7)) >> 8;
 }
 
+static int smia_stream_on(struct v4l2_int_device *s)
+{
+	struct smia_sensor *sensor = s->priv;
+	return smia_i2c_write_reg(sensor->i2c_client,
+				  SMIA_REG_8BIT, 0x0100, 0x01);
+}
+
+static int smia_stream_off(struct v4l2_int_device *s)
+{
+	struct smia_sensor *sensor = s->priv;
+	return smia_i2c_write_reg(sensor->i2c_client,
+				  SMIA_REG_8BIT, 0x0100, 0x00);
+}
+
 /* Must be called with power already enabled on the sensor */
 static int smia_configure(struct v4l2_int_device *s)
 {
 	struct smia_sensor *sensor = s->priv;
 	int rval;
 
-	rval = smia_i2c_reglist_find_write(sensor->i2c_client,
-					   sensor->meta_reglist,
-					   SMIA_REGLIST_POWERON);
+	rval = smia_i2c_write_regs(sensor->i2c_client,
+				   sensor->current_reglist->regs);
 	if (rval)
 		goto fail;
 
@@ -222,41 +234,27 @@ static int smia_configure(struct v4l2_int_device *s)
 	if (rval)
 		goto fail;
 
-	rval = smia_i2c_write_regs(sensor->i2c_client,
-				   sensor->current_reglist->regs);
+	/*
+	 * FIXME: remove stream_off from here as soon as camera-firmware
+	 * is modified to not enable streaming automatically.
+	 */
+	rval = smia_stream_off(s);
 	if (rval)
 		goto fail;
 
-	return rval;
+	rval = sensor->platform_data->configure_interface(
+		s,
+		sensor->current_reglist->mode.window_width,
+		sensor->current_reglist->mode.window_height);
+	if (rval)
+		goto fail;
+
+	return 0;
 
 fail:
 	dev_err(&sensor->i2c_client->dev, "sensor configuration failed\n");
 	return rval;
 
-}
-
-static int smia_setup_if(struct v4l2_int_device *s)
-{
-	struct smia_sensor *sensor = s->priv;
-	int rval;
-	unsigned int hz;
-
-	if (sensor->current_reglist) {
-		rval = sensor->platform_data->configure_interface(
-			s,
-			sensor->current_reglist->mode.window_width,
-			sensor->current_reglist->mode.window_height);
-		if (rval)
-			return rval;
-		hz = sensor->current_reglist->mode.ext_clock;
-	} else {
-		hz = DEFAULT_XCLK;
-	}
-
-	sensor->platform_data->set_xclk(s, hz);
-	udelay(16*1000000/hz+1);		/* Wait 16 clocks */
-
-	return 0;
 }
 
 static int smia_power_off(struct v4l2_int_device *s)
@@ -274,15 +272,21 @@ static int smia_power_off(struct v4l2_int_device *s)
 static int smia_power_on(struct v4l2_int_device *s)
 {
 	struct smia_sensor *sensor = s->priv;
+	struct smia_reglist *reglist = NULL;
 	int rval;
+	unsigned int hz = DEFAULT_XCLK;
+
+	if (sensor->meta_reglist) {
+		reglist = smia_reglist_find_type(sensor->meta_reglist,
+						 SMIA_REGLIST_POWERON);
+		hz = reglist->mode.ext_clock;
+	}
 
 	rval = sensor->platform_data->power_on(s);
 	if (rval)
 		goto out;
 
-	rval = smia_setup_if(s);
-	if (rval)
-		goto out;
+	sensor->platform_data->set_xclk(s, hz);
 
 	/*
 	 * At least 10 ms is required between xshutdown up and first
@@ -290,6 +294,13 @@ static int smia_power_on(struct v4l2_int_device *s)
 	 * before first i2c transaction.
 	 */
 	msleep(10);
+
+	if (reglist) {
+		rval = smia_i2c_write_regs(sensor->i2c_client,
+					   reglist->regs);
+		if (rval)
+			goto out;
+	}
 
 out:
 	if (rval)
@@ -473,12 +484,16 @@ static int smia_ioctl_s_parm(struct v4l2_int_device *s,
 	return -EINVAL;
 }
 
-static int smia_dev_init(struct v4l2_int_device *s)
+static int smia_ioctl_dev_init(struct v4l2_int_device *s)
 {
 	struct smia_sensor *sensor = s->priv;
 	char name[FIRMWARE_NAME_MAX];
 	int model_id, revision_number, manufacturer_id, smia_version;
 	int i, rval;
+
+	rval = smia_power_on(s);
+	if (rval)
+		return -ENODEV;
 
 	/* Read and check sensor identification registers */
 	if (smia_i2c_read_reg(sensor->i2c_client, SMIA_REG_16BIT,
@@ -489,7 +504,8 @@ static int smia_dev_init(struct v4l2_int_device *s)
 				 REG_MANUFACTURER_ID, &manufacturer_id)
 	    || smia_i2c_read_reg(sensor->i2c_client, SMIA_REG_8BIT,
 				 REG_SMIA_VERSION, &smia_version)) {
-		return -ENODEV;
+		rval = -ENODEV;
+		goto out_poweroff;
 	}
 
 	sensor->model_id        = model_id;
@@ -503,7 +519,8 @@ static int smia_dev_init(struct v4l2_int_device *s)
 			"unknown sensor 0x%04x detected (smia ver %i.%i)\n",
 			sensor->model_id,
 			sensor->smia_version / 10, sensor->smia_version % 10);
-		return -ENODEV;
+		rval = -ENODEV;
+		goto out_poweroff;
 	}
 
 	/* Update identification string */
@@ -525,7 +542,8 @@ static int smia_dev_init(struct v4l2_int_device *s)
 			     &sensor->i2c_client->dev)) {
 		dev_err(&sensor->i2c_client->dev,
 			"can't load firmware %s\n", name);
-		return -ENODEV;
+		rval = -ENODEV;
+		goto out_poweroff;
 	}
 
 	sensor->meta_reglist =
@@ -551,54 +569,79 @@ static int smia_dev_init(struct v4l2_int_device *s)
 		goto out_release;
 	}
 
-	sensor->dev_init_done = true;
+	rval = smia_power_off(s);
+	if (rval)
+		goto out_release;
 
 	return 0;
 
 out_release:
 	release_firmware(sensor->fw);
+out_poweroff:
 	sensor->meta_reglist = NULL;
 	sensor->fw = NULL;
+	smia_power_off(s);
 
 	return rval;
 }
 
-static int smia_ioctl_s_power(struct v4l2_int_device *s, enum v4l2_power state)
+static int smia_ioctl_s_power(struct v4l2_int_device *s,
+				enum v4l2_power new_state)
 {
 	struct smia_sensor *sensor = s->priv;
 	int rval = 0;
 
-	if (state != V4L2_POWER_ON)
-		state = V4L2_POWER_OFF;
+	/*
+	 * Map STANDBY to OFF mode: there is no reason to keep the sensor
+	 * powered if not streaming.
+	 */
+	if (new_state == V4L2_POWER_STANDBY)
+		new_state = V4L2_POWER_OFF;
 
-	if (sensor->power == state)
+	/* If we are already in this mode, do nothing */
+	if (sensor->power == new_state)
 		return 0;
 
-	if (state == V4L2_POWER_ON) {
-		rval = smia_power_on(s);
+	/* Disable power if so requested (it was enabled) */
+	if (new_state == V4L2_POWER_OFF) {
+		rval = smia_stream_off(s);
 		if (rval)
-			return rval;
-		if (!sensor->dev_init_done) {
-			rval = smia_dev_init(s);
-			if (rval)
-				goto out_poweroff;
-		}
-		rval = smia_configure(s);
-		if (rval)
-			goto out_poweroff;
-	} else {
-		/* V4L2_POWER_OFF */
+			dev_err(&sensor->i2c_client->dev,
+				"can not stop streaming\n");
 		rval = smia_power_off(s);
-		if (rval)
-			return rval;
+		goto out;
 	}
 
-	sensor->power = state;
-	return 0;
+	/* Either STANDBY or ON requested */
 
-out_poweroff:
-	sensor->power = V4L2_POWER_OFF;
-	smia_power_off(s);
+	/* Enable power and move to standby if it was off */
+	if (sensor->power == V4L2_POWER_OFF) {
+		rval = smia_power_on(s);
+		if (rval)
+			goto out;
+	}
+
+	/* Now sensor is powered (standby or streaming) */
+
+	if (new_state == V4L2_POWER_ON) {
+		/* Standby -> streaming */
+		rval = smia_configure(s);
+		if (rval) {
+			smia_stream_off(s);
+			if (sensor->power == V4L2_POWER_OFF)
+				smia_power_off(s);
+			goto out;
+		}
+		rval = smia_stream_on(s);
+	} else {
+		/* Streaming -> standby */
+		rval = smia_stream_off(s);
+	}
+
+out:
+	if (rval == 0)
+		sensor->power = new_state;
+
 	return rval;
 }
 
@@ -625,43 +668,27 @@ static int smia_ioctl_enum_frameintervals(struct v4l2_int_device *s,
 	return smia_reglist_enum_frameintervals(sensor->meta_reglist, frm);
 }
 
-static int smia_ioctl_enum_slaves(struct v4l2_int_device *s,
-			     struct v4l2_slave_info *si)
-{
-	struct smia_sensor *sensor = s->priv;
-
-	strlcpy(si->driver, SMIA_SENSOR_NAME, sizeof(si->driver));
-	strlcpy(si->bus_info, "ccp2", sizeof(si->bus_info));
-	snprintf(si->version, sizeof(si->version), "%02x",
-		 sensor->revision_number);
-
-	return 0;
-}
-
 #ifdef CONFIG_PM
 
 static int smia_suspend(struct i2c_client *client, pm_message_t mesg)
 {
-	struct smia_sensor *sensor = i2c_get_clientdata(client);
+	struct smia_sensor *sensor = dev_get_drvdata(&client->dev);
+	enum v4l2_power resume_state = sensor->power;
+	int rval;
 
-	if (sensor->power == V4L2_POWER_OFF)
-		return 0;
-
-	return smia_power_off(sensor->v4l2_int_device);
+	rval = smia_ioctl_s_power(sensor->v4l2_int_device, V4L2_POWER_OFF);
+	if (rval == 0)
+		sensor->power = resume_state;
+	return rval;
 }
 
 static int smia_resume(struct i2c_client *client)
 {
-	struct smia_sensor *sensor = i2c_get_clientdata(client);
-	enum v4l2_power resume_power;
+	struct smia_sensor *sensor = dev_get_drvdata(&client->dev);
+	enum v4l2_power resume_state = sensor->power;
 
-	if (sensor->power == V4L2_POWER_OFF)
-		return 0;
-
-	resume_power = sensor->power;
 	sensor->power = V4L2_POWER_OFF;
-
-	return smia_ioctl_s_power(sensor->v4l2_int_device, resume_power);
+	return smia_ioctl_s_power(sensor->v4l2_int_device, resume_state);
 }
 
 #else

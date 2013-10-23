@@ -30,15 +30,18 @@
 #include <linux/seq_file.h>
 #include <linux/debugfs.h>
 #include <linux/io.h>
+#include <linux/workqueue.h>
+#include <linux/spinlock.h>
 
 #include <mach/display.h>
 #include <mach/clock.h>
+#include <mach/omap-pm.h>
 
 #include "dss.h"
 
 static struct {
 	struct platform_device *pdev;
-	unsigned	ctx_id;
+	int		ctx_id;
 
 	struct clk      *dss_ick;
 	struct clk	*dss1_fck;
@@ -46,6 +49,15 @@ static struct {
 	struct clk      *dss_54m_fck;
 	struct clk	*dss_96m_fck;
 	unsigned	num_clks_enabled;
+
+	struct delayed_work bus_tput_work;
+	unsigned int bus_tput;
+
+	bool reset_pending;
+	spinlock_t reset_lock;
+	struct work_struct reset_work;
+
+	struct mutex dss_lock;
 } core;
 
 static void dss_clk_enable_all_no_ctx(void);
@@ -63,26 +75,39 @@ module_param_named(debug, dss_debug, bool, 0644);
 #endif
 
 /* CONTEXT */
-static unsigned dss_get_ctx_id(void)
+static int dss_get_ctx_id(void)
 {
 	struct omap_dss_board_info *pdata = core.pdev->dev.platform_data;
+	int r;
 
 	if (!pdata->get_last_off_on_transaction_id)
 		return 0;
-
-	return pdata->get_last_off_on_transaction_id(&core.pdev->dev);
+	r = pdata->get_last_off_on_transaction_id(&core.pdev->dev);
+	if (r < 0) {
+		dev_err(&core.pdev->dev,
+			"getting transaction ID failed, will force context restore\n");
+		r = -1;
+	}
+	return r;
 }
 
 int dss_need_ctx_restore(void)
 {
 	int id = dss_get_ctx_id();
 
-	if (id != core.ctx_id) {
-		DSSDBG("ctx id %u -> id %u\n",
+	if (id < 0 || id != core.ctx_id) {
+		DSSDBG("ctx id %d -> id %d\n",
 				core.ctx_id, id);
 		core.ctx_id = id;
 		return 1;
 	} else {
+		/* Hack to workaround context loss */
+		if (dss_check_context()) {
+			DSSERR("unexpected HW context loss, will force context restore (id=%d)\n",
+			       id);
+			return 1;
+		}
+
 		return 0;
 	}
 }
@@ -93,12 +118,19 @@ static void save_all_ctx(void)
 
 	dss_clk_enable_no_ctx(DSS_CLK_ICK | DSS_CLK_FCK1);
 
+	/* Hack to workaround context loss */
+	if (dss_check_context()) {
+		DSSERR("HW context corrupted, skipping save\n");
+		goto out;
+	}
+
 	dss_save_context();
 	dispc_save_context();
 #ifdef CONFIG_OMAP2_DSS_DSI
 	dsi_save_context();
 #endif
 
+ out:
 	dss_clk_disable_no_ctx(DSS_CLK_ICK | DSS_CLK_FCK1);
 }
 
@@ -324,6 +356,16 @@ static void dss_clk_disable_all_no_ctx(void)
 	dss_clk_disable_no_ctx(clks);
 }
 
+static void dss_clk_enable_all(void)
+{
+	enum dss_clock clks;
+
+	clks = DSS_CLK_ICK | DSS_CLK_FCK1 | DSS_CLK_FCK2 | DSS_CLK_54M;
+	if (cpu_is_omap34xx())
+		clks |= DSS_CLK_96M;
+	dss_clk_enable(clks);
+}
+
 static void dss_clk_disable_all(void)
 {
 	enum dss_clock clks;
@@ -390,6 +432,10 @@ static int dss_initialize_debugfs(void)
 	debugfs_create_file("dsi", S_IRUGO, dss_debugfs_dir,
 			&dsi_dump_regs, &dss_debug_fops);
 #endif
+#ifdef CONFIG_OMAP2_DSS_VENC
+	debugfs_create_file("venc", S_IRUGO, dss_debugfs_dir,
+			&venc_dump_regs, &dss_debug_fops);
+#endif
 	return 0;
 }
 
@@ -400,6 +446,139 @@ static void dss_uninitialize_debugfs(void)
 }
 #endif /* CONFIG_DEBUG_FS && CONFIG_OMAP2_DSS_DEBUG_SUPPORT */
 
+void omap_dss_lock(void)
+{
+	mutex_lock(&core.dss_lock);
+}
+EXPORT_SYMBOL(omap_dss_lock);
+
+void omap_dss_unlock(void)
+{
+	mutex_unlock(&core.dss_lock);
+}
+EXPORT_SYMBOL(omap_dss_unlock);
+
+/* RESET */
+
+void dss_schedule_reset(void)
+{
+	unsigned long flags;
+
+	DSSDBG("schduling a soft reset\n");
+
+	spin_lock_irqsave(&core.reset_lock, flags);
+	if (core.reset_pending) {
+		spin_unlock_irqrestore(&core.reset_lock, flags);
+		return;
+	}
+
+	core.reset_pending = true;
+	schedule_work(&core.reset_work);
+
+	spin_unlock_irqrestore(&core.reset_lock, flags);
+}
+
+static void reset_work_func(struct work_struct *work)
+{
+	DSSDBG("performing soft reset\n");
+
+	spin_lock_irq(&core.reset_lock);
+	if (!core.reset_pending) {
+		spin_unlock_irq(&core.reset_lock);
+		return;
+	}
+	spin_unlock_irq(&core.reset_lock);
+
+	omap_dss_lock();
+	dss_clk_enable_all();
+	dss_suspend_all_displays();
+	save_all_ctx();
+
+	dss_reset();
+
+	restore_all_ctx();
+	dss_resume_all_displays();
+	dss_clk_disable_all();
+	omap_dss_unlock();
+
+	spin_lock_irq(&core.reset_lock);
+	core.reset_pending = false;
+	spin_unlock_irq(&core.reset_lock);
+
+	DSSDBG("done with soft reset\n");
+}
+
+/* DVFS */
+
+static void bus_tput_work_func(struct work_struct *work)
+{
+	struct omap_dss_board_info *pdata = core.pdev->dev.platform_data;
+
+	DSSDBG("setting bus throughput to %d KiB/s\n", core.bus_tput);
+	pdata->set_min_bus_tput(&core.pdev->dev,
+			OCP_INITIATOR_AGENT, core.bus_tput);
+}
+
+static void set_min_bus_tput(unsigned int num_overlays)
+{
+	struct omap_dss_board_info *pdata = core.pdev->dev.platform_data;
+	/*
+	 * Magic value 400000 chosen so that on OMAP3 OPP3 is used.
+	 */
+	unsigned int tput_max = 400000;
+	unsigned int tput = num_overlays ? 400000 : 0;
+
+	if (!pdata->set_min_bus_tput || tput == core.bus_tput)
+		return;
+
+	cancel_delayed_work_sync(&core.bus_tput_work);
+
+	core.bus_tput = tput;
+
+	/* Switch to the maximum when the FIFOs are empty. */
+	DSSDBG("setting bus throughput to %d KiB/s\n", tput_max);
+	pdata->set_min_bus_tput(&core.pdev->dev, OCP_INITIATOR_AGENT, tput_max);
+
+	if (tput == tput_max)
+		return;
+
+	/* Switch to whatever was requested after things have stabilized. */
+	schedule_delayed_work(&core.bus_tput_work, msecs_to_jiffies(2000));
+}
+
+void omap_dss_maximize_min_bus_tput(void)
+{
+	set_min_bus_tput(omap_dss_get_num_overlays());
+}
+
+void omap_dss_update_min_bus_tput(void)
+{
+	int i;
+	struct omap_display *display;
+	struct omap_overlay *ovl;
+	int num_overlays = 0;
+
+	DSSDBG("dss_update_min_bus_tput()\n");
+
+	/* Determine how many overlays are actually fetching data */
+	for (i = 0; i < omap_dss_get_num_overlays(); ++i) {
+		ovl = omap_dss_get_overlay(i);
+
+		if (!(ovl->caps & OMAP_DSS_OVL_CAP_DISPC))
+			continue;
+
+		if (!ovl->info.enabled || !ovl->manager)
+			continue;
+
+		display = ovl->manager->display;
+		if (!display || display->state != OMAP_DSS_DISPLAY_ACTIVE)
+			continue;
+
+		num_overlays++;
+	}
+
+	set_min_bus_tput(num_overlays);
+}
 
 /* DSI powers */
 int dss_dsi_power_up(void)
@@ -420,6 +599,11 @@ void dss_dsi_power_down(void)
 		return;
 
 	pdata->dsi_power_down();
+}
+
+const char *dss_get_def_disp_name(void)
+{
+	return def_disp_name ? def_disp_name : "";
 }
 
 
@@ -473,7 +657,7 @@ static int omap_dss_probe(struct platform_device *pdev)
 		goto fail0;
 	}
 #ifdef CONFIG_OMAP2_DSS_VENC
-	r = venc_init();
+	r = venc_init(core.pdev);
 	if (r) {
 		DSSERR("Failed to initialize venc\n");
 		goto fail0;
@@ -504,9 +688,17 @@ static int omap_dss_probe(struct platform_device *pdev)
 
 	dss_init_displays(pdev);
 	dss_init_overlay_managers(pdev);
-	dss_init_overlays(pdev, def_disp_name);
+	dss_init_overlays(pdev);
 
 	dss_clk_disable_all();
+
+	INIT_DELAYED_WORK(&core.bus_tput_work, bus_tput_work_func);
+
+	core.reset_pending = false;
+	spin_lock_init(&core.reset_lock);
+	INIT_WORK(&core.reset_work, reset_work_func);
+
+	mutex_init(&core.dss_lock);
 
 	return 0;
 
@@ -517,7 +709,15 @@ fail0:
 
 static int omap_dss_remove(struct platform_device *pdev)
 {
+	struct omap_dss_board_info *pdata = pdev->dev.platform_data;
 	int c;
+
+	cancel_work_sync(&core.reset_work);
+	core.reset_pending = false;
+
+	cancel_delayed_work_sync(&core.bus_tput_work);
+	if (pdata->set_min_bus_tput)
+		pdata->set_min_bus_tput(&core.pdev->dev, OCP_INITIATOR_AGENT, 0);
 
 	dss_uninit_overlays(pdev);
 	dss_uninit_overlay_managers(pdev);
@@ -597,16 +797,29 @@ static void omap_dss_shutdown(struct platform_device *pdev)
 
 static int omap_dss_suspend(struct platform_device *pdev, pm_message_t state)
 {
+	int ret;
+
 	DSSDBG("suspend %d\n", state.event);
 
-	return dss_suspend_all_displays();
+	omap_dss_lock();
+	ret = dss_suspend_all_displays();
+	omap_dss_unlock();
+
+	return ret;
+
 }
 
 static int omap_dss_resume(struct platform_device *pdev)
 {
+	int ret;
+
 	DSSDBG("resume\n");
 
-	return dss_resume_all_displays();
+	omap_dss_lock();
+	ret =  dss_resume_all_displays();
+	omap_dss_unlock();
+
+	return ret;
 }
 
 static struct platform_driver omap_dss_driver = {
@@ -631,7 +844,7 @@ static void __exit omap_dss_exit(void)
 	platform_driver_unregister(&omap_dss_driver);
 }
 
-subsys_initcall(omap_dss_init);
+device_initcall(omap_dss_init);
 module_exit(omap_dss_exit);
 
 

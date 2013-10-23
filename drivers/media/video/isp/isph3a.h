@@ -44,6 +44,8 @@
 #define ISPH3A_PCR_AEW_EN	(1 << 16)
 #define ISPH3A_PCR_AEW_ALAW_EN	(1 << 17)
 #define ISPH3A_PCR_AEW_BUSY	(1 << 18)
+#define ISPH3A_PCR_AEW_MASK 	(ISPH3A_PCR_AEW_ALAW_EN | \
+				 ISPH3A_PCR_AEW_AVE2LMT_MASK)
 
 #define WRITE_SAT_LIM(reg, sat_limit)			\
 	(reg = (reg & (~(ISPH3A_PCR_AEW_AVE2LMT_MASK))) \
@@ -95,41 +97,6 @@
 	 | (((sub_hor_inc >> 1) - 1) << ISPH3A_AEWSUBWIN_AEWINCH_SHIFT))
 
 /**
- * struct isph3a_aewb_xtrastats - Structure with extra statistics sent by cam.
- * @field_count: Sequence number of returned framestats.
- * @isph3a_aewb_xtrastats: Pointer to next buffer with extra stats.
- */
-struct isph3a_aewb_xtrastats {
-	unsigned long field_count;
-	struct isph3a_aewb_xtrastats *next;
-};
-
-/**
- * struct isph3a_aewb_buffer - AE, AWB frame stats buffer.
- * @virt_addr: Virtual address to mmap the buffer.
- * @phy_addr: Physical address of the buffer.
- * @addr_align: Virtual Address 32 bytes aligned.
- * @ispmmu_addr: Address of the buffer mapped by the ISPMMU.
- * @mmap_addr: Mapped memory area of buffer. For userspace access.
- * @locked: 1 - Buffer locked from write. 0 - Buffer can be overwritten.
- * @frame_num: Frame number from which the statistics are taken.
- * @next: Pointer to link next buffer.
- */
-struct isph3a_aewb_buffer {
-	unsigned long virt_addr;
-	unsigned long phy_addr;
-	unsigned long addr_align;
-	unsigned long ispmmu_addr;
-	unsigned long mmap_addr;	/* For userspace */
-	struct timeval ts;
-	u32 config_counter;
-
-	u8 locked;
-	u16 frame_num;
-	struct isph3a_aewb_buffer *next;
-};
-
-/**
  * struct isph3a_aewb_regs - Current value of AE, AWB configuration registers.
  * pcr: Peripheral control register.
  * win1: Control register.
@@ -145,64 +112,36 @@ struct isph3a_aewb_regs {
 	u32 subwin;
 };
 
-/**
- * struct isp_h3a_device - AE, AWB status.
- * @initialized: 1 - Buffers initialized.
- * @update: 1 - Update registers.
- * @stats_req: 1 - Future stats requested.
- * @stats_done: 1 - Stats ready for user.
- * @frame_req: Number of frame requested for statistics.
- * @h3a_buff: Array of statistics buffers to access.
- * @stats_buf_size: Statistics buffer size.
- * @min_buf_size: Minimum statisitics buffer size.
- * @win_count: Window Count.
- * @frame_count: Frame Count.
- * @stats_wait: Wait primitive for locking/unlocking the stats request.
- * @buffer_lock: Spinlock for statistics buffers access.
- */
 struct isp_h3a_device {
-	u8 initialized;
+	spinlock_t *lock;		/* Lock for this struct */
+
 	u8 update;
-	u8 stats_req;
-	u8 stats_done;
-	u16 frame_req;
-	int pm_state;
-	int camnotify;
+	u8 buf_err;
+	int enabled;
 	int wb_update;
 
-	struct isph3a_aewb_buffer buff[H3A_MAX_BUFF];
-	unsigned int stats_buf_size;
-	unsigned int min_buf_size;
-	unsigned int curr_cfg_buf_size;
-	struct isph3a_aewb_buffer *active_buff;
-
-	atomic_t config_counter;
 	struct isph3a_aewb_regs regs;
 	struct ispprev_wbal h3awb_update;
-	struct isph3a_aewb_xtrastats xtrastats[H3A_MAX_BUFF];
 	struct isph3a_aewb_config aewb_config_local;
+	struct ispstat_buffer *buf_next;
 	u16 win_count;
-	u32 frame_count;
-	wait_queue_head_t stats_wait;
-	spinlock_t buffer_lock;		/* For stats buffers read/write sync */
 
-	struct device *dev;
+	struct ispstat stat;
 };
 
-void isph3a_aewb_setxtrastats(struct isp_h3a_device *isp_h3a,
-			      struct isph3a_aewb_xtrastats *xtrastats);
+int omap34xx_isph3a_aewb_config(struct isp_h3a_device *isp_h3a,
+				struct isph3a_aewb_config *aewbcfg);
 
-int isph3a_aewb_configure(struct isp_h3a_device *isp_h3a,
-			  struct isph3a_aewb_config *aewbcfg);
-
-int isph3a_aewb_request_statistics(struct isp_h3a_device *isp_h3a,
-				   struct isph3a_aewb_data *aewbdata);
+int omap34xx_isph3a_aewb_request_statistics(struct isp_h3a_device *isp_h3a,
+					    struct isph3a_aewb_data *aewbdata);
 
 void isph3a_save_context(struct device *dev);
 
 void isph3a_restore_context(struct device *dev);
 
 void isph3a_aewb_enable(struct isp_h3a_device *isp_h3a, u8 enable);
+
+void isph3a_aewb_try_enable(struct isp_h3a_device *isp_h3a);
 
 int isph3a_aewb_busy(struct isp_h3a_device *isp_h3a);
 
@@ -212,5 +151,8 @@ void isph3a_aewb_resume(struct isp_h3a_device *isp_h3a);
 
 void isph3a_update_wb(struct isp_h3a_device *isp_h3a);
 
-void isph3a_notify(struct isp_h3a_device *isp_h3a, int notify);
+int isph3a_aewb_buf_process(struct isp_h3a_device *isp_h3a);
+
+void isph3a_aewb_config_registers(struct isp_h3a_device *isp_h3a);
+
 #endif		/* OMAP_ISP_H3A_H */

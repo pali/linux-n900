@@ -1203,7 +1203,8 @@ MMU_Create (MMU_CONTEXT *psMMUContext,
 	if (!bRes)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "MMU_Create: ERROR call to _AllocPageTables failed"));
-		OSFreeMem (PVRSRV_OS_PAGEABLE_HEAP, 0, pMMUHeap, IMG_NULL);
+		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(MMU_HEAP),
+				pMMUHeap, IMG_NULL);
 		return IMG_NULL;
 	}
 
@@ -1222,7 +1223,8 @@ MMU_Create (MMU_CONTEXT *psMMUContext,
 	{
 		PVR_DPF((PVR_DBG_ERROR, "MMU_Create: ERROR call to RA_Create failed"));
 		_DeferredFreePageTables (pMMUHeap);
-		OSFreeMem (PVRSRV_OS_PAGEABLE_HEAP, 0, pMMUHeap, IMG_NULL);
+		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(MMU_HEAP),
+				pMMUHeap, IMG_NULL);
 		return IMG_NULL;
 	}
 
@@ -1279,7 +1281,8 @@ MMU_Delete (MMU_HEAP *pMMUHeap)
 		DisableHostAccess(pMMUHeap->psMMUContext);
 #endif
 
-		OSFreeMem (PVRSRV_OS_PAGEABLE_HEAP, 0, pMMUHeap, IMG_NULL);
+		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(MMU_HEAP),
+				pMMUHeap, IMG_NULL);
 	}
 }
 

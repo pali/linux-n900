@@ -459,6 +459,8 @@ DSP_STATUS DBLL_getSect(struct DBLL_LibraryObj *lib, char *name, u32 *pAddr,
 			(*(zlLib->pTarget->attrs.fseek))(zlLib->fp,
 			 zlLib->ulPos, SEEK_SET);
 		}
+	} else {
+		status = DSP_EHANDLE;
 	}
 	if (DSP_SUCCEEDED(status)) {
 		uByteSize = 1;
@@ -834,8 +836,9 @@ DSP_STATUS DBLL_readSect(struct DBLL_LibraryObj *lib, char *name,
 			(*(zlLib->pTarget->attrs.fseek))(zlLib->fp,
 				zlLib->ulPos, SEEK_SET);
 		}
+	} else {
+		status = DSP_EHANDLE;
 	}
-
 	if (DSP_FAILED(status))
 		goto func_cont;
 
@@ -1478,6 +1481,7 @@ static int writeMem(struct Dynamic_Loader_Initialize *this, void *buf,
 {
 	struct DBLLInit *pInit = (struct DBLLInit *)this;
 	struct DBLL_LibraryObj *lib;
+	struct DBLL_TarObj *pTarget;
 	struct DBLL_SectInfo sectInfo;
 	u32 memType;
 	bool retVal = true;
@@ -1488,20 +1492,24 @@ static int writeMem(struct Dynamic_Loader_Initialize *this, void *buf,
 
 	memType = (DLOAD_SECTION_TYPE(info->type) == DLOAD_TEXT) ? DBLL_CODE :
 		  DBLL_DATA;
-	if (lib != NULL) {
-		retVal = (*lib->pTarget->attrs.write)(lib->pTarget->
-			attrs.wHandle, addr, buf, nBytes, memType);
-	}
-	if (lib->pTarget->attrs.logWrite) {
-		sectInfo.name = info->name;
-		sectInfo.runAddr = info->run_addr;
-		sectInfo.loadAddr = info->load_addr;
-		sectInfo.size = info->size;
-		sectInfo.type = memType;
-		/* Pass the information about what we've written to
-		 * another module */
-		(*lib->pTarget->attrs.logWrite)(lib->pTarget->
-			attrs.logWriteHandle, &sectInfo, addr, nBytes);
+	if ((lib != NULL) &&
+	    ((pTarget = lib->pTarget) != NULL) &&
+	    (pTarget->attrs.write != NULL)) {
+		retVal = (*pTarget->attrs.write)(pTarget->attrs.wHandle,
+						 addr, buf, nBytes, memType);
+
+		if (pTarget->attrs.logWrite) {
+			sectInfo.name = info->name;
+			sectInfo.runAddr = info->run_addr;
+			sectInfo.loadAddr = info->load_addr;
+			sectInfo.size = info->size;
+			sectInfo.type = memType;
+			/* Pass the information about what we've written to
+			 * another module */
+			(*pTarget->attrs.logWrite)(
+				pTarget->attrs.logWriteHandle,
+				&sectInfo, addr, nBytes);
+		}
 	}
 	return retVal;
 }

@@ -226,6 +226,7 @@ static struct gpio_bank gpio_bank_34xx[6] = {
 #define OMAP34XX_PAD_SAFE_MODE 0x7
 #define OMAP34XX_PAD_IN_PU_GPIO 0x11c
 #define OMAP34XX_PAD_IN_PD_GPIO 0x10c
+#define OMAP34XX_PAD_WAKE_EN (1 << 14)
 
 struct omap3_gpio_regs {
 	u32 sysconfig;
@@ -578,6 +579,9 @@ static inline void set_24xx_gpio_triggering(struct gpio_bank *bank, int gpio,
 {
 	void __iomem *base = bank->base;
 	u32 gpio_bit = 1 << gpio;
+	struct gpio_pad *pad;
+	int gpio_num;
+	u16 val;
 
 	MOD_REG_BIT(OMAP24XX_GPIO_LEVELDETECT0, gpio_bit,
 		trigger & IRQ_TYPE_LEVEL_LOW);
@@ -589,6 +593,21 @@ static inline void set_24xx_gpio_triggering(struct gpio_bank *bank, int gpio,
 		trigger & IRQ_TYPE_EDGE_FALLING);
 
 	if (likely(!(bank->non_wakeup_gpios & gpio_bit))) {
+		pad = gpio_pads;
+
+		gpio_num = bank->virtual_irq_start - IH_GPIO_BASE + gpio;
+		/* Find the pad corresponding the GPIO */
+		while (pad->gpio >= 0 && pad->gpio != gpio_num)
+			pad++;
+		/* Enable / disable pad wakeup */
+		if (pad->gpio == gpio_num) {
+			val = omap_ctrl_readw(pad->offset);
+			if (trigger)
+				val |= OMAP34XX_PAD_WAKE_EN;
+			else
+				val &= ~(u16)OMAP34XX_PAD_WAKE_EN;
+			omap_ctrl_writew(val, pad->offset);
+		}
 		if (trigger != 0)
 			__raw_writel(1 << gpio, bank->base
 					+ OMAP24XX_GPIO_SETWKUENA);
@@ -1131,6 +1150,7 @@ static void gpio_mask_irq(unsigned int irq)
 	struct gpio_bank *bank = get_irq_chip_data(irq);
 
 	_set_gpio_irqenable(bank, gpio, 0);
+	_set_gpio_triggering(bank, get_gpio_index(gpio), IRQ_TYPE_NONE);
 }
 
 static void gpio_unmask_irq(unsigned int irq)
@@ -1138,6 +1158,11 @@ static void gpio_unmask_irq(unsigned int irq)
 	unsigned int gpio = irq - IH_GPIO_BASE;
 	struct gpio_bank *bank = get_irq_chip_data(irq);
 	unsigned int irq_mask = 1 << get_gpio_index(gpio);
+	struct irq_desc *desc = irq_to_desc(irq);
+	u32 trigger = desc->status & IRQ_TYPE_SENSE_MASK;
+
+	if (trigger)
+		_set_gpio_triggering(bank, get_gpio_index(gpio), trigger);
 
 	/* For level-triggered GPIOs, the clearing must be done after
 	 * the HW source is cleared, thus after the handler has run */
@@ -1408,7 +1433,7 @@ static int __init omap3_gpio_pads_init(void)
 	kfree(gpio_pad_map);
 	return 0;
 }
-late_initcall(omap3_gpio_pads_init);
+early_initcall(omap3_gpio_pads_init);
 #endif
 
 /* This lock class tells lockdep that GPIO irqs are in a different
@@ -1797,7 +1822,7 @@ void omap2_gpio_resume_after_idle(void)
 		min = 1;
 	for (i = min; i < gpio_bank_count; i++) {
 		struct gpio_bank *bank = &gpio_bank[i];
-		u32 l;
+		u32 l, gen, gen0, gen1;
 
 		if (cpu_is_omap34xx() && bank->dbck_enable_mask)
 			clk_enable(bank->dbck);
@@ -1822,13 +1847,32 @@ void omap2_gpio_resume_after_idle(void)
 #endif
 		l ^= bank->saved_datain;
 		l &= bank->enabled_non_wakeup_gpios;
-		if (l) {
+
+		/*
+		 * No need to generate IRQs for the rising edge for gpio IRQs
+		 * configured with falling edge only; and vice versa.
+		 */
+		gen0 = l & bank->saved_fallingdetect;
+		gen0 &= bank->saved_datain;
+
+		gen1 = l & bank->saved_risingdetect;
+		gen1 &= ~(bank->saved_datain);
+
+		/* FIXME: Consider GPIO IRQs with level detections properly! */
+		gen = l & (~(bank->saved_fallingdetect) &
+				~(bank->saved_risingdetect));
+		/* Consider all GPIO IRQs needed to be updated */
+		gen |= gen0 | gen1;
+
+		if (gen) {
 			u32 old0, old1;
 #if defined(CONFIG_ARCH_OMAP24XX) || defined(CONFIG_ARCH_OMAP34XX)
 			old0 = __raw_readl(bank->base + OMAP24XX_GPIO_LEVELDETECT0);
 			old1 = __raw_readl(bank->base + OMAP24XX_GPIO_LEVELDETECT1);
-			__raw_writel(old0 | l, bank->base + OMAP24XX_GPIO_LEVELDETECT0);
-			__raw_writel(old1 | l, bank->base + OMAP24XX_GPIO_LEVELDETECT1);
+			__raw_writel(old0 | gen, bank->base +
+				OMAP24XX_GPIO_LEVELDETECT0);
+			__raw_writel(old1 | gen, bank->base +
+				OMAP24XX_GPIO_LEVELDETECT1);
 			__raw_writel(old0, bank->base + OMAP24XX_GPIO_LEVELDETECT0);
 			__raw_writel(old1, bank->base + OMAP24XX_GPIO_LEVELDETECT1);
 #endif

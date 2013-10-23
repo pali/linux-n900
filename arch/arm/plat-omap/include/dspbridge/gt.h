@@ -261,13 +261,15 @@ extern struct GT_Config _GT_params;
 
 #define GT_query(mask, class)     false
 
-#define GT_0trace(mask, class, format)
-#define GT_1trace(mask, class, format, arg1)
-#define GT_2trace(mask, class, format, arg1, arg2)
-#define GT_3trace(mask, class, format, arg1, arg2, arg3)
-#define GT_4trace(mask, class, format, arg1, arg2, arg3, arg4)
-#define GT_5trace(mask, class, format, arg1, arg2, arg3, arg4, arg5)
-#define GT_6trace(mask, class, format, arg1, arg2, arg3, arg4, arg5, arg6)
+#define GT_0trace(mask, class, format) do {} while (0)
+#define GT_1trace(mask, class, format, arg1) do {} while (0)
+#define GT_2trace(mask, class, format, arg1, arg2) do {} while (0)
+#define GT_3trace(mask, class, format, arg1, arg2, arg3) do {} while (0)
+#define GT_4trace(mask, class, format, arg1, arg2, arg3, arg4) do {} while (0)
+#define GT_5trace(mask, class, format, arg1, arg2, arg3, arg4, arg5) \
+	do {} while (0)
+#define GT_6trace(mask, class, format, arg1, arg2, arg3, arg4, arg5, arg6) \
+	do {} while (0)
 
 #else				/* GT_TRACE == 1 */
 

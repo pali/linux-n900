@@ -34,7 +34,7 @@
 #define IEEE80211_ASSOC_TIMEOUT (HZ / 5)
 #define IEEE80211_ASSOC_MAX_TRIES 3
 #define IEEE80211_MONITORING_INTERVAL (2 * HZ)
-#define IEEE80211_PROBE_INTERVAL (60 * HZ)
+#define IEEE80211_PROBE_IDLE_TIME (60 * HZ)
 #define IEEE80211_RETRY_AUTH_INTERVAL (1 * HZ)
 #define IEEE80211_SCAN_INTERVAL (2 * HZ)
 #define IEEE80211_SCAN_INTERVAL_SLOW (15 * HZ)
@@ -44,8 +44,6 @@
 #define IEEE80211_IBSS_INACTIVITY_LIMIT (60 * HZ)
 
 #define IEEE80211_IBSS_MAX_STA_ENTRIES 128
-
-#define IEEE80211_ROAMING_SIGNAL_THRESHOLD -75
 
 #define RSSI_HIGHSIGNAL "HIGHSIGNAL"
 #define RSSI_LOWSIGNAL "LOWSIGNAL"
@@ -729,6 +727,8 @@ static void ieee80211_set_associated(struct ieee80211_sub_if_data *sdata,
 		changed |= ieee80211_handle_bss_capability(sdata,
 			bss->capability, bss->has_erp_value, bss->erp_value);
 
+		bss->hold = true;
+
 		ieee80211_rx_bss_put(local, bss);
 	}
 
@@ -743,7 +743,7 @@ static void ieee80211_set_associated(struct ieee80211_sub_if_data *sdata,
 	memcpy(ifsta->prev_bssid, sdata->u.sta.bssid, ETH_ALEN);
 	ieee80211_sta_send_associnfo(sdata, ifsta);
 
-	ifsta->rssi_signal_state = RSSI_SIGNAL_STATE_HIGH;
+	ifsta->rssi_state = IEEE80211_RSSI_STATE_HIGH;
 	ifsta->roam_threshold_count = 0;
 
 	ifsta->last_probe = jiffies;
@@ -817,6 +817,7 @@ static void ieee80211_authenticate(struct ieee80211_sub_if_data *sdata,
 		       " timed out\n",
 		       sdata->dev->name, print_mac(mac, ifsta->bssid));
 		ifsta->state = IEEE80211_STA_MLME_DISABLED;
+		ifsta->flags &= ~IEEE80211_STA_ASSOCIATED;
 		ieee80211_sta_send_apinfo(sdata, ifsta);
 		return;
 	}
@@ -835,6 +836,8 @@ static void ieee80211_set_disassoc(struct ieee80211_sub_if_data *sdata,
 				   bool self_disconnected, u16 reason)
 {
 	struct ieee80211_local *local = sdata->local;
+	struct ieee80211_conf *conf = &local_to_hw(local)->conf;
+	struct ieee80211_bss *bss;
 	struct sta_info *sta;
 	u32 changed = BSS_CHANGED_ASSOC;
 
@@ -857,6 +860,15 @@ static void ieee80211_set_disassoc(struct ieee80211_sub_if_data *sdata,
 	netif_carrier_off(sdata->dev);
 
 	ieee80211_sta_tear_down_BA_sessions(sdata, sta->sta.addr);
+
+	bss = ieee80211_rx_bss_get(local, ifsta->bssid,
+				   conf->channel->center_freq,
+				   ifsta->ssid, ifsta->ssid_len);
+
+	if (bss) {
+		bss->hold = false;
+		ieee80211_rx_bss_put(local, bss);
+	}
 
 	if (self_disconnected) {
 		if (deauth)
@@ -949,6 +961,7 @@ static void ieee80211_associate(struct ieee80211_sub_if_data *sdata,
 		       " timed out\n",
 		       sdata->dev->name, print_mac(mac, ifsta->bssid));
 		ifsta->state = IEEE80211_STA_MLME_DISABLED;
+		ifsta->flags &= ~IEEE80211_STA_ASSOCIATED;
 		ieee80211_sta_send_apinfo(sdata, ifsta);
 		return;
 	}
@@ -968,69 +981,104 @@ static void ieee80211_associate(struct ieee80211_sub_if_data *sdata,
 	mod_timer(&ifsta->timer, jiffies + IEEE80211_ASSOC_TIMEOUT);
 }
 
-static void ieee80211_rx_check_threshold(struct ieee80211_sub_if_data *sdata,
-					 int freq)
+void ieee80211_rssi_changed(struct ieee80211_vif *vif,
+			    enum ieee80211_rssi_state state)
 {
-	struct ieee80211_if_sta *ifsta = &sdata->u.sta;
-	enum rssi_signal_state uninitialized_var(new_state);
-	struct ieee80211_bss *bss;
+	struct ieee80211_sub_if_data *sdata = vif_to_sdata(vif);
+	struct ieee80211_if_sta *ifsta = NULL;
 	const char *event = NULL;
 	union iwreq_data wrqu;
 	char *buf = NULL;
 
-	if (ifsta->state != IEEE80211_STA_MLME_ASSOCIATED)
+	ifsta = &sdata->u.sta;
+
+	if (!ifsta || ifsta->state != IEEE80211_STA_MLME_ASSOCIATED)
 		return;
 
-	bss = ieee80211_rx_bss_get(sdata->local, ifsta->bssid, freq,
-				   ifsta->ssid, ifsta->ssid_len);
-
-	if (!bss)
+	if (ifsta->rssi_state == state)
 		return;
 
-	switch (ifsta->rssi_signal_state) {
-	case RSSI_SIGNAL_STATE_HIGH:
-		if (bss->signal < IEEE80211_ROAMING_SIGNAL_THRESHOLD) {
-			event = RSSI_LOWSIGNAL;
-			new_state = RSSI_SIGNAL_STATE_LOW;
-		}
+	ifsta->rssi_state = state;
+
+	switch (state) {
+	case IEEE80211_RSSI_STATE_HIGH:
+		event = RSSI_HIGHSIGNAL;
 		break;
-	case RSSI_SIGNAL_STATE_LOW:
-		if (bss->signal > IEEE80211_ROAMING_SIGNAL_THRESHOLD) {
-			event = RSSI_HIGHSIGNAL;
-			new_state = RSSI_SIGNAL_STATE_HIGH;
-		}
+	case IEEE80211_RSSI_STATE_LOW:
+		event = RSSI_LOWSIGNAL;
 		break;
 	default:
 		WARN_ON(1);
-		break;
+		return;
 	}
 
-	if (event) {
-		ifsta->roam_threshold_count++;
-		if (ifsta->roam_threshold_count >= 3) {
-			buf = kstrdup(event, GFP_ATOMIC);
-			printk(KERN_DEBUG "%s: roaming threshold exceeded, "
-			       "sending %s\n", sdata->dev->name, buf);
-			memset(&wrqu, 0, sizeof(wrqu));
-			wrqu.data.length = strlen(buf);
-			wireless_send_event(sdata->dev, IWEVCUSTOM, &wrqu,
-					    buf);
-			ifsta->rssi_signal_state = new_state;
-			ifsta->roam_threshold_count = 0;
-			kfree(buf);
-		}
-	} else
-		ifsta->roam_threshold_count = 0;
-
-	ieee80211_rx_bss_put(sdata->local, bss);
+	buf = kstrdup(event, GFP_ATOMIC);
+	printk(KERN_DEBUG "%s: roaming signal from driver, sending %s\n",
+	       sdata->dev->name, buf);
+	memset(&wrqu, 0, sizeof(wrqu));
+	wrqu.data.length = strlen(buf);
+	wireless_send_event(sdata->dev, IWEVCUSTOM, &wrqu, buf);
+	kfree(buf);
 }
+EXPORT_SYMBOL(ieee80211_rssi_changed);
+
+void ieee80211_sta_rx_notify(struct ieee80211_sub_if_data *sdata,
+			     struct ieee80211_hdr *hdr)
+{
+	/*
+	 * We can postpone the sta.timer whenever receiving unicast frames
+	 * from AP because we know that the connection is working both ways
+	 * at that time. But multicast frames (and hence also beacons) must
+	 * be ignored here, because we need to trigger the timer during
+	 * data idle periods for sending the periodical probe request to
+	 * the AP.
+	 */
+	if (!is_multicast_ether_addr(hdr->addr1))
+		mod_timer(&sdata->u.sta.timer,
+			  jiffies + IEEE80211_MONITORING_INTERVAL);
+}
+
+void ieee80211_beacon_loss_work(struct work_struct *work)
+{
+	struct ieee80211_sub_if_data *sdata =
+		container_of(work, struct ieee80211_sub_if_data,
+			     u.sta.beacon_loss_work);
+	struct ieee80211_if_sta *ifsta = &sdata->u.sta;
+	struct ieee80211_local *local = sdata->local;
+
+	printk(KERN_DEBUG "%s: driver reports beacon loss from AP %pM "
+	       "- sending probe request\n", sdata->dev->name,
+	       sdata->u.sta.bssid);
+
+	ifsta->flags |= IEEE80211_STA_PROBEREQ_POLL;
+
+	if (local->powersave) {
+		/* disable power save before sending the probe request */
+		local->hw.conf.flags &= ~IEEE80211_CONF_PS;
+		ieee80211_hw_config(local);
+	}
+
+	ieee80211_send_probe_req(sdata, ifsta->bssid, ifsta->ssid,
+				 ifsta->ssid_len);
+
+	mod_timer(&ifsta->timer, jiffies + IEEE80211_MONITORING_INTERVAL);
+}
+
+void ieee80211_beacon_loss(struct ieee80211_vif *vif)
+{
+	struct ieee80211_sub_if_data *sdata = vif_to_sdata(vif);
+
+	queue_work(sdata->local->hw.workqueue,
+		   &sdata->u.sta.beacon_loss_work);
+}
+EXPORT_SYMBOL(ieee80211_beacon_loss);
 
 static void ieee80211_associated(struct ieee80211_sub_if_data *sdata,
 				 struct ieee80211_if_sta *ifsta)
 {
 	struct ieee80211_local *local = sdata->local;
 	struct sta_info *sta;
-	int disassoc;
+	bool disassoc = false, send_probe = false;
 	DECLARE_MAC_BUF(mac);
 
 	/* TODO: start monitoring current AP signal quality and number of
@@ -1044,37 +1092,58 @@ static void ieee80211_associated(struct ieee80211_sub_if_data *sdata,
 
 	sta = sta_info_get(local, ifsta->bssid);
 	if (!sta) {
-		printk(KERN_DEBUG "%s: No STA entry for own AP %s\n",
-		       sdata->dev->name, print_mac(mac, ifsta->bssid));
-		disassoc = 1;
-	} else {
-		disassoc = 0;
-		if (time_after(jiffies,
-			       sta->last_rx + IEEE80211_MONITORING_INTERVAL)) {
-			if (ifsta->flags & IEEE80211_STA_PROBEREQ_POLL) {
-				printk(KERN_DEBUG "%s: No ProbeResp from "
-				       "current AP %s - assume out of "
-				       "range\n",
-				       sdata->dev->name, print_mac(mac, ifsta->bssid));
-				disassoc = 1;
-			} else
-				ieee80211_send_probe_req(sdata, ifsta->bssid,
-							 ifsta->ssid,
-							 ifsta->ssid_len);
-			ifsta->flags ^= IEEE80211_STA_PROBEREQ_POLL;
-		} else {
-			ifsta->flags &= ~IEEE80211_STA_PROBEREQ_POLL;
-			if (time_after(jiffies, ifsta->last_probe +
-				       IEEE80211_PROBE_INTERVAL)) {
-				ifsta->last_probe = jiffies;
-				ieee80211_send_probe_req(sdata, ifsta->bssid,
-							 ifsta->ssid,
-							 ifsta->ssid_len);
-			}
-		}
+		printk(KERN_DEBUG "%s: No STA entry for own AP %pM\n",
+		       sdata->dev->name, ifsta->bssid);
+		disassoc = true;
+		goto unlock;
 	}
 
+	if ((ifsta->flags & IEEE80211_STA_PROBEREQ_POLL) &&
+	    time_after(jiffies, sta->last_rx + IEEE80211_MONITORING_INTERVAL)) {
+		printk(KERN_DEBUG "%s: no probe response from AP %pM "
+		       "- disassociating\n",
+		       sdata->dev->name, ifsta->bssid);
+		disassoc = true;
+		ifsta->flags &= ~IEEE80211_STA_PROBEREQ_POLL;
+		goto unlock;
+	}
+
+	/*
+	 * Beacon filtering is only enabled with power save and then the
+	 * stack should not check for beacon loss.
+	 */
+	if (!((local->hw.flags & IEEE80211_HW_BEACON_FILTER) &&
+	      (local->hw.conf.flags & IEEE80211_CONF_PS)) &&
+	    time_after(jiffies,
+		       ifsta->last_beacon + IEEE80211_MONITORING_INTERVAL)) {
+		printk(KERN_DEBUG "%s: beacon loss from AP %pM "
+		       "- sending probe request\n",
+		       sdata->dev->name, ifsta->bssid);
+		ifsta->flags |= IEEE80211_STA_PROBEREQ_POLL;
+		send_probe = true;
+		goto unlock;
+
+	}
+
+	if (time_after(jiffies, sta->last_rx + IEEE80211_PROBE_IDLE_TIME)) {
+		ifsta->flags |= IEEE80211_STA_PROBEREQ_POLL;
+		send_probe = true;
+	}
+
+ unlock:
 	rcu_read_unlock();
+
+	/* config() can sleep so call it after unlock */
+	if (send_probe) {
+		if (local->powersave) {
+			/* disable ps before sending the probe request */
+			local->hw.conf.flags &= ~IEEE80211_CONF_PS;
+			ieee80211_hw_config(local);
+		}
+
+		ieee80211_send_probe_req(sdata, ifsta->bssid, ifsta->ssid,
+					 ifsta->ssid_len);
+	}
 
 	if (disassoc)
 		ieee80211_set_disassoc(sdata, ifsta, true, true,
@@ -1453,6 +1522,12 @@ static void ieee80211_rx_mgmt_assoc_resp(struct ieee80211_sub_if_data *sdata,
 	bss_conf->assoc_capability = capab_info;
 	ieee80211_set_associated(sdata, ifsta);
 
+	/*
+	 * initialise the time of last beacon to be the association time,
+	 * otherwise beacon loss check will trigger immediately
+	 */
+	ifsta->last_beacon = jiffies;
+
 	ieee80211_associated(sdata, ifsta);
 }
 
@@ -1722,6 +1797,7 @@ static void ieee80211_rx_mgmt_probe_resp(struct ieee80211_sub_if_data *sdata,
 	size_t baselen;
 	struct ieee802_11_elems elems;
 	struct ieee80211_if_sta *ifsta = &sdata->u.sta;
+	struct ieee80211_local *local = sdata->local;
 
 	if (memcmp(mgmt->da, sdata->dev->dev_addr, ETH_ALEN))
 		return; /* ignore ProbeResp to foreign address */
@@ -1741,6 +1817,19 @@ static void ieee80211_rx_mgmt_probe_resp(struct ieee80211_sub_if_data *sdata,
 		printk(KERN_DEBUG "%s direct probe responded\n",
 		       sdata->dev->name);
 		ieee80211_authenticate(sdata, ifsta);
+	}
+
+	if (ifsta->flags & IEEE80211_STA_PROBEREQ_POLL) {
+		if (local->powersave) {
+			/*
+			 * re-enable power save now that probe response was
+			 * received
+			 */
+			local->hw.conf.flags |= IEEE80211_CONF_PS;
+			ieee80211_hw_config(local);
+		}
+
+		ifsta->flags &= ~IEEE80211_STA_PROBEREQ_POLL;
 	}
 }
 
@@ -1800,7 +1889,6 @@ static void ieee80211_rx_mgmt_beacon(struct ieee80211_sub_if_data *sdata,
 					       &bss_info);
 	}
 
-	ieee80211_rx_check_threshold(sdata, rx_status->freq);
 	ieee80211_bss_info_change_notify(sdata, changed);
 }
 
@@ -2407,6 +2495,7 @@ void ieee80211_sta_setup_sdata(struct ieee80211_sub_if_data *sdata)
 
 	ifsta = &sdata->u.sta;
 	INIT_WORK(&ifsta->work, ieee80211_sta_work);
+	INIT_WORK(&ifsta->beacon_loss_work, ieee80211_beacon_loss_work);
 	setup_timer(&ifsta->timer, ieee80211_sta_timer,
 		    (unsigned long) sdata);
 	skb_queue_head_init(&ifsta->skb_queue);

@@ -176,8 +176,6 @@ musb_start_urb(struct musb *musb, int is_in, struct musb_qh *qh)
 	void __iomem		*mbase =  musb->mregs;
 	struct urb		*urb = next_urb(qh);
 	struct musb_hw_ep	*hw_ep = qh->hw_ep;
-	unsigned		pipe = urb->pipe;
-	u8			address = usb_pipedevice(pipe);
 	int			epnum = hw_ep->epnum;
 
 	/* initialize software qh state */
@@ -206,7 +204,7 @@ musb_start_urb(struct musb *musb, int is_in, struct musb_qh *qh)
 	}
 
 	DBG(4, "qh %p urb %p dev%d ep%d%s%s, hw_ep %d, %p/%d\n",
-			qh, urb, address, qh->epnum,
+			qh, urb, usb_pipedevice(urb->pipe), qh->epnum,
 			is_in ? "in" : "out",
 			({char *s; switch (qh->type) {
 			case USB_ENDPOINT_XFER_CONTROL:	s = ""; break;

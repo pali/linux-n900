@@ -443,6 +443,8 @@ static int __init PVRCore_Init(void)
 		goto init_failed;
 	}
 
+	powervr_device.dev.devt = MKDEV(AssignedMajorNumber, 0);
+
 	if ((error = platform_device_register(&powervr_device)) != 0)
 	{
 		platform_driver_unregister(&powervr_driver);

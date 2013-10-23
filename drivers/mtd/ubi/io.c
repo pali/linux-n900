@@ -566,15 +566,16 @@ int ubi_io_mark_bad(const struct ubi_device *ubi, int pnum)
  * This function returns zero if the erase counter header is OK, and %1 if
  * not.
  */
-static int validate_ec_hdr(const struct ubi_device *ubi,
+static int validate_ec_hdr(struct ubi_device *ubi,
 			   const struct ubi_ec_hdr *ec_hdr)
 {
 	long long ec;
-	int vid_hdr_offset, leb_start;
+	int vid_hdr_offset, leb_start, image_seq;
 
 	ec = be64_to_cpu(ec_hdr->ec);
 	vid_hdr_offset = be32_to_cpu(ec_hdr->vid_hdr_offset);
 	leb_start = be32_to_cpu(ec_hdr->data_offset);
+	image_seq = be32_to_cpu(ec_hdr->image_seq);
 
 	if (ec_hdr->version != UBI_VERSION) {
 		ubi_err("node with incompatible UBI version found: "
@@ -597,6 +598,15 @@ static int validate_ec_hdr(const struct ubi_device *ubi,
 
 	if (ec < 0 || ec > UBI_MAX_ERASECOUNTER) {
 		ubi_err("bad erase counter %lld", ec);
+		goto bad;
+	}
+
+	if (!ubi->image_seq_set) {
+		ubi->image_seq = image_seq;
+		ubi->image_seq_set = 1;
+	} else if (ubi->image_seq && image_seq && ubi->image_seq != image_seq) {
+		ubi_err("bad image sequence number %d, expected %d",
+			image_seq, ubi->image_seq);
 		goto bad;
 	}
 
@@ -755,6 +765,7 @@ int ubi_io_write_ec_hdr(struct ubi_device *ubi, int pnum,
 	ec_hdr->version = UBI_VERSION;
 	ec_hdr->vid_hdr_offset = cpu_to_be32(ubi->vid_hdr_offset);
 	ec_hdr->data_offset = cpu_to_be32(ubi->leb_start);
+	ec_hdr->image_seq = cpu_to_be32(ubi->image_seq);
 	crc = crc32(UBI_CRC32_INIT, ec_hdr, UBI_EC_HDR_SIZE_CRC);
 	ec_hdr->hdr_crc = cpu_to_be32(crc);
 
@@ -902,7 +913,7 @@ bad:
  * o %UBI_IO_BITFLIPS if the CRC is correct, but bit-flips were detected
  *   and corrected by the flash driver; this is harmless but may indicate that
  *   this eraseblock may become bad soon;
- * o %UBI_IO_BAD_VID_HRD if the volume identifier header is corrupted (a CRC
+ * o %UBI_IO_BAD_VID_HDR if the volume identifier header is corrupted (a CRC
  *   error detected);
  * o %UBI_IO_PEB_FREE if the physical eraseblock is free (i.e., there is no VID
  *   header there);

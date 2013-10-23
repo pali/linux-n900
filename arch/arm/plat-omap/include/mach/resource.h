@@ -76,6 +76,9 @@ int resource_unregister(struct shared_resource *res);
 int resource_request(const char *name, struct device *dev,
 						 unsigned long level);
 int resource_release(const char *name, struct device *dev);
+int resource_request_locked(const char *name, struct device *dev,
+						unsigned long level);
+int resource_release_locked(const char *name, struct device *dev);
 int resource_get_level(const char *name);
 
 #endif /* __ARCH_ARM_OMAP_RESOURCE_H */

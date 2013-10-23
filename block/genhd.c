@@ -692,6 +692,20 @@ static void disk_seqf_stop(struct seq_file *seqf, void *v)
 	}
 }
 
+void mtd_diskstats(struct seq_file *seqf);
+
+static void diskstats_seqf_stop(struct seq_file *seqf, void *v)
+{
+	struct class_dev_iter *iter = seqf->private;
+
+	/* stop is called even after start failed :-( */
+	if (iter) {
+		mtd_diskstats(seqf);
+		class_dev_iter_exit(iter);
+		kfree(iter);
+	}
+}
+
 static void *show_partition_start(struct seq_file *seqf, loff_t *pos)
 {
 	static void *p;
@@ -1010,7 +1024,7 @@ static int diskstats_show(struct seq_file *seqf, void *v)
 static const struct seq_operations diskstats_op = {
 	.start	= disk_seqf_start,
 	.next	= disk_seqf_next,
-	.stop	= disk_seqf_stop,
+	.stop	= diskstats_seqf_stop,
 	.show	= diskstats_show
 };
 

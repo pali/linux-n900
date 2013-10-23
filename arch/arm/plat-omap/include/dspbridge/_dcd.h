@@ -72,7 +72,7 @@
  */
 	extern DSP_STATUS WCD_CallDevIOCtl(unsigned int cmd,
 					   union Trapped_Args *args,
-					   u32 *pResult);
+					   u32 *pResult, void *pr_ctxt);
 
 /*
  *  ======== WCD_Init ========
@@ -119,69 +119,94 @@
 	extern void WCD_Exit(void);
 
 /* MGR wrapper functions */
-	extern u32 MGRWRAP_EnumNode_Info(union Trapped_Args *args);
-	extern u32 MGRWRAP_EnumProc_Info(union Trapped_Args *args);
-	extern u32 MGRWRAP_RegisterObject(union Trapped_Args *args);
-	extern u32 MGRWRAP_UnregisterObject(union Trapped_Args *args);
-	extern u32 MGRWRAP_WaitForBridgeEvents(union Trapped_Args *args);
+	extern u32 MGRWRAP_EnumNode_Info(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 MGRWRAP_EnumProc_Info(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 MGRWRAP_RegisterObject(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 MGRWRAP_UnregisterObject(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 MGRWRAP_WaitForBridgeEvents(union Trapped_Args *args,
+			void *pr_ctxt);
 
 #ifndef RES_CLEANUP_DISABLE
-	extern u32 MGRWRAP_GetProcessResourcesInfo(union Trapped_Args *args);
+	extern u32 MGRWRAP_GetProcessResourcesInfo(union Trapped_Args *args,
+			void *pr_ctxt);
 #endif
 
 
 /* CPRC (Processor) wrapper Functions */
-	extern u32 PROCWRAP_Attach(union Trapped_Args *args);
-	extern u32 PROCWRAP_Ctrl(union Trapped_Args *args);
-	extern u32 PROCWRAP_Detach(union Trapped_Args *args);
-	extern u32 PROCWRAP_EnumNode_Info(union Trapped_Args *args);
-	extern u32 PROCWRAP_EnumResources(union Trapped_Args *args);
-	extern u32 PROCWRAP_GetState(union Trapped_Args *args);
-	extern u32 PROCWRAP_GetTrace(union Trapped_Args *args);
-	extern u32 PROCWRAP_Load(union Trapped_Args *args);
-	extern u32 PROCWRAP_RegisterNotify(union Trapped_Args *args);
-	extern u32 PROCWRAP_Start(union Trapped_Args *args);
-	extern u32 PROCWRAP_ReserveMemory(union Trapped_Args *args);
-	extern u32 PROCWRAP_UnReserveMemory(union Trapped_Args *args);
-	extern u32 PROCWRAP_Map(union Trapped_Args *args);
-	extern u32 PROCWRAP_UnMap(union Trapped_Args *args);
-	extern u32 PROCWRAP_FlushMemory(union Trapped_Args *args);
-	extern u32 PROCWRAP_Stop(union Trapped_Args *args);
-	extern u32 PROCWRAP_InvalidateMemory(union Trapped_Args *args);
+	extern u32 PROCWRAP_Attach(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 PROCWRAP_Ctrl(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 PROCWRAP_Detach(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 PROCWRAP_EnumNode_Info(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 PROCWRAP_EnumResources(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 PROCWRAP_GetState(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 PROCWRAP_GetTrace(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 PROCWRAP_Load(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 PROCWRAP_RegisterNotify(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 PROCWRAP_Start(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 PROCWRAP_ReserveMemory(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 PROCWRAP_UnReserveMemory(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 PROCWRAP_Map(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 PROCWRAP_UnMap(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 PROCWRAP_FlushMemory(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 PROCWRAP_Stop(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 PROCWRAP_InvalidateMemory(union Trapped_Args *args,
+			void *pr_ctxt);
 
 /* NODE wrapper functions */
-	extern u32 NODEWRAP_Allocate(union Trapped_Args *args);
-	extern u32 NODEWRAP_AllocMsgBuf(union Trapped_Args *args);
-	extern u32 NODEWRAP_ChangePriority(union Trapped_Args *args);
-	extern u32 NODEWRAP_Connect(union Trapped_Args *args);
-	extern u32 NODEWRAP_Create(union Trapped_Args *args);
-	extern u32 NODEWRAP_Delete(union Trapped_Args *args);
-	extern u32 NODEWRAP_FreeMsgBuf(union Trapped_Args *args);
-	extern u32 NODEWRAP_GetAttr(union Trapped_Args *args);
-	extern u32 NODEWRAP_GetMessage(union Trapped_Args *args);
-	extern u32 NODEWRAP_Pause(union Trapped_Args *args);
-	extern u32 NODEWRAP_PutMessage(union Trapped_Args *args);
-	extern u32 NODEWRAP_RegisterNotify(union Trapped_Args *args);
-	extern u32 NODEWRAP_Run(union Trapped_Args *args);
-	extern u32 NODEWRAP_Terminate(union Trapped_Args *args);
-	extern u32 NODEWRAP_GetUUIDProps(union Trapped_Args *args);
+	extern u32 NODEWRAP_Allocate(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 NODEWRAP_AllocMsgBuf(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 NODEWRAP_ChangePriority(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 NODEWRAP_Connect(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 NODEWRAP_Create(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 NODEWRAP_Delete(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 NODEWRAP_FreeMsgBuf(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 NODEWRAP_GetAttr(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 NODEWRAP_GetMessage(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 NODEWRAP_Pause(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 NODEWRAP_PutMessage(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 NODEWRAP_RegisterNotify(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 NODEWRAP_Run(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 NODEWRAP_Terminate(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 NODEWRAP_GetUUIDProps(union Trapped_Args *args,
+			void *pr_ctxt);
 
 /* STRM wrapper functions */
-	extern u32 STRMWRAP_AllocateBuffer(union Trapped_Args *args);
-	extern u32 STRMWRAP_Close(union Trapped_Args *args);
-	extern u32 STRMWRAP_FreeBuffer(union Trapped_Args *args);
-	extern u32 STRMWRAP_GetEventHandle(union Trapped_Args *args);
-	extern u32 STRMWRAP_GetInfo(union Trapped_Args *args);
-	extern u32 STRMWRAP_Idle(union Trapped_Args *args);
-	extern u32 STRMWRAP_Issue(union Trapped_Args *args);
-	extern u32 STRMWRAP_Open(union Trapped_Args *args);
-	extern u32 STRMWRAP_Reclaim(union Trapped_Args *args);
-	extern u32 STRMWRAP_RegisterNotify(union Trapped_Args *args);
-	extern u32 STRMWRAP_Select(union Trapped_Args *args);
+	extern u32 STRMWRAP_AllocateBuffer(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 STRMWRAP_Close(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 STRMWRAP_FreeBuffer(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 STRMWRAP_GetEventHandle(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 STRMWRAP_GetInfo(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 STRMWRAP_Idle(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 STRMWRAP_Issue(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 STRMWRAP_Open(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 STRMWRAP_Reclaim(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 STRMWRAP_RegisterNotify(union Trapped_Args *args,
+			void *pr_ctxt);
+	extern u32 STRMWRAP_Select(union Trapped_Args *args, void *pr_ctxt);
 
-	extern u32 CMMWRAP_CallocBuf(union Trapped_Args *args);
-	extern u32 CMMWRAP_FreeBuf(union Trapped_Args *args);
-	extern u32 CMMWRAP_GetHandle(union Trapped_Args *args);
-	extern u32 CMMWRAP_GetInfo(union Trapped_Args *args);
+	extern u32 CMMWRAP_CallocBuf(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 CMMWRAP_FreeBuf(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 CMMWRAP_GetHandle(union Trapped_Args *args, void *pr_ctxt);
+	extern u32 CMMWRAP_GetInfo(union Trapped_Args *args, void *pr_ctxt);
 
 #endif				/* _WCD_ */

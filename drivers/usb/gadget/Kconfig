@@ -672,6 +672,16 @@ config USB_G_NOKIA
 	  It's only really useful for RX51 hardware. If you're building
 	  a kernel for RX51, say Y or M here. If unsure, say N.
 
+config USB_G_SOFTUPD
+	tristate "Nokia Firmware Upgrade Composite Kernel Driver"
+	depends on PHONET
+	help
+	  The Nokia upgrade gadget provides support for Firmware upgrading
+	  using the userland application softupd.
+
+	  It's only really useful for RX51 hardware. If you're building
+	  a kernel for RX51, say Y or M here. If unsure, say N.
+
 # put drivers that need isochronous transfer support (for audio
 # or video class gadget drivers), or specific hardware, here.
 

@@ -1580,6 +1580,19 @@ extern int get_sb_pseudo(struct file_system_type *, char *,
 extern int simple_set_mnt(struct vfsmount *mnt, struct super_block *sb);
 int __put_super_and_need_restart(struct super_block *sb);
 
+extern atomic_t periodic_wb_enabled;
+extern void enable_periodic_wb(void);
+/* Note, VFS does not protect the super block clean/dirty state */
+extern void mark_sb_dirty(struct super_block *sb);
+static inline void mark_sb_clean(struct super_block *sb)
+{
+	sb->s_dirt = 0;
+}
+static inline int is_sb_dirty(const struct super_block *sb)
+{
+	return sb->s_dirt;
+}
+
 /* Alas, no aliases. Too much hassle with bringing module.h everywhere */
 #define fops_get(fops) \
 	(((fops) && try_module_get((fops)->owner) ? (fops) : NULL))

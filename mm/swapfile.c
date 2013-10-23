@@ -273,22 +273,41 @@ out:
 static int swap_entry_free(struct swap_info_struct *p, unsigned long offset)
 {
 	int count = p->swap_map[offset];
+	unsigned old;
 
-	if (count < SWAP_MAP_MAX) {
-		count--;
-		p->swap_map[offset] = count;
-		if (!count) {
-			if (offset < p->lowest_bit)
-				p->lowest_bit = offset;
-			if (offset > p->highest_bit)
-				p->highest_bit = offset;
-			if (p->prio > swap_info[swap_list.next].prio)
-				swap_list.next = p - swap_info;
-			nr_swap_pages++;
-			p->inuse_pages--;
-		}
-	}
-	return count;
+	if (count >= SWAP_MAP_MAX)
+		return count;
+
+	count--;
+	p->swap_map[offset] = count;
+	if (count)
+		return count;
+
+	spin_lock(&p->remap_lock);
+
+	if (offset < p->lowest_bit)
+		p->lowest_bit = offset;
+	if (offset > p->highest_bit)
+		p->highest_bit = offset;
+	if (p->prio > swap_info[swap_list.next].prio)
+		swap_list.next = p - swap_info;
+	nr_swap_pages++;
+	p->inuse_pages--;
+
+	/* Re-map the page number */
+	old = p->swap_remap[offset] & 0x7FFFFFFF;
+	/* Zero means it was not re-mapped */
+	if (!old)
+		goto out;
+	/* Clear the re-mapping */
+	p->swap_remap[offset] &= 0x80000000;
+	/* Mark the re-mapped page as unused */
+	p->swap_remap[old] &= 0x7FFFFFFF;
+	/* Record how many free pages there are */
+	p->gaps_exist += 1;
+out:
+	spin_unlock(&p->remap_lock);
+	return 0;
 }
 
 /*
@@ -977,14 +996,118 @@ static void drain_mmlist(void)
 	spin_unlock(&mmlist_lock);
 }
 
+/* Find the largest sequence of free pages */
+int find_gap(struct swap_info_struct *sis)
+{
+	unsigned i, uninitialized_var(start), uninitialized_var(gap_next);
+	unsigned uninitialized_var(gap_end), gap_size = 0;
+	int in_gap = 0;
+
+	spin_unlock(&sis->remap_lock);
+	cond_resched();
+	mutex_lock(&sis->remap_mutex);
+
+	/* Check if a gap was found while we waited for the mutex */
+	spin_lock(&sis->remap_lock);
+	if (sis->gap_next <= sis->gap_end) {
+		mutex_unlock(&sis->remap_mutex);
+		return 0;
+	}
+	if (!sis->gaps_exist) {
+		mutex_unlock(&sis->remap_mutex);
+		return -1;
+	}
+	spin_unlock(&sis->remap_lock);
+
+	/*
+	 * There is no current gap, so no new re-mappings can be made without
+	 * going through this function (find_gap) which is protected by the
+	 * remap_mutex.
+	 */
+	for (i = 1; i < sis->max; i++) {
+		if (in_gap) {
+			if (!(sis->swap_remap[i] & 0x80000000))
+				continue;
+			if (i - start > gap_size) {
+				gap_next = start;
+				gap_end = i - 1;
+				gap_size = i - start;
+			}
+			in_gap = 0;
+		} else {
+			if (sis->swap_remap[i] & 0x80000000)
+				continue;
+			in_gap = 1;
+			start = i;
+		}
+		cond_resched();
+	}
+	spin_lock(&sis->remap_lock);
+	if (in_gap && i - start > gap_size) {
+		sis->gap_next = start;
+		sis->gap_end = i - 1;
+	} else {
+		sis->gap_next = gap_next;
+		sis->gap_end = gap_end;
+	}
+	mutex_unlock(&sis->remap_mutex);
+	return 0;
+}
+
 /*
  * Use this swapdev's extent info to locate the (PAGE_SIZE) block which
  * corresponds to page offset `offset'.
  */
-sector_t map_swap_page(struct swap_info_struct *sis, pgoff_t offset)
+sector_t map_swap_page(struct swap_info_struct *sis, pgoff_t offset, int write)
 {
 	struct swap_extent *se = sis->curr_swap_extent;
 	struct swap_extent *start_se = se;
+	unsigned old;
+
+	/*
+	 * Instead of using the offset we are given, re-map it to the next
+	 * sequential position.
+	 */
+	spin_lock(&sis->remap_lock);
+	/* Get the old re-mapping */
+	old = sis->swap_remap[offset] & 0x7FFFFFFF;
+	if (write) {
+		/* See if we have free pages */
+		if (sis->gap_next > sis->gap_end) {
+			/* The gap is used up. Find another one */
+			if (!sis->gaps_exist || find_gap(sis) < 0) {
+				/*
+				 * Out of space, so this page must have a
+				 * re-mapping, so use that.
+				 */
+				BUG_ON(!old);
+				sis->gap_next = sis->gap_end = old;
+			}
+		}
+		/* Zero means it was not re-mapped previously */
+		if (old) {
+			/* Clear the re-mapping */
+			sis->swap_remap[offset] &= 0x80000000;
+			/* Mark the re-mapped page as unused */
+			sis->swap_remap[old] &= 0x7FFFFFFF;
+		} else {
+			/* Record how many free pages there are */
+			sis->gaps_exist -= 1;
+		}
+		/* Create the re-mapping to the next free page */
+		sis->swap_remap[offset] |= sis->gap_next;
+		/* Mark it as used */
+		sis->swap_remap[sis->gap_next] |= 0x80000000;
+		/* Use the re-mapped page number */
+		offset = sis->gap_next;
+		/* Update the free pages gap */
+		sis->gap_next += 1;
+	} else {
+		/* Always read from the existing re-mapping */
+		BUG_ON(!old);
+		offset = old;
+	}
+	spin_unlock(&sis->remap_lock);
 
 	for ( ; ; ) {
 		struct list_head *lh;
@@ -1015,7 +1138,8 @@ sector_t swapdev_block(int swap_type, pgoff_t offset)
 		return 0;
 
 	sis = swap_info + swap_type;
-	return (sis->flags & SWP_WRITEOK) ? map_swap_page(sis, offset) : 0;
+#error map_swap_page does not support hibernation
+	return (sis->flags & SWP_WRITEOK) ? map_swap_page(sis, offset, 0) : 0;
 }
 #endif /* CONFIG_HIBERNATION */
 
@@ -1342,6 +1466,7 @@ asmlinkage long sys_swapoff(const char __user * specialfile)
 	p->flags = 0;
 	spin_unlock(&swap_lock);
 	mutex_unlock(&swapon_mutex);
+	vfree(p->swap_remap);
 	vfree(swap_map);
 	inode = mapping->host;
 	if (S_ISBLK(inode->i_mode)) {
@@ -1485,6 +1610,7 @@ asmlinkage long sys_swapon(const char __user * specialfile, int swap_flags)
 	unsigned long maxpages = 1;
 	int swapfilesize;
 	unsigned short *swap_map = NULL;
+	unsigned int *swap_remap = NULL;
 	struct page *page = NULL;
 	struct inode *inode = NULL;
 	int did_down = 0;
@@ -1654,9 +1780,15 @@ asmlinkage long sys_swapon(const char __user * specialfile, int swap_flags)
 			error = -ENOMEM;
 			goto bad_swap;
 		}
+		swap_remap = vmalloc(maxpages * sizeof(unsigned));
+		if (!swap_remap) {
+			error = -ENOMEM;
+			goto bad_swap;
+		}
 
 		error = 0;
 		memset(swap_map, 0, maxpages * sizeof(short));
+		memset(swap_remap, 0, maxpages * sizeof(unsigned));
 		for (i = 0; i < swap_header->info.nr_badpages; i++) {
 			int page_nr = swap_header->info.badpages[i];
 			if (page_nr <= 0 || page_nr >= swap_header->info.last_page)
@@ -1696,6 +1828,12 @@ asmlinkage long sys_swapon(const char __user * specialfile, int swap_flags)
 	else
 		p->prio = --least_priority;
 	p->swap_map = swap_map;
+	p->swap_remap = swap_remap;
+	p->gap_next = 1;
+	p->gap_end = p->max - 1;
+	p->gaps_exist = p->max - 1;
+	spin_lock_init(&p->remap_lock);
+	mutex_init(&p->remap_mutex);
 	p->flags = SWP_ACTIVE;
 	nr_swap_pages += nr_good_pages;
 	total_swap_pages += nr_good_pages;
@@ -1734,6 +1872,7 @@ bad_swap_2:
 	p->swap_file = NULL;
 	p->flags = 0;
 	spin_unlock(&swap_lock);
+	vfree(swap_remap);
 	vfree(swap_map);
 	if (swap_file)
 		filp_close(swap_file, NULL);

@@ -44,6 +44,7 @@
 #include <mach/gpmc.h>
 #include <mach/hardware.h>
 #include <mach/nand.h>
+#include <mach/mux.h>
 #include <mach/usb-ehci.h>
 #include <mach/usb-musb.h>
 
@@ -184,7 +185,9 @@ static int __init overo_i2c_init(void)
 
 static void __init overo_init_irq(void)
 {
-	omap2_init_common_hw(mt46h32m32lf6_sdrc_params, NULL, NULL, NULL);
+	omap2_init_common_hw(mt46h32m32lf6_sdrc_params,
+			     mt46h32m32lf6_sdrc_params,
+			     NULL, NULL, NULL);
 	omap_init_irq();
 	omap_gpio_init();
 }
@@ -232,9 +235,13 @@ static void __init overo_init(void)
 	omap_board_config_size = ARRAY_SIZE(overo_config);
 	omap_serial_init();
 	twl4030_mmc_init(mmc);
-	usb_musb_init();
+	usb_musb_init(NULL);
 	usb_ehci_init();
 	overo_flash_init();
+
+	/* Ensure SDRC pins are mux'd for self-refresh */
+	omap_cfg_reg(H16_34XX_SDRC_CKE0);
+	omap_cfg_reg(H17_34XX_SDRC_CKE1);
 
 	if ((gpio_request(OVERO_GPIO_W2W_NRESET,
 			  "OVERO_GPIO_W2W_NRESET") == 0) &&

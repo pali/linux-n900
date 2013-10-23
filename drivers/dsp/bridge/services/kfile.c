@@ -92,7 +92,6 @@ s32 KFILE_Close(struct KFILE_FileObj *hFile)
 {
 	s32 cRetVal = 0;	/* 0 indicates success */
 	s32 fRetVal = 0;
-	__kernel_pid_t curr_pid;
 
 	GT_1trace(KFILE_debugMask, GT_ENTER, "KFILE_Close: hFile 0x%x\n",
 		  hFile);
@@ -101,8 +100,6 @@ s32 KFILE_Close(struct KFILE_FileObj *hFile)
 	if (MEM_IsValidHandle(hFile, SIGNATURE)) {
 		/* Close file only if opened by the same process (id). Otherwise
 		 * Linux closes all open file handles when process exits.*/
-               /* Return PID instead of process handle */
-               curr_pid = (__kernel_pid_t)current->pid;
 		fRetVal = filp_close(hFile->fileDesc, NULL) ;
 		if (fRetVal) {
 			cRetVal = E_KFILE_ERROR;
@@ -181,8 +178,8 @@ struct KFILE_FileObj *KFILE_Open(CONST char *pszFileName, CONST char *pszMode)
 			hFile->size = fileDesc->f_op->llseek(fileDesc, 0,
 							    SEEK_END);
 			fileDesc->f_op->llseek(fileDesc, 0, SEEK_SET);
-                       /* Return PID instead of process handle */
-                       hFile->owner_pid = current->pid;
+			/* Return TGID instead of process handle */
+			hFile->owner_pid = current->tgid;
 
 			status = DSP_SOK;
 		}
@@ -262,7 +259,7 @@ KFILE_Read(void __user*pBuffer, s32 cSize, s32 cCount,
 s32 KFILE_Seek(struct KFILE_FileObj *hFile, s32 lOffset, s32 cOrigin)
 {
 	s32 cRetVal = 0;	/* 0 for success */
-	u32 dwCurPos = 0;
+	loff_t dwCurPos = 0;
 
 	struct file *fileDesc = NULL;
 
@@ -315,7 +312,7 @@ s32 KFILE_Seek(struct KFILE_FileObj *hFile, s32 lOffset, s32 cOrigin)
  */
 s32 KFILE_Tell(struct KFILE_FileObj *hFile)
 {
-	u32 dwCurPos = 0;
+	loff_t dwCurPos = 0;
 	s32 lRetVal = E_KFILE_ERROR;
 
 	GT_1trace(KFILE_debugMask, GT_ENTER, "KFILE_Tell: hFile 0x%x\n", hFile);

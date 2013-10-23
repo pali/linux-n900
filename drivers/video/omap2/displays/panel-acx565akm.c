@@ -48,9 +48,9 @@ struct acx565akm_device {
 	int		model;
 	int		revision;
 	u8		display_id[3];
-	int		has_bc:1;
-	int		has_cabc:1;
-	unsigned int	saved_bklight_level;
+	unsigned	has_bc:1;
+	unsigned	has_cabc:1;
+	unsigned	cabc_mode;
 	unsigned long	hw_guard_end;		/* next value of jiffies
 						   when we can issue the
 						   next sleep in/out command */
@@ -149,23 +149,19 @@ static void hw_guard_wait(struct acx565akm_device *md)
 
 static void set_sleep_mode(struct acx565akm_device *md, int on)
 {
-	int cmd, sleep_time = 50;
+	int cmd;
 
 	if (on)
 		cmd = MIPID_CMD_SLEEP_IN;
 	else
 		cmd = MIPID_CMD_SLEEP_OUT;
+	/*
+	 * We have to keep 120msec between sleep in/out commands.
+	 * (8.2.15, 8.2.16).
+	 */
 	hw_guard_wait(md);
 	acx565akm_cmd(md, cmd);
 	hw_guard_start(md, 120);
-	/*
-	 * When we enable the panel, it seems we _have_ to sleep
-	 * 120 ms before sending the init string. When disabling the
-	 * panel we'll sleep for the duration of 2 frames, so that the
-	 * controller can still provide the PCLK,HS,VS signals. */
-	if (!on)
-		sleep_time = 120;
-	msleep(sleep_time);
 }
 
 static void set_display_state(struct acx565akm_device *md, int enabled)
@@ -206,10 +202,13 @@ static void enable_backlight_ctrl(struct acx565akm_device *md, int enable)
 	acx565akm_write(md, MIPID_CMD_WRITE_CTRL_DISP, (u8 *)&ctrl, 2);
 }
 
-static void set_cabc_mode(struct acx565akm_device *md, int mode)
+static void set_cabc_mode(struct acx565akm_device *md, unsigned mode)
 {
 	u16 cabc_ctrl;
 
+	md->cabc_mode = mode;
+	if (!md->enabled)
+		return;
 	cabc_ctrl = 0;
 	acx565akm_read(md, MIPID_CMD_READ_CABC, (u8 *)&cabc_ctrl, 1);
 	cabc_ctrl &= ~3;
@@ -217,7 +216,12 @@ static void set_cabc_mode(struct acx565akm_device *md, int mode)
 	acx565akm_write(md, MIPID_CMD_WRITE_CABC, (u8 *)&cabc_ctrl, 2);
 }
 
-static int get_cabc_mode(struct acx565akm_device *md)
+static unsigned get_cabc_mode(struct acx565akm_device *md)
+{
+	return md->cabc_mode;
+}
+
+static unsigned get_hw_cabc_mode(struct acx565akm_device *md)
 {
 	u8 cabc_ctrl;
 
@@ -276,17 +280,29 @@ static int acx565akm_panel_enable(struct omap_display *display)
 	if (display->hw_config.panel_enable != NULL)
 		display->hw_config.panel_enable(display);
 
-	md->enabled = panel_enabled(md);
-
 	if (md->enabled) {
 		dev_dbg(&md->spi->dev, "panel already enabled\n");
 		mutex_unlock(&md->mutex);
 		return 0;
 	}
 
+	/*
+	 * We have to meet all the following delay requirements:
+	 * 1. tRW: reset pulse width 10usec (7.12.1)
+	 * 2. tRT: reset cancel time 5msec (7.12.1)
+	 * 3. Providing PCLK,HS,VS signals for 2 frames = ~50msec worst
+	 *    case (7.6.2)
+	 * 4. 120msec before the sleep out command (7.12.1)
+	 */
+	msleep(120);
+
 	set_sleep_mode(md, 0);
 	md->enabled = 1;
+
+	/* 5msec between sleep out and the next command. (8.2.16) */
+	msleep(5);
 	set_display_state(md, 1);
+	set_cabc_mode(md, md->cabc_mode);
 
 	mutex_unlock(&md->mutex);
 
@@ -309,6 +325,13 @@ static void acx565akm_panel_disable(struct omap_display *display)
 	set_display_state(md, 0);
 	set_sleep_mode(md, 1);
 	md->enabled = 0;
+	/*
+	 * We have to provide PCLK,HS,VS signals for 2 frames (worst case
+	 * ~50msec) after sending the sleep in command and asserting the
+	 * reset signal. We probably could assert the reset w/o the delay
+	 * but we still delay to avoid possible artifacts. (7.6.1)
+	 */
+	msleep(50);
 
 	if (display->hw_config.panel_disable != NULL)
 		display->hw_config.panel_disable(display);
@@ -548,6 +571,11 @@ static int acx565akm_panel_init(struct omap_display *display)
 
 	if (display->hw_config.panel_enable != NULL)
 		display->hw_config.panel_enable(display);
+	/*
+	 * After reset we have to wait 5 msec before the first
+	 * command can be sent.
+	 */
+	msleep(5);
 
 	md->enabled = panel_enabled(md);
 
@@ -583,6 +611,7 @@ static int acx565akm_panel_init(struct omap_display *display)
 			backlight_device_unregister(bldev);
 			return r;
 		}
+		md->cabc_mode = get_hw_cabc_mode(md);
 	}
 
 	bldev->props.fb_blank = FB_BLANK_UNBLANK;
@@ -622,15 +651,17 @@ static struct omap_panel acx565akm_panel = {
 		.pixel_clock	= 24000,
 
 		.hsw		= 4,
-		.hfp		= 16,
-		.hbp		= 12,
+		.hfp		= 28,
+		.hbp		= 24,
 
 		.vsw		= 3,
 		.vfp		= 3,
-		.vbp		= 3,
+		.vbp		= 4,
 	},
 
-	.config		= OMAP_DSS_LCD_TFT,
+	.config		= OMAP_DSS_LCD_TFT |
+			  OMAP_DSS_LCD_IVS |
+			  OMAP_DSS_LCD_IHS,
 
 	.recommended_bpp = 16,
 
@@ -644,7 +675,7 @@ static int acx565akm_spi_probe(struct spi_device *spi)
 {
 	struct acx565akm_device *md;
 
-	dev_dbg(&md->spi->dev, "%s\n", __func__);
+	dev_dbg(&spi->dev, "%s\n", __func__);
 
 	md = kzalloc(sizeof(*md), GFP_KERNEL);
 	if (md == NULL) {

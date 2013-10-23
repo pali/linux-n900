@@ -17,6 +17,7 @@
 #include <linux/spi/wl12xx.h>
 #include <linux/i2c.h>
 #include <linux/i2c/twl4030.h>
+#include <linux/i2c/tsl2563.h>
 #include <linux/camera_button.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -53,6 +54,7 @@
 #define RX51_WL12XX_IRQ_GPIO		42
 
 static void rx51_wl12xx_set_power(bool enable);
+static void rx51_tsc2005_set_reset(bool enable);
 
 static struct resource rx51_smc91x_resources[] = {
 	[0] = {
@@ -75,8 +77,6 @@ static struct platform_device rx51_smc91x_device = {
 };
 
 static struct tsc2005_platform_data tsc2005_config = {
-	.reset_gpio 		= RX51_TSC2005_RESET_GPIO, /* used for esd */
-
 	.ts_x_plate_ohm		= 280,
 	.ts_hw_avg		= 0,
 	.ts_touch_pressure	= 1500,
@@ -89,6 +89,8 @@ static struct tsc2005_platform_data tsc2005_config = {
 	.ts_y_fudge		= 7,
 
 	.esd_timeout		= 8*1000, /* ms of inactivity before we check */
+
+	.set_reset		= NULL,
 };
 
 static struct lis302dl_platform_data rx51_lis302dl_data = {
@@ -143,6 +145,10 @@ static struct lp5523_platform_data rx51_lp5523_platform_data = {
 	.chip_en     	= RX51_LP5523_CHIP_EN_GPIO,
 };
 
+static struct tsl2563_platform_data rx51_tsl2563_platform_data = {
+	.cover_comp_gain = 16,
+};
+
 static struct wl12xx_platform_data wl12xx_pdata = {
 	.set_power = rx51_wl12xx_set_power,
 };
@@ -172,7 +178,7 @@ static struct spi_board_info rx51_peripherals_spi_board_info[] = {
 		.bus_num		= 4,
 		.chip_select		= 0,
 		.max_speed_hz   	= 48000000,
-		.mode                   = SPI_MODE_2,
+		.mode                   = SPI_MODE_3,
 		.controller_data	= &wl12xx_mcspi_config,
 		.platform_data		= &wl12xx_pdata,
 	},
@@ -327,15 +333,20 @@ static void __init rx51_init_tsc2005(void)
 		gpio_direction_input(RX51_TSC2005_IRQ_GPIO);
 	else
 		printk(KERN_ERR "unable to get DAV GPIO\n");
-	if (tsc2005_config.esd_timeout) {
-		r = gpio_request(tsc2005_config.reset_gpio, "tsc2005 reset");
-		if (r >= 0) {
-			gpio_direction_output(tsc2005_config.reset_gpio, 1);
-		} else {
-			printk(KERN_ERR "unable to get tsc2005 reset GPIO\n");
-			tsc2005_config.esd_timeout = 0;
-		}
+
+	r = gpio_request(RX51_TSC2005_RESET_GPIO, "tsc2005 reset");
+	if (r >= 0) {
+		gpio_direction_output(RX51_TSC2005_RESET_GPIO, 1);
+		tsc2005_config.set_reset = rx51_tsc2005_set_reset;
+	} else {
+		printk(KERN_ERR "unable to get tsc2005 reset GPIO\n");
+		tsc2005_config.esd_timeout = 0;
 	}
+}
+
+static void rx51_tsc2005_set_reset(bool enable)
+{
+	gpio_set_value(RX51_TSC2005_RESET_GPIO, enable);
 }
 
 static void rx51_wl12xx_set_power(bool enable)
@@ -403,53 +414,42 @@ static struct twl4030_gpio_platform_data rx51_gpio_data = {
 
 static struct twl4030_ins sleep_on_seq[] = {
 /*
- * Turn off VDD1 and VDD2.
+ * Turn off everything.
  */
-	{MSG_SINGULAR(DEV_GRP_P1, 0xf, RES_STATE_OFF), 4},
-	{MSG_SINGULAR(DEV_GRP_P1, 0x10, RES_STATE_OFF), 2},
-/*
- * And also turn off the OMAP3 PLLs and the sysclk output.
- */
-	{MSG_SINGULAR(DEV_GRP_P1, 0x7, RES_STATE_OFF), 3},
-	{MSG_SINGULAR(DEV_GRP_P1, 0x17, RES_STATE_OFF), 3},
+	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_ALL, 1, 0, RES_STATE_SLEEP), 2},
 };
 
 static struct twl4030_script sleep_on_script = {
-	.script	= sleep_on_seq,
-	.size	= ARRAY_SIZE(sleep_on_seq),
-	.flags	= TRITON_SLEEP_SCRIPT,
+	.script		  = sleep_on_seq,
+	.size		  = ARRAY_SIZE(sleep_on_seq),
+	.number_of_events = 1,
+	.events[0] = {
+		.offset = 0,
+		.event = TRITON_SLEEP,
+	},
 };
 
 static struct twl4030_ins wakeup_seq[] = {
 /*
- * Reenable the OMAP3 PLLs.
- * Wakeup VDD1 and VDD2.
- * Reenable sysclk output.
+ * Reenable everything.
  */
-	{MSG_SINGULAR(DEV_GRP_P1, 0x7, RES_STATE_ACTIVE), 0x30},
-	{MSG_SINGULAR(DEV_GRP_P1, 0xf, RES_STATE_ACTIVE), 0x30},
-	{MSG_SINGULAR(DEV_GRP_P1, 0x10, RES_STATE_ACTIVE), 0x37},
-	{MSG_SINGULAR(DEV_GRP_P1, 0x19, RES_STATE_ACTIVE), 3},
+	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_ALL, 1, 0, RES_STATE_ACTIVE), 2},
 };
 
 static struct twl4030_script wakeup_script = {
-	.script	= wakeup_seq,
-	.size	= ARRAY_SIZE(wakeup_seq),
-	.flags	= TRITON_WAKEUP12_SCRIPT,
-};
-
-static struct twl4030_ins wakeup_p3_seq[] = {
-/*
- * Wakeup VDD1 (dummy to be able to insert a delay)
- * Enable CLKEN
- */
-	{MSG_SINGULAR(DEV_GRP_P1, 0x17, RES_STATE_ACTIVE), 3},
-};
-
-static struct twl4030_script wakeup_p3_script = {
-	.script	= wakeup_p3_seq,
-	.size	= ARRAY_SIZE(wakeup_p3_seq),
-	.flags	= TRITON_WAKEUP3_SCRIPT,
+	.script		  = wakeup_seq,
+	.size		  = ARRAY_SIZE(wakeup_seq),
+	.number_of_events = 2,
+	.events = {
+		[0] = {
+			.offset = 0,
+			.event = TRITON_WAKEUP12,
+		},
+		[1] = {
+			.offset = 0,
+			.event = TRITON_WAKEUP3,
+		},
+	},
 };
 
 static struct twl4030_ins wrst_seq[] = {
@@ -464,45 +464,80 @@ static struct twl4030_ins wrst_seq[] = {
 	{MSG_SINGULAR(DEV_GRP_NULL, RES_RESET, RES_STATE_OFF), 2},
 	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_ALL, 0, 1, RES_STATE_ACTIVE),
 		0x13},
-	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_PP, 0, 2, RES_STATE_WRST), 0x13},
 	{MSG_BROADCAST(DEV_GRP_NULL, RES_GRP_PP, 0, 3, RES_STATE_OFF), 0x13},
 	{MSG_SINGULAR(DEV_GRP_NULL, RES_VDD1, RES_STATE_WRST), 0x13},
 	{MSG_SINGULAR(DEV_GRP_NULL, RES_VDD2, RES_STATE_WRST), 0x13},
 	{MSG_SINGULAR(DEV_GRP_NULL, RES_VPLL1, RES_STATE_WRST), 0x35},
-	{MSG_SINGULAR(DEV_GRP_P1, RES_HFCLKOUT, RES_STATE_ACTIVE), 2},
+	{MSG_SINGULAR(DEV_GRP_P3, RES_HFCLKOUT, RES_STATE_ACTIVE), 2},
 	{MSG_SINGULAR(DEV_GRP_NULL, RES_RESET, RES_STATE_ACTIVE), 2},
 };
 
 static struct twl4030_script wrst_script = {
-	.script = wrst_seq,
-	.size   = ARRAY_SIZE(wrst_seq),
-	.flags  = TRITON_WRST_SCRIPT,
+	.script 	  = wrst_seq,
+	.size   	  = ARRAY_SIZE(wrst_seq),
+	.number_of_events = 1,
+	.events[0] = {
+		.offset = 0,
+		.event = TRITON_WRST,
+	},
 };
 
 static struct twl4030_script *twl4030_scripts[] = {
 	&sleep_on_script,
 	&wakeup_script,
-	&wakeup_p3_script,
 	&wrst_script,
 };
 
 static struct twl4030_resconfig twl4030_rconfig[] = {
-	{ .resource = RES_VINTANA1, .devgroup = -1, .type = -1, .type2 = 1 },
-	{ .resource = RES_VINTANA2, .devgroup = -1, .type = -1, .type2 = 1 },
-	{ .resource = RES_VINTDIG, .devgroup = -1, .type = -1, .type2 = 1 },
-	{ .resource = RES_VMMC1, .devgroup = -1, .type = -1, .type2 = 3},
-	{ .resource = RES_VMMC2, .devgroup = DEV_GRP_NULL, .type = -1,
-	  .type2 = 3},
-	{ .resource = RES_VAUX1, .devgroup = -1, .type = -1, .type2 = 3},
-	{ .resource = RES_VAUX2, .devgroup = -1, .type = -1, .type2 = 2},
-	{ .resource = RES_VAUX3, .devgroup = -1, .type = -1, .type2 = 3},
-	{ .resource = RES_VAUX4, .devgroup = -1, .type = -1, .type2 = 2},
-	{ .resource = RES_VPLL2, .devgroup = -1, .type = -1, .type2 = 2},
-	{ .resource = RES_VDAC, .devgroup = -1, .type = -1, .type2 = 3},
-	{ .resource = RES_VSIM, .devgroup = DEV_GRP_NULL, .type = -1,
-	  .type2 = 3},
-	{ .resource = RES_CLKEN, .devgroup = DEV_GRP_P3, .type = -1,
-		.type2 = 1 },
+
+	{ .resource = RES_VDD1, .devgroup = -1, .type = 1, .type2 = -1,
+		.remap = 0 },
+	{ .resource = RES_VDD2, .devgroup = -1, .type = 1, .type2 = -1,
+		.remap = 0 },
+	{ .resource = RES_VPLL1, .devgroup = -1, .type = 1, .type2 = -1,
+		.remap = 0 },
+	{ .resource = RES_VPLL2, .devgroup = -1, .type = -1, .type2 = 3,
+		.remap = -1 },
+	{ .resource = RES_VAUX1, .devgroup = -1, .type = -1, .type2 = 3,
+		.remap = -1 },
+	{ .resource = RES_VAUX2, .devgroup = -1, .type = -1, .type2 = 3,
+		.remap = -1 },
+	{ .resource = RES_VAUX3, .devgroup = -1, .type = -1, .type2 = 3,
+		.remap = -1 },
+	{ .resource = RES_VAUX4, .devgroup = -1, .type = -1, .type2 = 3,
+		.remap = -1 },
+	{ .resource = RES_VMMC1, .devgroup = -1, .type = -1, .type2 = 3,
+		.remap = -1 },
+	{ .resource = RES_VMMC2, .devgroup = -1, .type = -1, .type2 = 3,
+		.remap = -1 },
+	{ .resource = RES_VDAC, .devgroup = -1, .type = -1, .type2 = 3,
+		.remap = -1 },
+	{ .resource = RES_VSIM, .devgroup = -1, .type = -1, .type2 = 3,
+		.remap = -1 },
+	{ .resource = RES_VINTANA1, .devgroup = DEV_GRP_P1 | DEV_GRP_P3,
+		.type = -1, .type2 = -1, .remap = -1 },
+	{ .resource = RES_VINTANA2, .devgroup = DEV_GRP_P1 | DEV_GRP_P3,
+		.type = 1, .type2 = -1, .remap = -1 },
+	{ .resource = RES_VINTDIG, .devgroup = DEV_GRP_P1 | DEV_GRP_P3,
+		.type = -1, .type2 = -1, .remap = -1 },
+	{ .resource = RES_VIO, .devgroup = DEV_GRP_P3,
+		.type = 1, .type2 = -1, .remap = -1 },
+	{ .resource = RES_CLKEN, .devgroup = DEV_GRP_P1 | DEV_GRP_P3,
+		.type = 1, .type2 = -1 , .remap = -1 },
+	{ .resource = RES_REGEN, .devgroup = DEV_GRP_P1 | DEV_GRP_P3,
+		.type = 1, .type2 = -1, .remap = -1 },
+	{ .resource = RES_NRES_PWRON, .devgroup = DEV_GRP_P1 | DEV_GRP_P3,
+		.type = 1, .type2 = -1, .remap = -1 },
+	{ .resource = RES_SYSEN, .devgroup = DEV_GRP_P1 | DEV_GRP_P3,
+		.type = 1, .type2 = -1, .remap = -1 },
+	{ .resource = RES_HFCLKOUT, .devgroup = DEV_GRP_P3, .type = 1,
+		.type2 = -1, .remap = -1 },
+	{ .resource = RES_32KCLKOUT, .devgroup = -1, .type = 1, .type2 = -1,
+		.remap = -1 },
+	{ .resource = RES_RESET, .devgroup = -1, .type = 1, .type2 = -1,
+		.remap = -1 },
+	{ .resource = RES_Main_Ref, .devgroup = -1, .type = 1, .type2 = -1,
+		.remap = -1 },
 	{ 0, 0},
 };
 
@@ -511,6 +546,9 @@ static struct twl4030_power_data rx51_t2scripts_data = {
 	.scripts_size	= ARRAY_SIZE(twl4030_scripts),
 	.resource_config = twl4030_rconfig,
 };
+
+
+extern struct regulator_init_data rx51_vdac_data;
 
 static struct twl4030_platform_data rx51_twldata = {
 	.irq_base		= TWL4030_IRQ_BASE,
@@ -522,6 +560,9 @@ static struct twl4030_platform_data rx51_twldata = {
 	.madc			= &rx51_madc_data,
 	.power			= &rx51_t2scripts_data,
 	.usb			= &rx51_usb_data,
+
+	/* LDOs */
+	.vdac			= &rx51_vdac_data,
 };
 
 static struct omap_ssi_board_config ssi_board_config = {
@@ -545,6 +586,7 @@ static struct i2c_board_info __initdata rx51_peripherals_i2c_board_info_2[] = {
 	},
 	{
 		I2C_BOARD_INFO("tsl2563", 0x29),
+		.platform_data = &rx51_tsl2563_platform_data,
 	},
 };
 
@@ -557,7 +599,7 @@ static struct i2c_board_info __initdata rx51_peripherals_i2c_board_info_3[] = {
 
 static int __init rx51_i2c_init(void)
 {
-	omap_register_i2c_bus(1, 2600, rx51_peripherals_i2c_board_info_1,
+	omap_register_i2c_bus(1, 2200, rx51_peripherals_i2c_board_info_1,
 			ARRAY_SIZE(rx51_peripherals_i2c_board_info_1));
 	omap_register_i2c_bus(2, 100, rx51_peripherals_i2c_board_info_2,
 			      ARRAY_SIZE(rx51_peripherals_i2c_board_info_2));

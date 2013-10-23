@@ -50,6 +50,10 @@
 #define PVRMMapKVIndexAddressToMMapData(A,B,C,D,E) PVRSRV_OK
 #endif
 
+#ifdef __KERNEL__
+#include <linux/pagemap.h> /* for cache flush */
+#endif	/* __KERNEL__ */
+
 #ifndef ENOMEM
 #define ENOMEM	12
 #endif
@@ -859,6 +863,50 @@ PVRSRVUnmapDeviceMemoryBW(IMG_UINT32 ui32BridgeID,
 }
 
 
+static int
+FlushCacheDRI(IMG_UINT32 ui32Type, IMG_UINT32 ui32Virt, IMG_UINT32 ui32Length)
+{
+	switch (ui32Type) {
+	case DRM_PVR2D_CFLUSH_FROM_GPU:
+		PVR_DPF((PVR_DBG_MESSAGE, "DRM_PVR2D_CFLUSH_FROM_GPU 0x%08x, length 0x%08x\n",
+			  ui32Virt, ui32Length));
+#ifdef CONFIG_ARM
+		dmac_inv_range((const void *)ui32Virt,
+			       (const void *)(ui32Virt + ui32Length));
+#endif
+		return 0;
+	case DRM_PVR2D_CFLUSH_TO_GPU:
+		PVR_DPF((PVR_DBG_MESSAGE, "DRM_PVR2D_CFLUSH_TO_GPU 0x%08x, length 0x%08x\n",
+			  ui32Virt, ui32Length));
+#ifdef CONFIG_ARM
+		dmac_clean_range((const void *)ui32Virt,
+				 (const void *)(ui32Virt + ui32Length));
+#endif
+		return 0;
+	default:
+		PVR_DPF((PVR_DBG_ERROR, "Invalid cflush type 0x%x\n", ui32Type));
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+
+static int
+PVRSRVCacheFlushDRIBW(IMG_UINT32 ui32BridgeID,
+							 PVRSRV_BRIDGE_IN_CACHEFLUSHDRMFROMUSER *psCacheFlushIN,
+							 PVRSRV_BRIDGE_RETURN *psRetOUT,
+							 PVRSRV_PER_PROCESS_DATA *psPerProc)
+{
+	PVRSRV_BRIDGE_ASSERT_CMD(ui32BridgeID, PVRSRV_BRIDGE_CACHE_FLUSH_DRM);
+
+	psRetOUT->eError = FlushCacheDRI(psCacheFlushIN->ui32Type,
+										psCacheFlushIN->ui32Virt,
+										psCacheFlushIN->ui32Length);
+
+	return 0;
+}
+
 
 static int
 PVRSRVMapDeviceClassMemoryBW(IMG_UINT32 ui32BridgeID,
@@ -1073,14 +1121,13 @@ PVRSRVWrapExtMemoryBW(IMG_UINT32 ui32BridgeID,
 							  psSysPAddr,
 							  psWrapExtMemIN->pvLinAddr,
 							  &psMemInfo);
-	if(psWrapExtMemIN->ui32NumPageTableEntries)
-	{
-		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,
-			  ui32PageTableSize,
-			  (IMG_VOID *)psSysPAddr, 0);
-	}
 	if(psWrapExtMemOUT->eError != PVRSRV_OK)
 	{
+		/* PVRSRVWrapExtMemoryKM failed, so clean up page list */
+		if (psWrapExtMemIN->ui32NumPageTableEntries)
+			OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,
+					ui32PageTableSize,
+					(IMG_VOID *)psSysPAddr, 0);
 		return 0;
 	}
 
@@ -1126,7 +1173,7 @@ PVRSRVWrapExtMemoryBW(IMG_UINT32 ui32BridgeID,
 					  &psWrapExtMemOUT->sClientSyncInfo.hKernelSyncInfo, 
 					  (IMG_HANDLE)psMemInfo->psKernelSyncInfo,
 					  PVRSRV_HANDLE_TYPE_SYNC_INFO,
-					  PVRSRV_HANDLE_ALLOC_FLAG_NONE,
+					  PVRSRV_HANDLE_ALLOC_FLAG_MULTI,
 					  psWrapExtMemOUT->sClientMemInfo.hKernelMemInfo);
 
 	COMMIT_HANDLE_BATCH_OR_ERROR(psWrapExtMemOUT->eError, psPerProc);
@@ -4714,6 +4761,7 @@ CommonBridgeInit(IMG_VOID)
 	SetDispatchTableEntry(PVRSRV_BRIDGE_UNMAP_DEVICECLASS_MEMORY, PVRSRVUnmapDeviceClassMemoryBW);
 	SetDispatchTableEntry(PVRSRV_BRIDGE_MAP_MEM_INFO_TO_USER, DummyBW);
 	SetDispatchTableEntry(PVRSRV_BRIDGE_UNMAP_MEM_INFO_FROM_USER, DummyBW);
+	SetDispatchTableEntry(PVRSRV_BRIDGE_CACHE_FLUSH_DRM, PVRSRVCacheFlushDRIBW);
 
 	
 	SetDispatchTableEntry(PVRSRV_BRIDGE_PROCESS_SIMISR_EVENT, DummyBW);

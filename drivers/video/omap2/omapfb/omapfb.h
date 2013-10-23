@@ -53,11 +53,6 @@ struct omapfb2_mem_region {
 	bool		map;		/* kernel mapped by the driver */
 };
 
-enum omapfb_rotation_type {
-	OMAPFB_ROT_DMA = 0,
-	OMAPFB_ROT_VRFB = 1,
-};
-
 /* appended to fb_info */
 struct omapfb_info {
 	int id;
@@ -66,8 +61,8 @@ struct omapfb_info {
 	int num_overlays;
 	struct omap_overlay *overlays[OMAPFB_MAX_OVL_PER_FB];
 	struct omapfb2_device *fbdev;
-	enum omapfb_rotation_type rotation_type;
-	u8 rotation;
+	enum omap_dss_rotation_type rotation_type;
+	u8 rotation[OMAPFB_MAX_OVL_PER_FB];
 	bool mirror;
 };
 
@@ -100,9 +95,6 @@ struct omapfb_colormode {
 	struct fb_bitfield transp;
 };
 
-u32 omapfb_get_region_paddr(struct omapfb_info *ofbi);
-void __iomem *omapfb_get_region_vaddr(struct omapfb_info *ofbi);
-
 void set_fb_fix(struct fb_info *fbi);
 int check_fb_var(struct fb_info *fbi, struct fb_var_screeninfo *var);
 int omapfb_realloc_fbmem(struct fb_info *fbi, unsigned long size, int type);
@@ -116,6 +108,8 @@ int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg);
 
 int omapfb_mode_to_timings(const char *mode_str,
 		struct omap_video_timings *timings, u8 *bpp);
+int dss_mode_to_fb_mode(enum omap_color_mode dssmode,
+			struct fb_var_screeninfo *var);
 
 /* find the display connected to this fb, if any */
 static inline struct omap_display *fb2display(struct fb_info *fbi)

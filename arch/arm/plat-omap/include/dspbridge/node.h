@@ -68,6 +68,7 @@
 #include <dspbridge/nodedefs.h>
 #include <dspbridge/dispdefs.h>
 #include <dspbridge/nldrdefs.h>
+#include <dspbridge/drv.h>
 
 /*
  *  ======== NODE_Allocate ========
@@ -104,7 +105,8 @@
 					*pArgs,
 					OPTIONAL IN CONST struct DSP_NODEATTRIN
 					*pAttrIn,
-					OUT struct NODE_OBJECT **phNode);
+					OUT struct NODE_OBJECT **phNode,
+					struct PROCESS_CONTEXT *pr_ctxt);
 
 /*
  *  ======== NODE_AllocMsgBuf ========
@@ -307,7 +309,8 @@
  *  Ensures:
  *      DSP_SOK:            hNode is invalid.
  */
-	extern DSP_STATUS NODE_Delete(struct NODE_OBJECT *hNode);
+	extern DSP_STATUS NODE_Delete(struct NODE_OBJECT *hNode,
+			struct PROCESS_CONTEXT *pr_ctxt);
 
 /*
  *  ======== NODE_DeleteMgr ========

@@ -154,6 +154,16 @@ static int ieee80211_open(struct net_device *dev)
 			goto err_del_bss;
 		need_hw_reconfig = 1;
 		ieee80211_led_radio(local, local->hw.conf.radio_enabled);
+		/*
+		 * In the case of IBSS whenever interface is restarted, random
+		 * BSSID should be generated when creating ad-hoc network with
+		 * same ssid. As the bss_list is not cleared anywhere, it uses
+		 * previously cached random BSSID. This is a workaround to
+		 * clear bss_list during interface down and initialize during
+		 * interface up.
+		 */
+
+		ieee80211_rx_bss_list_init(local);
 	}
 
 	/*
@@ -434,6 +444,8 @@ static int ieee80211_stop(struct net_device *dev)
 		 * it no longer is.
 		 */
 		cancel_work_sync(&sdata->u.sta.work);
+		cancel_work_sync(&sdata->u.sta.beacon_loss_work);
+
 		/*
 		 * When we get here, the interface is marked down.
 		 * Call synchronize_rcu() to wait for the RX path
@@ -499,6 +511,11 @@ static int ieee80211_stop(struct net_device *dev)
 			local->ops->stop(local_to_hw(local));
 
 		ieee80211_led_radio(local, 0);
+		/*
+		 * Clear the bss_list so that random BSSID is generated when
+		 * creating ad-hoc network with same bssid.
+		 */
+		ieee80211_rx_bss_list_deinit(local);
 
 		flush_workqueue(local->hw.workqueue);
 

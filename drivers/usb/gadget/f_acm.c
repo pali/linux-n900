@@ -340,10 +340,13 @@ static int acm_setup(struct usb_function *f, const struct usb_ctrlrequest *ctrl)
 
 		value = 0;
 
-		/* FIXME we should not allow data to flow until the
-		 * host sets the ACM_CTRL_DTR bit; and when it clears
-		 * that bit, we should return to that no-flow state.
+		/* REVISIT Hangup would be the right way, but since the hooks
+		 * are not there we need to connect/disconnect.
 		 */
+		if (w_value & ACM_CTRL_DTR)
+			gserial_connect(&acm->port, acm->port_num);
+		else
+			gserial_disconnect(&acm->port);
 		acm->port_handshake_bits = w_value;
 		break;
 

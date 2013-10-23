@@ -35,10 +35,6 @@
 #include "u_phonet.h"
 
 #define PN_MEDIA_USB	0x1B
-#define MAXPACKET	512
-#if (PAGE_SIZE % MAXPACKET)
-#error MAXPACKET must divide PAGE_SIZE!
-#endif
 
 /*-------------------------------------------------------------------------*/
 
@@ -60,7 +56,7 @@ struct f_phonet {
 	struct usb_request		*out_reqv[0];
 };
 
-static int phonet_rxq_size = 2;
+static int phonet_rxq_size = 17;
 
 static inline struct f_phonet *func_to_pn(struct usb_function *f)
 {
@@ -146,7 +142,7 @@ pn_hs_sink_desc = {
 
 	.bEndpointAddress =	USB_DIR_OUT,
 	.bmAttributes =		USB_ENDPOINT_XFER_BULK,
-	.wMaxPacketSize =	__constant_cpu_to_le16(MAXPACKET),
+	.wMaxPacketSize =	__constant_cpu_to_le16(512),
 };
 
 static struct usb_endpoint_descriptor
@@ -269,20 +265,10 @@ out:
 
 static int pn_net_mtu(struct net_device *dev, int new_mtu)
 {
-	struct phonet_port *port = netdev_priv(dev);
-	unsigned long flags;
-	int err = -EBUSY;
-
 	if ((new_mtu < PHONET_MIN_MTU) || (new_mtu > PHONET_MAX_MTU))
 		return -EINVAL;
-
-	spin_lock_irqsave(&port->lock, flags);
-	if (!netif_carrier_ok(dev)) {
-		dev->mtu = new_mtu;
-		err = 0;
-	}
-	spin_unlock_irqrestore(&port->lock, flags);
-	return err;
+	dev->mtu = new_mtu;
+	return 0;
 }
 
 static void pn_net_setup(struct net_device *dev)
@@ -290,7 +276,7 @@ static void pn_net_setup(struct net_device *dev)
 	dev->features		= 0;
 	dev->type		= ARPHRD_PHONET;
 	dev->flags		= IFF_POINTOPOINT | IFF_NOARP;
-	dev->mtu		= PHONET_DEV_MTU;
+	dev->mtu		= (60 * 1024),
 	dev->hard_header_len	= 1;
 	dev->dev_addr[0]	= PN_MEDIA_USB;
 	dev->addr_len		= 1;
@@ -396,7 +382,6 @@ static void __pn_reset(struct usb_function *f)
 	struct net_device *dev = fp->dev;
 	struct phonet_port *port = netdev_priv(dev);
 
-	netif_carrier_off(dev);
 	port->usb = NULL;
 
 	usb_ep_disable(fp->out_ep);
@@ -443,7 +428,6 @@ static int pn_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 			fp->out_ep->driver_data = fp;
 			fp->in_ep->driver_data = fp;
 
-			netif_carrier_on(dev);
 			for (i = 0; i < phonet_rxq_size; i++)
 				pn_rx_submit(fp, fp->out_reqv[i], GFP_ATOMIC);
 		}
@@ -624,7 +608,6 @@ int __init gphonet_setup(struct usb_gadget *gadget)
 
 	port = netdev_priv(dev);
 	spin_lock_init(&port->lock);
-	netif_carrier_off(dev);
 	netif_stop_queue(dev);
 	SET_NETDEV_DEV(dev, &gadget->dev);
 

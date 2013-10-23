@@ -2710,7 +2710,7 @@ static int ext4_load_journal(struct super_block *sb,
 	if (journal_devnum &&
 	    journal_devnum != le32_to_cpu(es->s_journal_dev)) {
 		es->s_journal_dev = cpu_to_le32(journal_devnum);
-		sb->s_dirt = 1;
+		mark_sb_dirty(sb);
 
 		/* Make sure we flush the recovery flag to disk. */
 		ext4_commit_super(sb, es, 1);
@@ -2753,7 +2753,7 @@ static int ext4_create_journal(struct super_block *sb,
 	EXT4_SET_COMPAT_FEATURE(sb, EXT4_FEATURE_COMPAT_HAS_JOURNAL);
 
 	es->s_journal_inum = cpu_to_le32(journal_inum);
-	sb->s_dirt = 1;
+	mark_sb_dirty(sb);
 
 	/* Make sure we flush the recovery flag to disk. */
 	ext4_commit_super(sb, es, 1);
@@ -2817,7 +2817,7 @@ static void ext4_mark_recovery_complete(struct super_block *sb,
 	if (EXT4_HAS_INCOMPAT_FEATURE(sb, EXT4_FEATURE_INCOMPAT_RECOVER) &&
 	    sb->s_flags & MS_RDONLY) {
 		EXT4_CLEAR_INCOMPAT_FEATURE(sb, EXT4_FEATURE_INCOMPAT_RECOVER);
-		sb->s_dirt = 0;
+		mark_sb_clean(sb);
 		ext4_commit_super(sb, es, 1);
 	}
 	unlock_super(sb);
@@ -2876,7 +2876,7 @@ int ext4_force_commit(struct super_block *sb)
 		return 0;
 
 	journal = EXT4_SB(sb)->s_journal;
-	sb->s_dirt = 0;
+	mark_sb_clean(sb);
 	ret = ext4_journal_force_commit(journal);
 	return ret;
 }
@@ -2891,7 +2891,7 @@ static void ext4_write_super(struct super_block *sb)
 {
 	if (mutex_trylock(&sb->s_lock) != 0)
 		BUG();
-	sb->s_dirt = 0;
+	mark_sb_clean(sb);
 }
 
 static int ext4_sync_fs(struct super_block *sb, int wait)
@@ -2899,7 +2899,7 @@ static int ext4_sync_fs(struct super_block *sb, int wait)
 	int ret = 0;
 
 	trace_mark(ext4_sync_fs, "dev %s wait %d", sb->s_id, wait);
-	sb->s_dirt = 0;
+	mark_sb_clean(sb);
 	if (wait)
 		ret = ext4_force_commit(sb);
 	else
@@ -2913,7 +2913,7 @@ static int ext4_sync_fs(struct super_block *sb, int wait)
  */
 static void ext4_write_super_lockfs(struct super_block *sb)
 {
-	sb->s_dirt = 0;
+	mark_sb_clean(sb);
 
 	if (!(sb->s_flags & MS_RDONLY)) {
 		journal_t *journal = EXT4_SB(sb)->s_journal;

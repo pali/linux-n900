@@ -1456,6 +1456,16 @@ static void serial8250_handle_port(struct uart_8250_port *up)
 	if (status & UART_LSR_THRE)
 		transmit_chars(up);
 
+#ifdef CONFIG_ARCH_OMAP
+	/*
+	 * OMAP3 UART has a special RX_FIFO_STATUS bit that will stall
+	 * RX transfer on FIFO overflow until the RX fifo is cleared.
+	 */
+	if (cpu_is_omap34xx() && is_omap_port(up) &&
+					status & UART_LSR_RX_FIFO_STS)
+		serial_outp(up, UART_FCR, uart_config[up->port.type].fcr |
+					UART_FCR_CLEAR_RCVR);
+#endif
 	spin_unlock_irqrestore(&up->port.lock, flags);
 }
 

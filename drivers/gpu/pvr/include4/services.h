@@ -183,11 +183,8 @@ typedef struct _PVRSRV_MEMBLK_
 {
 	IMG_DEV_VIRTADDR	sDevVirtAddr;			
 	IMG_HANDLE			hOSMemHandle;			
-	IMG_HANDLE			hOSWrapMem;					
 	IMG_HANDLE			hBuffer;				
 	IMG_HANDLE			hResItem;				
-	IMG_SYS_PHYADDR	 	*psIntSysPAddr;
-
 } PVRSRV_MEMBLK;
 
 typedef struct _PVRSRV_KERNEL_MEM_INFO_ *PPVRSRV_KERNEL_MEM_INFO;

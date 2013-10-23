@@ -48,7 +48,6 @@ struct ad5820_device {
 	s32 focus_absolute;		/* Current values of V4L2 controls */
 	s32 focus_ramp_time;
 	s32 focus_ramp_mode;
-	bool dev_init_done;
 	enum v4l2_power power;
 	struct ad5820_platform_data *platform_data;
 	struct v4l2_int_device *v4l2_int_device;

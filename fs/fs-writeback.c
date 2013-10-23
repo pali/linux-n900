@@ -65,6 +65,24 @@ static void writeback_release(struct backing_dev_info *bdi)
 }
 
 /**
+ * enable_pwb - enable periodic write-back after an inode was marked as dirty.
+ * @inode: the inode which was marked as dirty
+ *
+ * This is a helper function for '__mark_inode_dirty()' which enables the
+ * periodic write-back, unless:
+ *   * the backing device @inode belongs to does not support write-back;
+ *   * periodic write-back is already enabled.
+ */
+static void enable_pwb(struct inode *inode)
+{
+	struct backing_dev_info *bdi = inode->i_mapping->backing_dev_info;
+
+	if (bdi_cap_writeback_dirty(bdi) &&
+	    atomic_add_unless(&periodic_wb_enabled, 1, 1))
+		enable_periodic_wb();
+}
+
+/**
  *	__mark_inode_dirty -	internal function
  *	@inode: inode to mark
  *	@flags: what kind of dirty (i.e. I_DIRTY_SYNC)
@@ -164,6 +182,7 @@ void __mark_inode_dirty(struct inode *inode, int flags)
 		if (!was_dirty) {
 			inode->dirtied_when = jiffies;
 			list_move(&inode->i_list, &sb->s_dirty);
+			enable_pwb(inode);
 		}
 	}
 out:
@@ -171,6 +190,28 @@ out:
 }
 
 EXPORT_SYMBOL(__mark_inode_dirty);
+
+/**
+ * mark_sb_dirty - mark super block as dirty.
+ * @sb: the super block to mark as dirty
+ *
+ * This function marks super block @sb as dirty and enables the periodic
+ * write-back, unless it is already enabled. Note, VFS does not serialize the
+ * super block clean/dirty (@sb->s_dirt) state changes, and each FS is
+ * responsible for doing its own serialization.
+ */
+void mark_sb_dirty(struct super_block *sb)
+{
+	sb->s_dirt = 1;
+	/*
+	 * If 'periodic_wb_enabled' is 0, set it to 1 and enable the periodic
+	 * write-back.
+	 */
+	if (atomic_add_unless(&periodic_wb_enabled, 1, 1))
+		enable_periodic_wb();
+}
+
+EXPORT_SYMBOL(mark_sb_dirty);
 
 static int write_inode(struct inode *inode, int sync)
 {

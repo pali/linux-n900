@@ -157,41 +157,57 @@ struct isph3a_aewb_data {
 
 
 /* Histogram related structs */
+
 /* Flags for number of bins */
-#define BINS_32			0x0
-#define BINS_64			0x1
-#define BINS_128		0x2
-#define BINS_256		0x3
+#define HIST_BINS_32		0
+#define HIST_BINS_64		1
+#define HIST_BINS_128		2
+#define HIST_BINS_256		3
+#define HIST_MEM_SIZE_BINS(n)	((n)*16)
+
+#define HIST_MEM_SIZE		1024
+#define HIST_MIN_REGIONS	1
+#define HIST_MAX_REGIONS	4
+#define HIST_MAX_WB_GAIN	255
+#define HIST_MIN_WB_GAIN	0
+#define HIST_MAX_BIT_WIDTH	14
+#define HIST_MIN_BIT_WIDTH	8
+#define HIST_MAX_BUFF		5
+#define HIST_MAX_WG		4
+
+/* Source */
+#define HIST_SOURCE_CCDC	0
+#define HIST_SOURCE_MEM		1
+
+/* CFA pattern */
+#define HIST_CFA_BAYER		0
+#define HIST_CFA_FOVEONX3	1
 
 struct isp_hist_config {
-	__u8 hist_source;		/* CCDC or Memory */
+	__u8 enable;
+	__u8 source;		/* CCDC or memory */
 	__u8 input_bit_width;	/* Needed o know the size per pixel */
-	__u8 hist_frames;		/* Num of frames to be processed and
-				 * accumulated
-				 */
+	__u8 num_acc_frames;	/* Num of frames to be processed and accumulated
+				   for each generated histogram frame */
 	__u8 hist_h_v_info;	/* frame-input width and height if source is
-				 * memory
-				 */
-	__u16 hist_radd;		/* frame-input address in memory */
+				 * memory */
+	__u16 hist_radd;	/* frame-input address in memory */
 	__u16 hist_radd_off;	/* line-offset for frame-input */
 	__u16 hist_bins;	/* number of bins: 32, 64, 128, or 256 */
-	__u16 wb_gain_R;	/* White Balance Field-to-Pattern Assignments */
-	__u16 wb_gain_RG;	/* White Balance Field-to-Pattern Assignments */
-	__u16 wb_gain_B;	/* White Balance Field-to-Pattern Assignments */
-	__u16 wb_gain_BG;	/* White Balance Field-to-Pattern Assignments */
-	__u8 num_regions;		/* number of regions to be configured */
-	__u16 reg0_hor;		/* Region 0 size and position */
-	__u16 reg0_ver;		/* Region 0 size and position */
-	__u16 reg1_hor;		/* Region 1 size and position */
-	__u16 reg1_ver;		/* Region 1 size and position */
-	__u16 reg2_hor;		/* Region 2 size and position */
-	__u16 reg2_ver;		/* Region 2 size and position */
-	__u16 reg3_hor;		/* Region 3 size and position */
-	__u16 reg3_ver;		/* Region 3 size and position */
+	__u8 cfa;		/* BAYER or FOVEON X3 */
+	__u8 wg[HIST_MAX_WG];	/* White Balance Gain */
+	__u8 num_regions;	/* number of regions to be configured */
+	__u32 reg_hor[HIST_MAX_REGIONS];	/* Regions size and position */
+	__u32 reg_ver[HIST_MAX_REGIONS];	/* Regions size and position */
 };
 
 struct isp_hist_data {
 	__u32 *hist_statistics_buf;	/* Pointer to pass to user */
+	__u8 update;
+	__u16 frame_number;
+	__u16 curr_frame;
+	__u32 config_counter;
+	struct timeval ts;
 };
 
 /* Auto Focus related structs */

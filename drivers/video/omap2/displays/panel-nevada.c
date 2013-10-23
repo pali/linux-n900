@@ -485,8 +485,6 @@ static struct omap_panel nevada_panel = {
 	},
 	.config		= OMAP_DSS_LCD_TFT,
 
-	.recommended_bpp = 16,
-
 	/* supported modes: 12bpp(444), 16bpp(565), 18bpp(666),  24bpp(888)
 	 * resolutions */
 };

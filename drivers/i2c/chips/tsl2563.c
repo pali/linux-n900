@@ -31,6 +31,7 @@
 #include <linux/pm.h>
 #include <linux/hwmon.h>
 #include <linux/err.h>
+#include <linux/i2c/tsl2563.h>
 #include <mach/board.h>
 
 #define DRIVER_NAME  "tsl2563"
@@ -111,6 +112,7 @@ struct tsl2563_chip {
 	struct mutex		lock;
 	struct i2c_client	*client;
 	struct device		*hwmon_dev;
+	struct delayed_work	poweroff_work;
 
 	/* Remember state for suspend and resume functions */
 	pm_message_t		state;
@@ -125,6 +127,7 @@ struct tsl2563_chip {
 	/* Calibration coefficients */
 	u32			calib0;
 	u32			calib1;
+	int			cover_comp_gain;
 
 	/* Cache current values, to be returned while suspended */
 	u32			data0;
@@ -195,6 +198,13 @@ static int tsl2563_configure(struct tsl2563_chip *chip)
 
 out:
 	return ret;
+}
+
+static void tsl2563_poweroff_work(struct work_struct *work)
+{
+	struct tsl2563_chip *chip =
+		container_of(work, struct tsl2563_chip, poweroff_work.work);
+	tsl2563_set_power(chip, 0);
 }
 
 static int tsl2563_detect(struct tsl2563_chip *chip)
@@ -310,6 +320,18 @@ static int tsl2563_get_adc(struct tsl2563_chip *chip)
 	if (chip->state.event != PM_EVENT_ON)
 		goto out;
 
+	cancel_delayed_work(&chip->poweroff_work);
+
+	if (!tsl2563_get_power(chip)) {
+		ret = tsl2563_set_power(chip, 1);
+		if (ret)
+			goto out;
+		ret = tsl2563_configure(chip);
+		if (ret)
+			goto out;
+		tsl2563_wait_adc(chip);
+	}
+
 	while (retry) {
 		ret = tsl2563_read(client,
 				   TSL2563_REG_DATA0LOW | TSL2563_CLEARINT,
@@ -330,6 +352,8 @@ static int tsl2563_get_adc(struct tsl2563_chip *chip)
 
 	chip->data0 = normalize_adc(adc0, chip->gainlevel->gaintime);
 	chip->data1 = normalize_adc(adc1, chip->gainlevel->gaintime);
+
+	schedule_delayed_work(&chip->poweroff_work, 5 * HZ);
 
 	ret = 0;
 out:
@@ -482,8 +506,8 @@ static ssize_t tsl2563_lux_show(struct device *dev,
 	if (ret)
 		goto out;
 
-	calib0 = calib_adc(chip->data0, chip->calib0);
-	calib1 = calib_adc(chip->data1, chip->calib1);
+	calib0 = calib_adc(chip->data0, chip->calib0) * chip->cover_comp_gain;
+	calib1 = calib_adc(chip->data1, chip->calib1) * chip->cover_comp_gain;
 
 	ret = snprintf(buf, PAGE_SIZE, "%d\n", adc_to_lux(calib0, calib1));
 
@@ -599,6 +623,7 @@ static int tsl2563_probe(struct i2c_client *client,
 		const struct i2c_device_id *device_id)
 {
 	struct tsl2563_chip *chip;
+	struct tsl2563_platform_data *pdata = client->dev.platform_data;
 	int err = 0;
 	u8 id;
 
@@ -629,6 +654,11 @@ static int tsl2563_probe(struct i2c_client *client,
 	chip->calib0 = calib_from_sysfs(CALIB_BASE_SYSFS);
 	chip->calib1 = calib_from_sysfs(CALIB_BASE_SYSFS);
 
+	if (pdata)
+		chip->cover_comp_gain = pdata->cover_comp_gain;
+	else
+		chip->cover_comp_gain = 1;
+
 	dev_info(&client->dev, "model %d, rev. %d\n", id >> 4, id & 0x0f);
 
 	err = tsl2563_configure(chip);
@@ -644,6 +674,9 @@ static int tsl2563_probe(struct i2c_client *client,
 		dev_err(&client->dev, "sysfs registration failed, %d\n", err);
 		goto fail2;
 	}
+
+	INIT_DELAYED_WORK(&chip->poweroff_work, tsl2563_poweroff_work);
+	schedule_delayed_work(&chip->poweroff_work, 5 * HZ);
 
 	return 0;
 fail2:

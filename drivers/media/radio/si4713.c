@@ -78,6 +78,10 @@
 #define DEFAULT_MUTE			0x00
 #define DEFAULT_POWER_LEVEL		88
 #define DEFAULT_TUNE_RSSI		0xFF
+#define DEFAULT_TONE_FREQUENCY	 	0x00
+#define DEFAULT_TONE_DEVIATION		0x00
+#define DEFAULT_TONE_ON_TIME 		0x00
+#define DEFAULT_TONE_OFF_TIME		0x00
 
 #define POWER_OFF			0x00
 #define POWER_ON			0x01
@@ -864,6 +868,22 @@ int si4713_init(struct si4713_device *sdev)
 	if (rval < 0)
 		goto exit;
 
+	rval = si4713_set_tone_frequency(sdev, DEFAULT_TONE_FREQUENCY);
+	if (rval < 0)
+		goto exit;
+
+	rval = si4713_set_tone_deviation(sdev, DEFAULT_TONE_DEVIATION);
+	if (rval < 0)
+		goto exit;
+
+	rval = si4713_set_tone_on_time(sdev, DEFAULT_TONE_ON_TIME);
+	if (rval < 0)
+		goto exit;
+
+	rval = si4713_set_tone_off_time(sdev, DEFAULT_TONE_OFF_TIME);
+	if (rval < 0)
+		goto exit;
+
 exit:
 	return rval;
 }
@@ -961,6 +981,22 @@ int si4713_setup(struct si4713_device *sdev)
 		goto exit;
 
 	rval = si4713_set_mute(sdev, tmp->mute);
+	if (rval < 0)
+		goto exit;
+
+	rval = si4713_set_tone_frequency(sdev, tmp->tone_info.frequency);
+	if (rval < 0)
+		goto exit;
+
+	rval = si4713_set_tone_deviation(sdev, tmp->tone_info.deviation);
+	if (rval < 0)
+		goto exit;
+
+	rval = si4713_set_tone_on_time(sdev, tmp->tone_info.on_time);
+	if (rval < 0)
+		goto exit;
+
+	rval = si4713_set_tone_off_time(sdev, tmp->tone_info.off_time);
 	if (rval < 0)
 		goto exit;
 
@@ -1094,11 +1130,11 @@ int si4713_probe(struct si4713_device *sdev)
 	if (rval < 0)
 		goto exit;
 
-	rval = si4713_init(sdev);
+	rval = si4713_set_power_state(sdev, POWER_OFF);
 	if (rval < 0)
 		goto exit;
 
-	rval = si4713_set_power_state(sdev, POWER_OFF);
+	rval = si4713_init(sdev);
 
 exit:
 	return rval;
@@ -1579,7 +1615,7 @@ int si4713_set_region(struct si4713_device *sdev, u8 region)
 	int rval = 0;
 	u16 new_frequency = 0;
 
-	if (region > ARRAY_SIZE(region_configs))
+	if (region >= ARRAY_SIZE(region_configs))
 		return -EINVAL;
 
 	mutex_lock(&sdev->mutex);
@@ -1964,6 +2000,182 @@ int si4713_get_pilot_frequency(struct si4713_device *sdev)
 	}
 
 	rval = sdev->pilot_info.frequency;
+
+unlock:
+	mutex_unlock(&sdev->mutex);
+	return rval;
+}
+
+int si4713_set_tone_deviation(struct si4713_device *sdev,
+					unsigned long deviation)
+{
+	int rval = 0;
+
+	/* Device receives in 10Hz units */
+	deviation /= 10;
+
+	mutex_lock(&sdev->mutex);
+
+	if (sdev->power_state)
+		rval = si4713_write_property(sdev, SI4713_TX_TONE_DEVIATION,
+						deviation);
+
+	/* Device returns in 10Hz units */
+	if (rval >= 0)
+		sdev->tone_info.deviation = deviation * 10;
+
+	mutex_unlock(&sdev->mutex);
+
+	return rval;
+}
+
+long si4713_get_tone_deviation(struct si4713_device *sdev)
+{
+	int rval;
+
+	mutex_lock(&sdev->mutex);
+
+	if (sdev->power_state) {
+		rval = si4713_read_property(sdev, SI4713_TX_TONE_DEVIATION);
+
+		if (rval < 0)
+			goto unlock;
+
+		/* Device returns in 10Hz units */
+		sdev->tone_info.deviation = rval * 10;
+	}
+
+	rval = sdev->tone_info.deviation;
+
+unlock:
+	mutex_unlock(&sdev->mutex);
+	return rval;
+}
+
+int si4713_set_tone_frequency(struct si4713_device *sdev, u16 freq)
+{
+	int rval = 0;
+
+	mutex_lock(&sdev->mutex);
+
+	if (sdev->power_state)
+		rval = si4713_write_property(sdev, SI4713_TX_TONE_FREQUENCY,
+						freq);
+
+	if (rval >= 0)
+		sdev->tone_info.frequency = freq;
+
+	mutex_unlock(&sdev->mutex);
+
+	return rval;
+}
+
+int si4713_get_tone_frequency(struct si4713_device *sdev)
+{
+	int rval;
+
+	mutex_lock(&sdev->mutex);
+
+	if (sdev->power_state) {
+		rval = si4713_read_property(sdev, SI4713_TX_TONE_FREQUENCY);
+
+		if (rval < 0)
+			goto unlock;
+
+		sdev->tone_info.frequency = rval;
+	}
+
+	rval = sdev->tone_info.frequency;
+
+unlock:
+	mutex_unlock(&sdev->mutex);
+	return rval;
+}
+
+int si4713_set_tone_on_time(struct si4713_device *sdev, u16 on_time)
+{
+	int rval = 0;
+
+	/* Device receives in 2ms units */
+	on_time >>= 1;
+
+	mutex_lock(&sdev->mutex);
+
+	if (sdev->power_state)
+		rval = si4713_write_property(sdev, SI4713_TX_TONE_ON_TIME,
+						on_time);
+
+	/* Device returns in 2ms units */
+	if (rval >= 0)
+		sdev->tone_info.on_time = on_time << 1;
+
+	mutex_unlock(&sdev->mutex);
+
+	return rval;
+}
+
+int si4713_get_tone_on_time(struct si4713_device *sdev)
+{
+	int rval;
+
+	mutex_lock(&sdev->mutex);
+
+	if (sdev->power_state) {
+		rval = si4713_read_property(sdev, SI4713_TX_TONE_ON_TIME);
+
+		if (rval < 0)
+			goto unlock;
+
+		/* Device returns in 2ms units */
+		sdev->tone_info.on_time = rval << 1;
+	}
+
+	rval = sdev->tone_info.on_time;
+
+unlock:
+	mutex_unlock(&sdev->mutex);
+	return rval;
+}
+
+int si4713_set_tone_off_time(struct si4713_device *sdev, u16 off_time)
+{
+	int rval = 0;
+
+	/* Device receives in 2ms units */
+	off_time >>= 1;
+
+	mutex_lock(&sdev->mutex);
+
+	if (sdev->power_state)
+		rval = si4713_write_property(sdev, SI4713_TX_TONE_OFF_TIME,
+						off_time);
+
+	/* Device returns in 2ms units */
+	if (rval >= 0)
+		sdev->tone_info.off_time = off_time << 1;
+
+	mutex_unlock(&sdev->mutex);
+
+	return rval;
+}
+
+int si4713_get_tone_off_time(struct si4713_device *sdev)
+{
+	int rval;
+
+	mutex_lock(&sdev->mutex);
+
+	if (sdev->power_state) {
+		rval = si4713_read_property(sdev, SI4713_TX_TONE_OFF_TIME);
+
+		if (rval < 0)
+			goto unlock;
+
+		/* Device returns in 2ms units */
+		sdev->tone_info.off_time = rval << 1;
+	}
+
+	rval = sdev->tone_info.off_time;
 
 unlock:
 	mutex_unlock(&sdev->mutex);

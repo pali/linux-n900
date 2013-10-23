@@ -64,6 +64,30 @@
 
 #include <dspbridge/cfgdefs.h>
 #include <dspbridge/devdefs.h>
+#include <dspbridge/drv.h>
+
+/* The PROC_OBJECT structure.   */
+struct PROC_OBJECT {
+	struct LST_ELEM link;		/* Link to next PROC_OBJECT */
+	u32 dwSignature;		/* Used for object validation */
+	struct DEV_OBJECT *hDevObject;	/* Device this PROC represents */
+	u32 hProcess;			/* Process owning this Processor */
+	struct MGR_OBJECT *hMgrObject;	/* Manager Object Handle */
+	u32 uAttachCount;		/* Processor attach count */
+	u32 uProcessor;			/* Processor number */
+	u32 uTimeout;			/* Time out count */
+	enum DSP_PROCSTATE sState;	/* Processor state */
+	u32 ulUnit;			/* DDSP unit number */
+	bool bIsAlreadyAttached;	/*
+					 * True if the Device below has
+					 * GPP Client attached
+					 */
+	struct NTFY_OBJECT *hNtfy;	/* Manages  notifications */
+	struct WMD_DEV_CONTEXT *hWmdContext;	/* WMD Context Handle */
+	struct WMD_DRV_INTERFACE *pIntfFxns;	/* Function interface to WMD */
+	char *g_pszLastCoff;
+	struct list_head proc_object;
+};
 
 /*
  *  ======== PROC_Attach ========
@@ -94,7 +118,8 @@
 	extern DSP_STATUS PROC_Attach(u32 uProcessor,
 				      OPTIONAL CONST struct DSP_PROCESSORATTRIN
 				      *pAttrIn,
-				      OUT DSP_HPROCESSOR *phProcessor);
+				      OUT DSP_HPROCESSOR *phProcessor,
+				      struct PROCESS_CONTEXT *pr_ctxt);
 
 /*
  *  ======== PROC_AutoStart =========
@@ -161,7 +186,8 @@
  *  Ensures:
  *      PROC Object is destroyed.
  */
-	extern DSP_STATUS PROC_Detach(DSP_HPROCESSOR hProcessor);
+	extern DSP_STATUS PROC_Detach(DSP_HPROCESSOR hProcessor,
+			struct PROCESS_CONTEXT *pr_ctxt);
 
 /*
  *  ======== PROC_EnumNodes ========
@@ -578,7 +604,8 @@
 				   void *pMpuAddr,
 				   u32 ulSize,
 				   void *pReqAddr,
-				   void **ppMapAddr, u32 ulMapAttr);
+				   void **ppMapAddr, u32 ulMapAttr,
+				   struct PROCESS_CONTEXT *pr_ctxt);
 
 /*
  *  ======== PROC_ReserveMemory ========
@@ -621,7 +648,8 @@
  *  Ensures:
  *  Details:
  */
-	extern DSP_STATUS PROC_UnMap(DSP_HPROCESSOR hProcessor, void *pMapAddr);
+	extern DSP_STATUS PROC_UnMap(DSP_HPROCESSOR hProcessor, void *pMapAddr,
+			struct PROCESS_CONTEXT *pr_ctxt);
 
 /*
  *  ======== PROC_UnReserveMemory ========

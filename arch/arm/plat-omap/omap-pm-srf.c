@@ -27,6 +27,7 @@
 #include <mach/powerdomain.h>
 #include <mach/resource.h>
 #include <mach/omapdev.h>
+#include <mach/pm.h>
 
 struct omap_opp *dsp_opps;
 struct omap_opp *mpu_opps;
@@ -73,6 +74,20 @@ void omap_pm_set_max_mpu_wakeup_lat(struct device *dev, long t)
 		resource_request("mpu_latency", dev, t);
 	}
 }
+
+void omap_pm_set_min_mpu_freq(struct device *dev, unsigned long r)
+{
+	if (!dev) {
+		WARN_ON(1);
+		return;
+	}
+
+	if (r == 0)
+		resource_release("mpu_freq", dev);
+	else
+		resource_request("mpu_freq", dev, r);
+}
+EXPORT_SYMBOL(omap_pm_set_min_mpu_freq);
 
 void omap_pm_set_min_bus_tput(struct device *dev, u8 agent_id, unsigned long r)
 {
@@ -277,7 +292,7 @@ int omap_pm_get_dev_context_loss_count(struct device *dev)
 	 * off counter.
 	 */
 
-	return 0;
+	return get_last_off_on_transaction_id(dev);
 }
 
 /*

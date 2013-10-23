@@ -22,6 +22,19 @@
 
 #include "fault.h"
 
+/*
+ * Fault status register encodings.  We steal bit 31 for our own purposes.
+ */
+#define FSR_LNX_PF		(1 << 31)
+#define FSR_WRITE		(1 << 11)
+#define FSR_FS4			(1 << 10)
+#define FSR_FS3_0		(15)
+
+static inline int fsr_fs(unsigned int fsr)
+{
+	return (fsr & FSR_FS3_0) | (fsr & FSR_FS4) >> 6;
+}
+
 
 #ifdef CONFIG_KPROBES
 static inline int notify_page_fault(struct pt_regs *regs, unsigned int fsr)
@@ -172,18 +185,35 @@ void do_bad_area(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 #define VM_FAULT_BADMAP		0x010000
 #define VM_FAULT_BADACCESS	0x020000
 
-static int
+/*
+ * Check that the permissions on the VMA allow for the fault which occurred.
+ * If we encountered a write fault, we must have write permission, otherwise
+ * we allow any permission.
+ */
+static inline bool access_error(unsigned int fsr, struct vm_area_struct *vma)
+{
+	unsigned int mask = VM_READ | VM_WRITE | VM_EXEC;
+
+	if (fsr & FSR_WRITE)
+		mask = VM_WRITE;
+	if (fsr & FSR_LNX_PF)
+		mask = VM_EXEC;
+
+	return vma->vm_flags & mask ? false : true;
+}
+
+static int __kprobes
 __do_page_fault(struct mm_struct *mm, unsigned long addr, unsigned int fsr,
 		struct task_struct *tsk)
 {
 	struct vm_area_struct *vma;
-	int fault, mask;
+	int fault;
 
 	vma = find_vma(mm, addr);
 	fault = VM_FAULT_BADMAP;
-	if (!vma)
+	if (unlikely(!vma))
 		goto out;
-	if (vma->vm_start > addr)
+	if (unlikely(vma->vm_start > addr))
 		goto check_stack;
 
 	/*
@@ -191,14 +221,10 @@ __do_page_fault(struct mm_struct *mm, unsigned long addr, unsigned int fsr,
 	 * memory access, so we can handle it.
 	 */
 good_area:
-	if (fsr & (1 << 11)) /* write? */
-		mask = VM_WRITE;
-	else
-		mask = VM_READ|VM_EXEC|VM_WRITE;
-
-	fault = VM_FAULT_BADACCESS;
-	if (!(vma->vm_flags & mask))
+	if (access_error(fsr, vma)) {
+		fault = VM_FAULT_BADACCESS;
 		goto out;
+	}
 
 	/*
 	 * If for any reason at all we couldn't handle
@@ -206,7 +232,7 @@ good_area:
 	 * than endlessly redo the fault.
 	 */
 survive:
-	fault = handle_mm_fault(mm, vma, addr & PAGE_MASK, fsr & (1 << 11));
+	fault = handle_mm_fault(mm, vma, addr & PAGE_MASK, fsr & FSR_WRITE);
 	if (unlikely(fault & VM_FAULT_ERROR)) {
 		if (fault & VM_FAULT_OOM)
 			goto out_of_memory;
@@ -268,6 +294,13 @@ do_page_fault(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 		if (!user_mode(regs) && !search_exception_tables(regs->ARM_pc))
 			goto no_context;
 		down_read(&mm->mmap_sem);
+	} else {
+		/*
+		 * The above down_read_trylock() might have succeeded in
+		 * which case, we'll have missed the might_sleep() from
+		 * down_read()
+		 */
+		might_sleep();
 	}
 
 	fault = __do_page_fault(mm, addr, fsr, tsk);
@@ -463,10 +496,10 @@ hook_fault_code(int nr, int (*fn)(unsigned long, unsigned int, struct pt_regs *)
 asmlinkage void __exception
 do_DataAbort(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 {
-	const struct fsr_info *inf = fsr_info + (fsr & 15) + ((fsr & (1 << 10)) >> 6);
+	const struct fsr_info *inf = fsr_info + fsr_fs(fsr);
 	struct siginfo info;
 
-	if (!inf->fn(addr, fsr, regs))
+	if (!inf->fn(addr, fsr & ~FSR_LNX_PF, regs))
 		return;
 
 	printk(KERN_ALERT "Unhandled fault: %s (0x%03x) at 0x%08lx\n",
@@ -482,6 +515,6 @@ do_DataAbort(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 asmlinkage void __exception
 do_PrefetchAbort(unsigned long addr, struct pt_regs *regs)
 {
-	do_translation_fault(addr, 0, regs);
+	do_translation_fault(addr, FSR_LNX_PF, regs);
 }
 

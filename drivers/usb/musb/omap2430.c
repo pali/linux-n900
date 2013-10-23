@@ -249,7 +249,12 @@ int __init musb_platform_init(struct musb *musb)
 	l &= ~AUTOIDLE;		/* disable auto idle */
 	l &= ~NOIDLE;		/* remove possible noidle */
 	l |= SMARTIDLE;		/* enable smart idle */
-	l |= AUTOIDLE;		/* enable auto idle */
+	/*
+	 * MUSB AUTOIDLE don't work in 3430.
+	 * Workaround by Richard Woodruff/TI
+	 */
+	if (!cpu_is_omap3430())
+		l |= AUTOIDLE;	/* enable auto idle */
 	omap_writel(l, OTG_SYSCONFIG);
 
 	l = omap_readl(OTG_INTERFSEL);
@@ -341,3 +346,109 @@ int musb_platform_exit(struct musb *musb)
 
 	return 0;
 }
+
+#ifdef CONFIG_PM
+
+void musb_save_ctx_and_suspend(struct usb_gadget *gadget, int overwrite)
+{
+	struct musb *musb = gadget_to_musb(gadget);
+	u32 l;
+	unsigned long	flags;
+	unsigned long	tmo;
+
+	spin_lock_irqsave(&musb->lock, flags);
+	if (overwrite)
+		/* Save register context */
+		musb_save_ctx(musb);
+	spin_unlock_irqrestore(&musb->lock, flags);
+
+	DBG(3, "allow sleep\n");
+	/* Do soft reset. This needs to be done with broken AUTOIDLE */
+	tmo = jiffies + msecs_to_jiffies(300);
+	omap_writel(SOFTRST, OTG_SYSCONFIG);
+	while (!omap_readl(OTG_SYSSTATUS)) {
+		if (time_after(jiffies, tmo)) {
+			WARN(1, "musb failed to recover from reset!");
+			break;
+		}
+	}
+
+	l = omap_readl(OTG_FORCESTDBY);
+	l |= ENABLEFORCE;	/* enable MSTANDBY */
+	omap_writel(l, OTG_FORCESTDBY);
+
+	l = ENABLEWAKEUP;	/* enable wakeup */
+	omap_writel(l, OTG_SYSCONFIG);
+	/* Use AUTOIDLE here or the device may fail to hit sleep */
+	l |= AUTOIDLE;
+	omap_writel(l, OTG_SYSCONFIG);
+
+	if (musb->board && musb->board->xceiv_power)
+		musb->board->xceiv_power(0);
+	/* Now it's safe to get rid of the buggy AUTOIDLE */
+	l &= ~AUTOIDLE;
+	omap_writel(l, OTG_SYSCONFIG);
+
+	musb->is_charger = 0;
+
+	/* clear constraints */
+	if (musb->board && musb->board->set_pm_limits)
+		musb->board->set_pm_limits(musb->controller, 0);
+}
+EXPORT_SYMBOL_GPL(musb_save_ctx_and_suspend);
+
+void musb_restore_ctx_and_resume(struct usb_gadget *gadget)
+{
+	struct musb *musb = gadget_to_musb(gadget);
+	u32 l;
+	u8 r;
+	unsigned long	flags;
+
+	DBG(3, "restoring register context\n");
+
+	if (musb->board && musb->board->xceiv_power)
+		musb->board->xceiv_power(1);
+
+	spin_lock_irqsave(&musb->lock, flags);
+	if (musb->set_clock)
+		musb->set_clock(musb->clock, 1);
+	else
+		clk_enable(musb->clock);
+
+	/* Recover OTG control */
+	r = musb_ulpi_readb(musb->mregs, ISP1704_OTG_CTRL);
+	r |= ISP1704_OTG_CTRL_IDPULLUP | ISP1704_OTG_CTRL_DP_PULLDOWN;
+	musb_ulpi_writeb(musb->mregs, ISP1704_OTG_CTRL, r);
+
+	/* Recover FUNC control */
+	r = ISP1704_FUNC_CTRL_FULL_SPEED;
+	r |= ISP1704_FUNC_CTRL_SUSPENDM | ISP1704_FUNC_CTRL_RESET;
+	musb_ulpi_writeb(musb->mregs, ISP1704_FUNC_CTRL, r);
+
+	l = omap_readl(OTG_SYSCONFIG);
+	l &= ~ENABLEWAKEUP;	/* disable wakeup */
+	omap_writel(l, OTG_SYSCONFIG);
+
+	l = omap_readl(OTG_FORCESTDBY);
+	l &= ~ENABLEFORCE;	/* disable MSTANDBY */
+	omap_writel(l, OTG_FORCESTDBY);
+
+	l = omap_readl(OTG_SYSCONFIG);
+	l &= ~ENABLEWAKEUP;	/* disable wakeup */
+	l &= ~NOSTDBY;		/* remove possible nostdby */
+	l |= SMARTSTDBY;	/* enable smart standby */
+	l &= ~AUTOIDLE;		/* disable auto idle */
+	l &= ~NOIDLE;		/* remove possible noidle */
+	l |= SMARTIDLE;		/* enable smart idle */
+	omap_writel(l, OTG_SYSCONFIG);
+
+	l = omap_readl(OTG_INTERFSEL);
+	l |= ULPI_12PIN;
+	omap_writel(l, OTG_INTERFSEL);
+
+	/* Restore register context */
+	musb_restore_ctx(musb);
+	spin_unlock_irqrestore(&musb->lock, flags);
+}
+EXPORT_SYMBOL_GPL(musb_restore_ctx_and_resume);
+#endif

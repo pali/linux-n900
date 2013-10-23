@@ -158,7 +158,7 @@ bool MSG_Init(void)
 
 	if (cRefs == 0) {
 		DBC_Assert(!MSG_debugMask.flags);
-		GT_create(&MSG_debugMask, "MG");	/* "MG" for MsG */
+		GT_create(&MSG_debugMask, "MS");	/* "MS" for MSg */
 	}
 
 	cRefs++;

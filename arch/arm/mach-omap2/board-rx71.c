@@ -101,7 +101,11 @@ static struct omap_board_config_kernel rx71_config[] = {
 
 static void __init rx71_init_irq(void)
 {
-	omap2_init_common_hw(rx51_get_sdram_timings(),
+	struct omap_sdrc_params *sdrc_params;
+
+	sdrc_params = rx51_get_sdram_timings();
+
+	omap2_init_common_hw(sdrc_params, sdrc_params,
 				rx71_mpu_rate_table,
 				rx71_dsp_rate_table,
 				rx71_l3_rate_table);
@@ -114,7 +118,7 @@ static void __init rx71_init(void)
 {
 	omap_board_config = rx71_config;
 	omap_board_config_size = ARRAY_SIZE(rx71_config);
-	usb_musb_init();
+	usb_musb_init(NULL);
 	omap_serial_init();
 }
 

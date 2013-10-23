@@ -284,8 +284,8 @@ void *CMM_CallocBuf(struct CMM_OBJECT *hCmmMgr, u32 uSize,
 			 * We'll need to free up a process's alloc'd SM if the
 			 * client process goes away.
 			 */
-                       /* Return PID instead of process handle */
-                       pNode->hClientProc = current->pid;
+			/* Return TGID instead of process handle */
+			pNode->hClientProc = current->tgid;
 
 			/* put our node on InUse list */
 			LST_PutTail(pAllocator->pInUseListHead,

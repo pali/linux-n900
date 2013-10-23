@@ -244,7 +244,7 @@ static void bfs_write_super(struct super_block *s)
 	mutex_lock(&info->bfs_lock);
 	if (!(s->s_flags & MS_RDONLY))
 		mark_buffer_dirty(info->si_sbh);
-	s->s_dirt = 0;
+	mark_sb_clean(s);
 	mutex_unlock(&info->bfs_lock);
 }
 
@@ -411,7 +411,7 @@ static int bfs_fill_super(struct super_block *s, void *data, int silent)
 	brelse(bh);
 	if (!(s->s_flags & MS_RDONLY)) {
 		mark_buffer_dirty(info->si_sbh);
-		s->s_dirt = 1;
+		mark_sb_dirty(s);
 	} 
 	dump_imap("read_super", s);
 	mutex_init(&info->bfs_lock);

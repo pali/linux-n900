@@ -149,7 +149,7 @@ struct ssi_dev {
 	struct clk *ssi_clk;
 	void __iomem *base;
 	spinlock_t lock;
-	unsigned cawake_clk_enable:1;
+	unsigned int cawake_clk_enable:1;
 	int gdd_irq;
 	unsigned int gdd_usecount;
 	unsigned int last_gdd_lch;

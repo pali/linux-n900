@@ -66,7 +66,7 @@
  * 	- free()
  */
 
-enum ispresizer_input {
+enum resizer_input {
 	RSZ_OTFLY_YUV,
 	RSZ_MEM_YUV,
 	RSZ_MEM_COL8
@@ -128,39 +128,26 @@ struct isprsz_yenh {
  * @ispres_mutex: Mutex for isp resizer.
  */
 struct isp_res_device {
-	int pm_state;
 	u8 res_inuse;
 	u8 h_startphase;
 	u8 v_startphase;
 	u16 h_resz;
 	u16 v_resz;
-	u32 outputwidth;
-	u32 outputheight;
-	u32 inputwidth;
-	u32 inputheight;
 	u8 algo;
-	u32 ipht_crop;
-	u32 ipwd_crop;
-	u32 cropwidth;
-	u32 cropheight;
 	dma_addr_t tmp_buf;
-	enum ispresizer_input resinput;
 	struct isprsz_coef coeflist;
 	struct mutex ispres_mutex; /* For checking/modifying res_inuse */
 	struct isprsz_yenh defaultyenh;
-	struct device *dev;
 	int applycrop;
-	struct v4l2_rect croprect;
 };
 
+int ispresizer_config_crop(struct isp_res_device *isp_res,
+			   struct v4l2_crop *a);
 void ispresizer_config_shadow_registers(struct isp_res_device *isp_res);
 
 int ispresizer_request(struct isp_res_device *isp_res);
 
 int ispresizer_free(struct isp_res_device *isp_res);
-
-int ispresizer_config_datapath(struct isp_res_device *isp_res,
-			       enum ispresizer_input input);
 
 void ispresizer_enable_cbilin(struct isp_res_device *isp_res, u8 enable);
 
@@ -175,19 +162,11 @@ void ispresizer_config_filter_coef(struct isp_res_device *isp_res,
 void ispresizer_config_luma_enhance(struct isp_res_device *isp_res,
 				    struct isprsz_yenh *yenh);
 
-int ispresizer_try_size(struct isp_res_device *isp_res, u32 *input_w,
-			u32 *input_h, u32 *output_w, u32 *output_h);
+int ispresizer_try_pipeline(struct isp_res_device *isp_res,
+			    struct isp_pipeline *pipe);
 
-void ispresizer_applycrop(struct isp_res_device *isp_res);
-
-void ispresizer_config_crop(struct isp_res_device *isp_res,
-			    struct v4l2_crop *a);
-
-void ispresizer_trycrop(struct isp_res_device *isp_res, u32 left, u32 top,
-			u32 width, u32 height, u32 ow, u32 oh);
-
-int ispresizer_config_size(struct isp_res_device *isp_res, u32 input_w,
-			   u32 input_h, u32 output_w, u32 output_h);
+int ispresizer_s_pipeline(struct isp_res_device *isp_res,
+			  struct isp_pipeline *pipe);
 
 int ispresizer_config_inlineoffset(struct isp_res_device *isp_res, u32 offset);
 
@@ -198,10 +177,6 @@ int ispresizer_config_outlineoffset(struct isp_res_device *isp_res, u32 offset);
 int ispresizer_set_outaddr(struct isp_res_device *isp_res, u32 addr);
 
 void ispresizer_enable(struct isp_res_device *isp_res, int enable);
-
-void ispresizer_suspend(struct isp_res_device *isp_res);
-
-void ispresizer_resume(struct isp_res_device *isp_res);
 
 int ispresizer_busy(struct isp_res_device *isp_res);
 

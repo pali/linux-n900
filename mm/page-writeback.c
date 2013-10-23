@@ -34,6 +34,7 @@
 #include <linux/syscalls.h>
 #include <linux/buffer_head.h>
 #include <linux/pagevec.h>
+#include <linux/hrtimer.h>
 
 /*
  * The maximum number of pages to writeout in a single bdflush/kupdate
@@ -661,11 +662,114 @@ int wakeup_pdflush(long nr_pages)
 	return pdflush_operation(background_writeout, nr_pages);
 }
 
-static void wb_timer_fn(unsigned long unused);
+static enum hrtimer_restart wb_timer_fn(struct hrtimer *timer);
 static void laptop_timer_fn(unsigned long unused);
 
-static DEFINE_TIMER(wb_timer, wb_timer_fn, 0, 0);
+struct hrtimer wb_timer;
 static DEFINE_TIMER(laptop_mode_wb_timer, laptop_timer_fn, 0, 0);
+static DEFINE_SPINLOCK(wb_timer_lock);
+
+/* Whether the atomic write-back is enabled or not */
+atomic_t periodic_wb_enabled;
+
+/*
+ * This is a helper function which sets up the next periodic write-back timer
+ * event. The @wb_timer is set up as a range timer with soft limit 25% less
+ * than @expires and the hard limit equivalent to @expires. This means that the
+ * kernel may group this timer with other events and lessen number of
+ * wakeups.
+ */
+static void setup_wb_timer(unsigned long expires)
+{
+	u64 hardlimit, delta;
+
+	hardlimit = jiffies_to_usecs(expires) * 1000LLU;
+	delta = hardlimit >> 2;
+	if (delta > ULONG_MAX)
+		delta = ULONG_MAX;
+
+	hrtimer_start_range_ns(&wb_timer, ns_to_ktime(hardlimit - delta), delta,
+			       HRTIMER_MODE_REL);
+}
+
+/*
+ * Enable the periodic write-back. This function is usually called when
+ * an inode or a super block becomes dirty.
+ */
+void enable_periodic_wb(void)
+{
+	if (dirty_writeback_interval) {
+		spin_lock(&wb_timer_lock);
+		setup_wb_timer(dirty_writeback_interval);
+		spin_unlock(&wb_timer_lock);
+	}
+}
+
+static int sb_supports_wb(struct super_block *sb)
+{
+	struct inode *inode;
+	struct backing_dev_info *bdi;
+	int res;
+
+	spin_lock(&inode_lock);
+	inode = list_entry(sb->s_inodes.next, struct inode, i_sb_list);
+	bdi = inode->i_mapping->backing_dev_info;
+	res = bdi_cap_writeback_dirty(bdi);
+	spin_unlock(&inode_lock);
+	return res;
+}
+
+static void set_next_wb_timer(unsigned long expires)
+{
+	int all_clean = 1;
+	struct super_block *sb;
+
+	atomic_set(&periodic_wb_enabled, 0);
+
+	spin_lock(&sb_lock);
+restart:
+	list_for_each_entry(sb, &super_blocks, s_list) {
+		sb->s_count++;
+		spin_unlock(&sb_lock);
+
+		if (down_read_trylock(&sb->s_umount)) {
+			spin_lock(&sb_lock);
+			if (is_sb_dirty(sb))
+				all_clean = 0;
+			else if (sb->s_root && sb_supports_wb(sb) &&
+				   sb_has_dirty_inodes(sb))
+				all_clean = 0;
+			up_read(&sb->s_umount);
+		} else {
+			all_clean = 0;
+			spin_lock(&sb_lock);
+		}
+
+		if (__put_super_and_need_restart(sb))
+			goto restart;
+
+		if (!all_clean)
+			break;
+	}
+	spin_unlock(&sb_lock);
+
+	spin_lock(&wb_timer_lock);
+	if (all_clean && !atomic_read(&periodic_wb_enabled)) {
+		/*
+		 * There are no dirty data, and no one marked an inode or
+		 * super block as dirty. The periodic update timer may be
+		 * deleted. Note, if we race with some other task which has
+		 * just marked something as dirty and just set
+		 * 'periodic_wb_enabled' to 1, then this task will call
+		 * 'enable_periodic_wb()' which will re-enable the 'wb_timer'.
+		 */
+		hrtimer_cancel(&wb_timer);
+	} else {
+		atomic_set(&periodic_wb_enabled, 1);
+		setup_wb_timer(expires);
+	}
+	spin_unlock(&wb_timer_lock);
+}
 
 /*
  * Periodic writeback of "old" data.
@@ -719,10 +823,16 @@ static void wb_kupdate(unsigned long arg)
 		}
 		nr_to_write -= MAX_WRITEBACK_PAGES - wbc.nr_to_write;
 	}
-	if (time_before(next_jif, jiffies + HZ))
-		next_jif = jiffies + HZ;
-	if (dirty_writeback_interval)
-		mod_timer(&wb_timer, next_jif);
+
+	if (dirty_writeback_interval) {
+		unsigned long expires;
+
+		if (time_before(next_jif, jiffies + HZ))
+			expires = HZ;
+		else
+			expires = next_jif - jiffies;
+		set_next_wb_timer(expires);
+	}
 }
 
 /*
@@ -733,16 +843,17 @@ int dirty_writeback_centisecs_handler(ctl_table *table, int write,
 {
 	proc_dointvec_userhz_jiffies(table, write, file, buffer, length, ppos);
 	if (dirty_writeback_interval)
-		mod_timer(&wb_timer, jiffies + dirty_writeback_interval);
+		setup_wb_timer(dirty_writeback_interval);
 	else
-		del_timer(&wb_timer);
+		hrtimer_cancel(&wb_timer);
 	return 0;
 }
 
-static void wb_timer_fn(unsigned long unused)
+static enum hrtimer_restart wb_timer_fn(struct hrtimer *timer)
 {
 	if (pdflush_operation(wb_kupdate, 0) < 0)
-		mod_timer(&wb_timer, jiffies + HZ); /* delay 1 second */
+		setup_wb_timer(HZ); /* delay 1 second */
+	return HRTIMER_NORESTART;
 }
 
 static void laptop_flush(unsigned long unused)
@@ -835,7 +946,8 @@ void __init page_writeback_init(void)
 {
 	int shift;
 
-	mod_timer(&wb_timer, jiffies + dirty_writeback_interval);
+	hrtimer_init(&wb_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	wb_timer.function = wb_timer_fn;
 	writeback_set_ratelimit();
 	register_cpu_notifier(&ratelimit_nb);
 

@@ -60,9 +60,13 @@ affs_write_super(struct super_block *sb)
 				  &AFFS_ROOT_TAIL(sb, sbi->s_root_bh)->disk_change);
 		affs_fix_checksum(sb, sbi->s_root_bh);
 		mark_buffer_dirty(sbi->s_root_bh);
-		sb->s_dirt = !clean;	/* redo until bitmap synced */
+		/* redo until bitmap synced */
+		if (clean)
+			mark_sb_clean(sb);
+		else
+			mark_sb_dirty(sb);
 	} else
-		sb->s_dirt = 0;
+		mark_sb_clean(sb);
 
 	pr_debug("AFFS: write_super() at %lu, clean=%d\n", get_seconds(), clean);
 }
@@ -518,8 +522,8 @@ affs_remount(struct super_block *sb, int *flags, char *data)
 	if ((*flags & MS_RDONLY) == (sb->s_flags & MS_RDONLY))
 		return 0;
 	if (*flags & MS_RDONLY) {
-		sb->s_dirt = 1;
-		while (sb->s_dirt)
+		mark_sb_dirty(sb);
+		while (is_sb_dirty(sb))
 			affs_write_super(sb);
 		affs_free_bitmap(sb);
 	} else

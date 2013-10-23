@@ -538,7 +538,7 @@ static inline int sta_info_buffer_expired(struct ieee80211_local *local,
 }
 
 
-static void sta_info_cleanup_expire_buffered(struct ieee80211_local *local,
+static bool sta_info_cleanup_expire_buffered(struct ieee80211_local *local,
 					     struct sta_info *sta)
 {
 	unsigned long flags;
@@ -547,7 +547,7 @@ static void sta_info_cleanup_expire_buffered(struct ieee80211_local *local,
 	DECLARE_MAC_BUF(mac);
 
 	if (skb_queue_empty(&sta->ps_tx_buf))
-		return;
+		return false;
 
 	for (;;) {
 		spin_lock_irqsave(&sta->ps_tx_buf.lock, flags);
@@ -572,6 +572,8 @@ static void sta_info_cleanup_expire_buffered(struct ieee80211_local *local,
 		if (skb_queue_empty(&sta->ps_tx_buf))
 			sta_info_clear_tim_bit(sta);
 	}
+
+	return true;
 }
 
 
@@ -579,15 +581,22 @@ static void sta_info_cleanup(unsigned long data)
 {
 	struct ieee80211_local *local = (struct ieee80211_local *) data;
 	struct sta_info *sta;
+	bool need_timer = false;
 
 	rcu_read_lock();
-	list_for_each_entry_rcu(sta, &local->sta_list, list)
-		sta_info_cleanup_expire_buffered(local, sta);
+	list_for_each_entry_rcu(sta, &local->sta_list, list) {
+		bool res = sta_info_cleanup_expire_buffered(local, sta);
+		if (res)
+			need_timer = true;
+	}
 	rcu_read_unlock();
 
-	local->sta_cleanup.expires =
-		round_jiffies(jiffies + STA_INFO_CLEANUP_INTERVAL);
-	add_timer(&local->sta_cleanup);
+	/* If the queues are empty, don't add a new timer */
+	if (need_timer) {
+		local->sta_cleanup.expires =
+			round_jiffies(jiffies + STA_INFO_CLEANUP_INTERVAL);
+		add_timer(&local->sta_cleanup);
+	}
 }
 
 #ifdef CONFIG_MAC80211_DEBUGFS

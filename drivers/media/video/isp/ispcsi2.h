@@ -221,10 +221,9 @@ int isp_csi2_timings_get_all(void);
 void isp_csi2_irq_complexio1_set(int enable);
 void isp_csi2_irq_ctx_set(int enable);
 void isp_csi2_irq_status_set(int enable);
-void isp_csi2_irq_set(int enable);
 void isp_csi2_irq_all_set(int enable);
 
-void isp_csi2_isr(void);
+int isp_csi2_isr(void);
 int isp_csi2_reset(void);
 void isp_csi2_enable(int enable);
 void isp_csi2_regdump(void);

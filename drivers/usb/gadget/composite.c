@@ -24,6 +24,7 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/device.h>
+#include <linux/delay.h>
 
 #include <linux/usb/composite.h>
 
@@ -68,6 +69,41 @@ MODULE_PARM_DESC(iProduct, "USB Product string");
 static char *iSerialNumber;
 module_param(iSerialNumber, charp, 0);
 MODULE_PARM_DESC(iSerialNumber, "SerialNumber string");
+
+/** UGLY UGLY HACK: Windows problems with multiple
+ * configurations.
+ *
+ * Windows can only handle 1 usb configuration at a time.
+ *
+ * In order to work around that issue, we will have a retry
+ * method implemented in such a way that we try one configuration
+ * at a time until one works.
+ *
+ * What we do is that we connect with 500mA configuration, if that
+ * doesn't work, we disconnect from the bus, change to 100mA and try
+ * again, if that still doesn't work, we disconnect and try 8mA,
+ * if that doesn't work we give up.
+ */
+
+/* To determine whether a configuration worked or no, we use a timer.
+ * If the time required to get a SET_CONFIG request exceeds the timeout,
+ * it means the configuration failed. We then use the next config.
+ */
+
+static struct timer_list cdev_set_config_timer;
+
+static void cdev_set_config_timeout(unsigned long _gadget)
+{
+	struct usb_gadget	*gadget = (void *) _gadget;
+
+	/* Configuration failed, so disconnect from bus and use next config */
+	gadget->get_config = 0;
+	usb_gadget_disconnect(gadget);
+	/* sleep to allow host see our disconnect */
+	mdelay(500);
+	gadget->cindex++;
+	usb_gadget_connect(gadget);
+}
 
 /*-------------------------------------------------------------------------*/
 
@@ -281,12 +317,15 @@ static int config_buf(struct usb_configuration *config,
 	return len;
 }
 
+static int count_configs(struct usb_composite_dev *cdev, unsigned type);
+
 static int config_desc(struct usb_composite_dev *cdev, unsigned w_value)
 {
 	struct usb_gadget		*gadget = cdev->gadget;
 	struct usb_configuration	*c;
 	u8				type = w_value >> 8;
 	enum usb_device_speed		speed = USB_SPEED_UNKNOWN;
+	u8				index;
 
 	if (gadget_is_dualspeed(gadget)) {
 		int			hs = 0;
@@ -301,7 +340,27 @@ static int config_desc(struct usb_composite_dev *cdev, unsigned w_value)
 	}
 
 	/* This is a lookup by config *INDEX* */
-	w_value &= 0xff;
+	index = w_value & 0xFF;
+	if (!index) {
+		u8	num_configs;
+
+		/** UGLY UGLY HACK: Windows problems with multiple
+		 * configurations.
+		 *
+		 * This is us giving up, if this one doesn't work
+		 * then user will have to take action, we can't
+		 * got any further
+		 */
+		index = gadget->cindex;
+		num_configs = count_configs(cdev, USB_DT_DEVICE);
+		if (index >= num_configs - 1) {
+			del_timer(&cdev_set_config_timer);
+			gadget->set_config = 1;
+			/* Restrict to the last configuration */
+			index = num_configs - 1;
+		}
+	}
+
 	list_for_each_entry(c, &cdev->configs, list) {
 		/* ignore configs that won't work at this speed */
 		if (speed == USB_SPEED_HIGH) {
@@ -311,10 +370,17 @@ static int config_desc(struct usb_composite_dev *cdev, unsigned w_value)
 			if (!c->fullspeed)
 				continue;
 		}
-		if (w_value == 0)
+		/** UGLY UGLY HACK: Windows problems with multiple
+		 * configurations.
+		 *
+		 * We need to keep track of which configuration to try this
+		 * time in order to make Windows happy.
+		 */
+		if (index == 0)
 			return config_buf(c, speed, cdev->req->buf, type);
-		w_value--;
+		index--;
 	}
+
 	return -EINVAL;
 }
 
@@ -358,7 +424,7 @@ static void device_qual(struct usb_composite_dev *cdev)
 	qual->bDeviceProtocol = cdev->desc.bDeviceProtocol;
 	/* ASSUME same EP0 fifo size at both speeds */
 	qual->bMaxPacketSize0 = cdev->desc.bMaxPacketSize0;
-	qual->bNumConfigurations = count_configs(cdev, USB_DT_DEVICE_QUALIFIER);
+	qual->bNumConfigurations = count_configs(cdev, USB_DT_DEVICE);
 	qual->bRESERVED = 0;
 }
 
@@ -708,6 +774,7 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 		case USB_DT_DEVICE:
 			cdev->desc.bNumConfigurations =
 				count_configs(cdev, USB_DT_DEVICE);
+
 			value = min(w_length, (u16) sizeof cdev->desc);
 			memcpy(req->buf, &cdev->desc, value);
 			break;
@@ -726,6 +793,13 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 			value = config_desc(cdev, w_value);
 			if (value >= 0)
 				value = min(w_length, (u16) value);
+			/** UGLY UGLY HACK: Windows problems with multiple
+			 * configurations.
+			 *
+			 * Note that we got a get_config
+			 */
+			gadget->get_config = 1;
+			DBG(cdev, "get_config = 1\n");
 			break;
 		case USB_DT_STRING:
 			value = get_string(cdev, req->buf,
@@ -751,6 +825,15 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 		spin_lock(&cdev->lock);
 		value = set_config(cdev, ctrl, w_value);
 		spin_unlock(&cdev->lock);
+		/** UGLY UGLY HACK: Windows problems with multiple
+		 * configurations.
+		 *
+		 * We got a SetConfiguration, meaning Windows accepted
+		 * our configuration descriptor, so stop the retry
+		 * timer and let device work.
+		 */
+		gadget->set_config = 1;
+		DBG(cdev, "set_config = 1\n");
 		break;
 	case USB_REQ_GET_CONFIGURATION:
 		if (ctrl->bRequestType != USB_DIR_IN)
@@ -843,11 +926,31 @@ done:
 	return value;
 }
 
+/** UGLY UGLY HACK: Windows problems with multiple
+ * configurations.
+ *
+ * This hook was introduced to differentiate between
+ * BUS RESET and DISCONNECT events. All we do here
+ * is delete our retry timer so we don't retry
+ * forever.
+ */
+static void composite_vbus_disconnect(struct usb_gadget *gadget)
+{
+	struct usb_composite_dev	*cdev = get_gadget_data(gadget);
+
+	DBG(cdev, "%s\n", __func__);
+	del_timer(&cdev_set_config_timer);
+	gadget->cindex = 0;
+	gadget->set_config = 0;
+	gadget->get_config = 0;
+}
+
 static void composite_disconnect(struct usb_gadget *gadget)
 {
 	struct usb_composite_dev	*cdev = get_gadget_data(gadget);
 	unsigned long			flags;
 
+	DBG(cdev, "%s\n", __func__);
 	/* REVISIT:  should we have config and device level
 	 * disconnect callbacks?
 	 */
@@ -855,6 +958,16 @@ static void composite_disconnect(struct usb_gadget *gadget)
 	if (cdev->config)
 		reset_config(cdev);
 	spin_unlock_irqrestore(&cdev->lock, flags);
+
+	/** UGLY UGLY HACK: Windows problems with multiple
+	 * configurations.
+	 *
+	 * Port RESET so maintain cindex but reset get_config
+	 * and set_config flags so we can try other configurations
+	 */
+
+	gadget->set_config = 0;
+	gadget->get_config = 0;
 }
 
 /*-------------------------------------------------------------------------*/
@@ -943,6 +1056,9 @@ static int __init composite_bind(struct usb_gadget *gadget)
 	cdev->gadget = gadget;
 	set_gadget_data(gadget, cdev);
 	INIT_LIST_HEAD(&cdev->configs);
+	cdev->gadget->cindex = 0;
+	cdev->gadget->set_config = 0;
+	cdev->gadget->get_config = 0;
 
 	/* preallocate control response and buffer */
 	cdev->req = usb_ep_alloc_request(gadget->ep0, GFP_KERNEL);
@@ -956,8 +1072,6 @@ static int __init composite_bind(struct usb_gadget *gadget)
 
 	cdev->bufsiz = USB_BUFSIZ;
 	cdev->driver = composite;
-
-	usb_gadget_set_selfpowered(gadget);
 
 	/* interface and string IDs start at zero via kzalloc.
 	 * we force endpoints to start unassigned; few controller
@@ -997,6 +1111,8 @@ static int __init composite_bind(struct usb_gadget *gadget)
 		string_override(composite->strings,
 			cdev->desc.iSerialNumber, iSerialNumber);
 
+	setup_timer(&cdev_set_config_timer, cdev_set_config_timeout,
+				(unsigned long) gadget);
 	INFO(cdev, "%s ready\n", composite->name);
 	return 0;
 
@@ -1007,6 +1123,11 @@ fail:
 
 /*-------------------------------------------------------------------------*/
 
+/** UGLY UGLY HACK: Windows problems with multiple
+ * configurations.
+ *
+ * we use suspend to try another configuration
+ */
 static void
 composite_suspend(struct usb_gadget *gadget)
 {
@@ -1022,6 +1143,17 @@ composite_suspend(struct usb_gadget *gadget)
 			if (f->suspend)
 				f->suspend(f);
 		}
+	}
+
+	/** UGLY UGLY HACK: Windows problems with multiple
+	 * configurations.
+	 *
+	 * we try another configuration if we have received
+	 * a get_config but not a set_config
+	 */
+	if (gadget->get_config && !gadget->set_config) {
+		mod_timer(&cdev_set_config_timer,
+				jiffies + msecs_to_jiffies(10));
 	}
 }
 
@@ -1053,6 +1185,7 @@ static struct usb_gadget_driver composite_driver = {
 
 	.setup		= composite_setup,
 	.disconnect	= composite_disconnect,
+	.vbus_disconnect = composite_vbus_disconnect,
 
 	.suspend	= composite_suspend,
 	.resume		= composite_resume,

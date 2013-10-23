@@ -1,4 +1,3 @@
-
 /*
  * tiomap.c
  *
@@ -29,6 +28,8 @@
 
 /*  ----------------------------------- Host OS */
 #include <dspbridge/host_os.h>
+#include <linux/mm.h>
+#include <linux/mmzone.h>
 #include <mach-omap2/prm.h>
 #include <mach-omap2/cm.h>
 #include <mach-omap2/prm-regbits-34xx.h>
@@ -94,8 +95,11 @@
 #define MMU_LARGE_PAGE_MASK      0xFFFF0000
 #define MMU_SMALL_PAGE_MASK      0xFFFFF000
 #define PAGES_II_LVL_TABLE   512
+#define phys_to_page(phys)      pfn_to_page((phys) >> PAGE_SHIFT)
 
 #define MMU_GFLUSH 0x60
+
+extern unsigned short min_active_opp;
 
 /* Forward Declarations: */
 static DSP_STATUS WMD_BRD_Monitor(struct WMD_DEV_CONTEXT *pDevContext);
@@ -130,9 +134,7 @@ static DSP_STATUS WMD_DEV_Create(OUT struct WMD_DEV_CONTEXT **ppDevContext,
 static DSP_STATUS WMD_DEV_Ctrl(struct WMD_DEV_CONTEXT *pDevContext, u32 dwCmd,
 			IN OUT void *pArgs);
 static DSP_STATUS WMD_DEV_Destroy(struct WMD_DEV_CONTEXT *pDevContext);
-static DSP_STATUS TIOMAP_VirtToPhysical(struct mm_struct *mm, u32 ulMpuAddr,
-			u32 ulNumBytes, u32 *numOfTableEntries,
-			u32 *physicalAddrTable);
+static u32 user_va2pa(struct mm_struct *mm, u32 address);
 static DSP_STATUS PteUpdate(struct WMD_DEV_CONTEXT *hDevContext, u32 pa,
 			u32 va, u32 size,
 			struct HW_MMUMapAttrs_t *mapAttrs);
@@ -140,10 +142,38 @@ static DSP_STATUS PteSet(struct PgTableAttrs *pt, u32 pa, u32 va,
 			u32 size, struct HW_MMUMapAttrs_t *attrs);
 static DSP_STATUS MemMapVmalloc(struct WMD_DEV_CONTEXT *hDevContext,
 			u32 ulMpuAddr, u32 ulVirtAddr,
-			u32 ulNumBytes, u32 ulMapAttr);
-static DSP_STATUS run_IdleBoot(u32 prcm_base, u32 cm_base,
-			u32 sysctrl_base);
-void GetHWRegs(u32 prcm_base, u32 cm_base);
+			u32 ulNumBytes, struct HW_MMUMapAttrs_t *hwAttrs);
+
+#ifdef CONFIG_BRIDGE_DEBUG
+static void GetHWRegs(void __iomem *prm_base, void __iomem *cm_base)
+{
+	u32 temp;
+	temp = __raw_readl((cm_base) + 0x00);
+	DBG_Trace(DBG_LEVEL6, "CM_FCLKEN_IVA2 = 0x%x \n", temp);
+	temp = __raw_readl((cm_base) + 0x10);
+	DBG_Trace(DBG_LEVEL6, "CM_ICLKEN1_IVA2 = 0x%x \n", temp);
+	temp = __raw_readl((cm_base) + 0x20);
+	DBG_Trace(DBG_LEVEL6, "CM_IDLEST_IVA2 = 0x%x \n", temp);
+	temp = __raw_readl((cm_base) + 0x48);
+	DBG_Trace(DBG_LEVEL6, "CM_CLKSTCTRL_IVA2 = 0x%x \n", temp);
+	temp = __raw_readl((cm_base) + 0x4c);
+	DBG_Trace(DBG_LEVEL6, "CM_CLKSTST_IVA2 = 0x%x \n", temp);
+	temp = __raw_readl((prm_base) + 0x50);
+	DBG_Trace(DBG_LEVEL6, "RM_RSTCTRL_IVA2 = 0x%x \n", temp);
+	temp = __raw_readl((prm_base) + 0x58);
+	DBG_Trace(DBG_LEVEL6, "RM_RSTST_IVA2 = 0x%x \n", temp);
+	temp = __raw_readl((prm_base) + 0xE0);
+	DBG_Trace(DBG_LEVEL6, "PM_PWSTCTRL_IVA2 = 0x%x \n", temp);
+	temp = __raw_readl((prm_base) + 0xE4);
+	DBG_Trace(DBG_LEVEL6, "PM_PWSTST_IVA2 = 0x%x \n", temp);
+	temp = __raw_readl((cm_base) + 0xA10);
+	DBG_Trace(DBG_LEVEL6, "CM_ICLKEN1_CORE = 0x%x \n", temp);
+}
+#else
+static inline void GetHWRegs(void __iomem *prm_base, void __iomem *cm_base)
+{
+}
+#endif
 
 /*  ----------------------------------- Globals */
 
@@ -187,7 +217,6 @@ struct PgTableAttrs {
  *  to boot
  */
 extern s32 dsp_debug;
-
 
 /*
  *  This mini driver's function interface table.
@@ -244,27 +273,30 @@ static struct WMD_DRV_INTERFACE drvInterfaceFxns = {
 	WMD_MSG_SetQueueId,
 };
 
-static inline void tlb_flush_all(const u32 base)
+static inline void tlb_flush_all(const void __iomem *base)
 {
-    __raw_writeb(__raw_readb(base + MMU_GFLUSH) | 1, base + MMU_GFLUSH);
+	__raw_writeb(__raw_readb(base + MMU_GFLUSH) | 1, base + MMU_GFLUSH);
 }
 
 static inline void flush_all(struct WMD_DEV_CONTEXT *pDevContext)
 {
-	struct CFG_HOSTRES resources;
-	u32 temp = 0;
-
-	CFG_GetHostResources((struct CFG_DEVNODE *)DRV_GetFirstDevExtension(), &resources);
-	HW_PWRST_IVA2RegGet(resources.dwPrmBase, &temp);
-
-	if ((temp & HW_PWR_STATE_ON) == HW_PWR_STATE_OFF ||
-	    (temp & HW_PWR_STATE_ON) == HW_PWR_STATE_RET) {
-		CLK_Enable(SERVICESCLK_iva2_ck);
+	if (pDevContext->dwBrdState == BRD_DSP_HIBERNATION ||
+			pDevContext->dwBrdState == BRD_HIBERNATION)
 		WakeDSP(pDevContext, NULL);
-		tlb_flush_all(pDevContext->dwDSPMmuBase);
-		CLK_Disable(SERVICESCLK_iva2_ck);
-	} else
-		tlb_flush_all(pDevContext->dwDSPMmuBase);
+
+	tlb_flush_all(pDevContext->dwDSPMmuBase);
+}
+
+static void bad_page_dump(u32 pa, struct page *pg)
+{
+	pr_emerg("DSPBRIDGE: MAP function: COUNT 0 FOR PA 0x%x\n", pa);
+	pr_emerg("Bad page state in process '%s'\n"
+		"page:%p flags:0x%0*lx mapping:%p mapcount:%d count:%d\n"
+		"Backtrace:\n",
+		current->comm, pg, (int)(2*sizeof(unsigned long)),
+		(unsigned long)pg->flags, pg->mapping,
+		page_mapcount(pg), page_count(pg));
+	BUG();
 }
 
 /*
@@ -279,9 +311,9 @@ void WMD_DRV_Entry(OUT struct WMD_DRV_INTERFACE **ppDrvInterface,
 	DBC_Require(pstrWMDFileName != NULL);
 	DBG_Trace(DBG_ENTER, "In the WMD_DRV_Entry \n");
 
-       IO_SM_init(); /* Initialization of io_sm module */
+	IO_SM_init(); /* Initialization of io_sm module */
 
-       if (strcmp(pstrWMDFileName, "UMA") == 0)
+	if (strcmp(pstrWMDFileName, "UMA") == 0)
 		*ppDrvInterface = &drvInterfaceFxns;
 	else
 		DBG_Trace(DBG_LEVEL7, "WMD_DRV_Entry Unknown WMD file name");
@@ -313,29 +345,28 @@ static DSP_STATUS WMD_BRD_Monitor(struct WMD_DEV_CONTEXT *hDevContext)
 
 	GetHWRegs(resources.dwPrmBase, resources.dwCmBase);
 	HW_PWRST_IVA2RegGet(resources.dwPrmBase, &temp);
-    if ((temp & 0x03) != 0x03 || (temp & 0x03) != 0x02) {
+	if ((temp & 0x03) != 0x03 || (temp & 0x03) != 0x02) {
 		/* IVA2 is not in ON state */
 		/* Read and set PM_PWSTCTRL_IVA2  to ON */
 		HW_PWR_IVA2PowerStateSet(resources.dwPrmBase,
 					  HW_PWR_DOMAIN_DSP,
 					  HW_PWR_STATE_ON);
 		/* Set the SW supervised state transition */
-		HW_PWR_CLKCTRL_IVA2RegSet(resources.dwCmBase,
-					   HW_SW_SUP_WAKEUP);
+		HW_PWR_CLKCTRL_IVA2RegSet(resources.dwCmBase, HW_SW_SUP_WAKEUP);
 		/* Wait until the state has moved to ON */
 		HW_PWR_IVA2StateGet(resources.dwPrmBase, HW_PWR_DOMAIN_DSP,
 				     &pwrState);
 		/* Disable Automatic transition */
-	HW_PWR_CLKCTRL_IVA2RegSet(resources.dwCmBase, HW_AUTOTRANS_DIS);
+		HW_PWR_CLKCTRL_IVA2RegSet(resources.dwCmBase, HW_AUTOTRANS_DIS);
 	}
 	DBG_Trace(DBG_LEVEL6, "WMD_BRD_Monitor - Middle ****** \n");
 	GetHWRegs(resources.dwPrmBase, resources.dwCmBase);
-	status = run_IdleBoot(resources.dwPrmBase, resources.dwCmBase,
-			      resources.dwSysCtrlBase);
+	HW_RST_UnReset(resources.dwPrmBase, HW_RST2_IVA2);
+	CLK_Enable(SERVICESCLK_iva2_ck);
+
 	if (DSP_SUCCEEDED(status)) {
 		/* set the device state to IDLE */
 		pDevContext->dwBrdState = BRD_IDLE;
-
 	}
 error_return:
 	DBG_Trace(DBG_LEVEL6, "WMD_BRD_Monitor - End ****** \n");
@@ -437,7 +468,7 @@ static DSP_STATUS WMD_BRD_Start(struct WMD_DEV_CONTEXT *hDevContext,
 	DBG_Trace(DBG_ENTER, "Entering WMD_BRD_Start:\n hDevContext: 0x%x\n\t "
 			     "dwDSPAddr: 0x%x\n", hDevContext, dwDSPAddr);
 
-	 /* The device context contains all the mmu setup info from when the
+	/* The device context contains all the mmu setup info from when the
 	 * last dsp base image was loaded. The first entry is always
 	 * SHMMEM base. */
 	/* Get SHM_BEG - convert to byte address */
@@ -506,23 +537,23 @@ static DSP_STATUS WMD_BRD_Start(struct WMD_DEV_CONTEXT *hDevContext,
 		for (iEntryNdx = 0; iEntryNdx < WMDIOCTL_NUMOFMMUTLB;
 			iEntryNdx++) {
 			if ((pDevContext->aTLBEntry[iEntryNdx].ulGppPa != 0) &&
-                               (pDevContext->aTLBEntry[iEntryNdx].ulDspVa != 0)) {
+			   (pDevContext->aTLBEntry[iEntryNdx].ulDspVa != 0)) {
 				DBG_Trace(DBG_LEVEL4, "** (proc) MMU %d GppPa:"
-                                       " 0x%x DspVa 0x%x Size 0x%x\n",
-                                       itmpEntryNdx,
-                                       pDevContext->aTLBEntry[iEntryNdx].ulGppPa,
-                                       pDevContext->aTLBEntry[iEntryNdx].ulDspVa,
-                                       pDevContext->aTLBEntry[iEntryNdx].ulSize);
+				    " 0x%x DspVa 0x%x Size 0x%x\n",
+				    itmpEntryNdx,
+				    pDevContext->aTLBEntry[iEntryNdx].ulGppPa,
+				    pDevContext->aTLBEntry[iEntryNdx].ulDspVa,
+				    pDevContext->aTLBEntry[iEntryNdx].ulSize);
 				configureDspMmu(pDevContext,
-                                       pDevContext->aTLBEntry[iEntryNdx].ulGppPa,
-                                       pDevContext->aTLBEntry[iEntryNdx].ulDspVa *
-						DSPWORDSIZE,
-                                       pDevContext->aTLBEntry[iEntryNdx].ulSize,
-                                       itmpEntryNdx,
-                                       pDevContext->aTLBEntry[iEntryNdx].endianism,
-                                       pDevContext->aTLBEntry[iEntryNdx].elemSize,
-                                       pDevContext->aTLBEntry[iEntryNdx].
-						mixedMode);
+				    pDevContext->aTLBEntry[iEntryNdx].ulGppPa,
+				    pDevContext->aTLBEntry[iEntryNdx].ulDspVa *
+				    DSPWORDSIZE,
+				    pDevContext->aTLBEntry[iEntryNdx].ulSize,
+				    itmpEntryNdx,
+				    pDevContext->aTLBEntry[iEntryNdx].endianism,
+				    pDevContext->aTLBEntry[iEntryNdx].elemSize,
+				    pDevContext->aTLBEntry[iEntryNdx].
+				    mixedMode);
 				itmpEntryNdx++;
 			}
 		}		/* end for */
@@ -538,11 +569,10 @@ static DSP_STATUS WMD_BRD_Start(struct WMD_DEV_CONTEXT *hDevContext,
 		HW_MMU_TWLEnable(resources.dwDmmuBase);
 		/* Enable the SmartIdle and AutoIdle bit for MMU_SYSCONFIG */
 
-		temp = (u32) *((REG_UWORD32 *)
-				((u32) (resources.dwDmmuBase) + 0x10));
+
+		temp = __raw_readl((resources.dwDmmuBase) + 0x10);
 		temp = (temp & 0xFFFFFFEF) | 0x11;
-		*((REG_UWORD32 *) ((u32) (resources.dwDmmuBase) + 0x10)) =
-			(u32) temp;
+		__raw_writel(temp, (resources.dwDmmuBase) + 0x10);
 
 		/* Let the DSP MMU run */
 		HW_MMU_Enable(resources.dwDmmuBase);
@@ -564,13 +594,13 @@ static DSP_STATUS WMD_BRD_Start(struct WMD_DEV_CONTEXT *hDevContext,
 			uClkCmd = (BPWR_DisableClock << MBX_PM_CLK_CMDSHIFT) |
 						ulLoadMonitorTimer;
 			DBG_Trace(DBG_LEVEL7,
-                                       "encoded LoadMonitor cmd for Disable: 0x%x\n",
-                                       uClkCmd);
+			       "encoded LoadMonitor cmd for Disable: 0x%x\n",
+			       uClkCmd);
 			DSPPeripheralClkCtrl(pDevContext, &uClkCmd);
 
 			extClkId = uClkCmd & MBX_PM_CLK_IDMASK;
 			for (tmpIndex = 0; tmpIndex < MBX_PM_MAX_RESOURCES;
-                                       tmpIndex++) {
+				       tmpIndex++) {
 				if (extClkId == BPWR_CLKID[tmpIndex]) {
 					clkIdIndex = tmpIndex;
 					break;
@@ -638,7 +668,7 @@ static DSP_STATUS WMD_BRD_Start(struct WMD_DEV_CONTEXT *hDevContext,
 
 		} else {
 		DBG_Trace(DBG_LEVEL7,
-                               "Not able to get the symbol for BIOS Timer\n");
+			       "Not able to get the symbol for BIOS Timer\n");
 		}
 	}
 
@@ -646,12 +676,12 @@ static DSP_STATUS WMD_BRD_Start(struct WMD_DEV_CONTEXT *hDevContext,
 		/* Set the DSP clock rate */
 		(void)DEV_GetSymbol(pDevContext->hDevObject,
 					"_BRIDGEINIT_DSP_FREQ", &ulDspClkAddr);
-               /*Set Autoidle Mode for IVA2 PLL */
-               temp = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwCmBase) + 0x34));
-               temp = (temp & 0xFFFFFFFE) | 0x1;
-               *((REG_UWORD32 *) ((u32) (resources.dwCmBase) + 0x34)) =
-                       (u32) temp;
+		/*Set Autoidle Mode for IVA2 PLL */
+		temp = (u32) *((REG_UWORD32 *)
+			((u32) (resources.dwCmBase) + 0x34));
+		temp = (temp & 0xFFFFFFFE) | 0x1;
+		*((REG_UWORD32 *) ((u32) (resources.dwCmBase) + 0x34)) =
+			(u32) temp;
 		DBG_Trace(DBG_LEVEL5, "WMD_BRD_Start: _BRIDGE_DSP_FREQ Addr:"
 				"0x%x \n", ulDspClkAddr);
 		if ((unsigned int *)ulDspClkAddr != NULL) {
@@ -665,32 +695,31 @@ static DSP_STATUS WMD_BRD_Start(struct WMD_DEV_CONTEXT *hDevContext,
 				 ulDspClkAddr, sizeof(u32), 0);
 		}
 /*PM_IVA2GRPSEL_PER = 0xC0;*/
-               temp = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA8));
-               temp = (temp & 0xFFFFFF30) | 0xC0;
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8)) =
-                       (u32) temp;
+		temp = (u32) *((REG_UWORD32 *)
+			((u32) (resources.dwPerPmBase) + 0xA8));
+		temp = (temp & 0xFFFFFF30) | 0xC0;
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA8)) =
+			(u32) temp;
 
 /*PM_MPUGRPSEL_PER &= 0xFFFFFF3F;*/
-               temp = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerPmBase) + 0xA4));
-               temp = (temp & 0xFFFFFF3F);
-               *((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4)) =
-                       (u32) temp;
+		temp = (u32) *((REG_UWORD32 *)
+			((u32) (resources.dwPerPmBase) + 0xA4));
+		temp = (temp & 0xFFFFFF3F);
+		*((REG_UWORD32 *) ((u32) (resources.dwPerPmBase) + 0xA4)) =
+			(u32) temp;
 /*CM_SLEEPDEP_PER |= 0x04;*/
-               temp = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwPerBase) + 0x44));
-               temp = (temp & 0xFFFFFFFB) | 0x04;
-               *((REG_UWORD32 *) ((u32) (resources.dwPerBase) + 0x44)) =
-                       (u32) temp;
+		temp = (u32) *((REG_UWORD32 *)
+			((u32) (resources.dwPerBase) + 0x44));
+		temp = (temp & 0xFFFFFFFB) | 0x04;
+		*((REG_UWORD32 *) ((u32) (resources.dwPerBase) + 0x44)) =
+			(u32) temp;
 
 /*CM_CLKSTCTRL_IVA2 = 0x00000003 -To Allow automatic transitions*/
-               temp = (u32) *((REG_UWORD32 *)
-                               ((u32) (resources.dwCmBase) + 0x48));
-               temp = (temp & 0xFFFFFFFC) | 0x03;
-               *((REG_UWORD32 *) ((u32) (resources.dwCmBase) + 0x48)) =
-                       (u32) temp;
-
+		temp = (u32) *((REG_UWORD32 *)
+			((u32) (resources.dwCmBase) + 0x48));
+		temp = (temp & 0xFFFFFFFC) | 0x03;
+		*((REG_UWORD32 *) ((u32) (resources.dwCmBase) + 0x48)) =
+			(u32) temp;
 
 		/* Enable Mailbox events and also drain any pending
 		 * stale messages */
@@ -800,16 +829,9 @@ static DSP_STATUS WMD_BRD_Stop(struct WMD_DEV_CONTEXT *hDevContext)
 
 	HW_PWRST_IVA2RegGet(resources.dwPrmBase, &dspPwrState);
 	if (dspPwrState != HW_PWR_STATE_OFF) {
-
-			CHNLSM_InterruptDSP2(pDevContext, MBX_PM_DSPIDLE);
-
-			mdelay(10);
-
-			GetHWRegs(resources.dwPrmBase, resources.dwCmBase);
-
-		run_IdleBoot(resources.dwPrmBase, resources.dwCmBase,
-			     resources.dwSysCtrlBase);
-
+		CHNLSM_InterruptDSP2(pDevContext, MBX_PM_DSPIDLE);
+		mdelay(10);
+		GetHWRegs(resources.dwPrmBase, resources.dwCmBase);
 		udelay(50);
 
 		clk_status = CLK_Disable(SERVICESCLK_iva2_ck);
@@ -817,15 +839,14 @@ static DSP_STATUS WMD_BRD_Stop(struct WMD_DEV_CONTEXT *hDevContext)
 			DBG_Trace(DBG_LEVEL6,
 				 "\n WMD_BRD_Stop: CLK_Disable failed "
 				 "for iva2_fck\n");
-			}
+		}
 		/* IVA2 is not in OFF state */
 		/* Set PM_PWSTCTRL_IVA2  to OFF */
 		HW_PWR_IVA2PowerStateSet(resources.dwPrmBase,
 					  HW_PWR_DOMAIN_DSP,
 					  HW_PWR_STATE_OFF);
 		/* Set the SW supervised state transition for Sleep */
-		HW_PWR_CLKCTRL_IVA2RegSet(resources.dwCmBase,
-					   HW_SW_SUP_SLEEP);
+		HW_PWR_CLKCTRL_IVA2RegSet(resources.dwCmBase, HW_SW_SUP_SLEEP);
 	} else {
 		clk_status = CLK_Disable(SERVICESCLK_iva2_ck);
 		if (DSP_FAILED(clk_status)) {
@@ -850,8 +871,9 @@ static DSP_STATUS WMD_BRD_Stop(struct WMD_DEV_CONTEXT *hDevContext)
 		memset((u8 *) pPtAttrs->pgInfo, 0x00,
 		       (pPtAttrs->L2NumPages * sizeof(struct PageInfo)));
 	}
-
-		DBG_Trace(DBG_LEVEL6, "WMD_BRD_Stop - End ****** \n");
+	DBG_Trace(DBG_LEVEL6, "WMD_BRD_Stop - End ****** \n");
+	HW_RST_Reset(resources.dwPrmBase, HW_RST1_IVA2);
+	HW_RST_Reset(resources.dwPrmBase, HW_RST2_IVA2);
 
 	return status;
 }
@@ -915,7 +937,10 @@ static DSP_STATUS WMD_BRD_Delete(struct WMD_DEV_CONTEXT *hDevContext)
 		memset((u8 *)pPtAttrs->pgInfo, 0x00,
 			(pPtAttrs->L2NumPages * sizeof(struct PageInfo)));
 	}
-	DBG_Trace(DBG_LEVEL6, "WMD_BRD_Stop - End ****** \n");
+	DBG_Trace(DBG_LEVEL6, "WMD_BRD_Delete - End ****** \n");
+	HW_RST_Reset(resources.dwPrmBase, HW_RST1_IVA2);
+	HW_RST_Reset(resources.dwPrmBase, HW_RST2_IVA2);
+
 	return status;
 }
 
@@ -1035,33 +1060,36 @@ static DSP_STATUS WMD_DEV_Create(OUT struct WMD_DEV_CONTEXT **ppDevContext,
 		/* we like to get aligned on L1 table size */
 		pg_tbl_va = (u32)MEM_AllocPhysMem(pPtAttrs->L1size,
 		    align_size, &pg_tbl_pa);
-	/* Check if the PA is aligned for us */
-	if ((pg_tbl_pa) & (align_size-1)) {
-                       /* PA not aligned to page table size ,
-                       * try with more allocation and align */
-                       MEM_FreePhysMem((void *)pg_tbl_va, pg_tbl_pa, pPtAttrs->L1size);
-                       /* we like to get aligned on L1 table size */
-                       pg_tbl_va = (u32) MEM_AllocPhysMem((pPtAttrs->L1size)*2,
-                       align_size, &pg_tbl_pa);
-                       /* We should be able to get aligned table now */
-                       pPtAttrs->L1TblAllocPa = pg_tbl_pa;
-                       pPtAttrs->L1TblAllocVa = pg_tbl_va;
-                       pPtAttrs->L1TblAllocSz = pPtAttrs->L1size * 2;
-                       /* Align the PA to the next 'align'  boundary */
-                       pPtAttrs->L1BasePa = ((pg_tbl_pa) + (align_size-1)) &
-				 (~(align_size-1));
-                       pPtAttrs->L1BaseVa = pg_tbl_va + (pPtAttrs->L1BasePa -
-				 pg_tbl_pa);
-	} else {
-                       /* We got aligned PA, cool */
-                       pPtAttrs->L1TblAllocPa = pg_tbl_pa;
-                       pPtAttrs->L1TblAllocVa = pg_tbl_va;
-                       pPtAttrs->L1TblAllocSz = pPtAttrs->L1size;
-                       pPtAttrs->L1BasePa = pg_tbl_pa;
-                       pPtAttrs->L1BaseVa = pg_tbl_va;
-	}
-       if (pPtAttrs->L1BaseVa)
-                       memset((u8 *)pPtAttrs->L1BaseVa, 0x00, pPtAttrs->L1size);
+
+		/* Check if the PA is aligned for us */
+		if ((pg_tbl_pa) & (align_size-1)) {
+			/* PA not aligned to page table size ,
+			 * try with more allocation and align */
+			MEM_FreePhysMem((void *)pg_tbl_va, pg_tbl_pa,
+					pPtAttrs->L1size);
+			/* we like to get aligned on L1 table size */
+			pg_tbl_va = (u32) MEM_AllocPhysMem((pPtAttrs->L1size)*2,
+					align_size, &pg_tbl_pa);
+			/* We should be able to get aligned table now */
+			pPtAttrs->L1TblAllocPa = pg_tbl_pa;
+			pPtAttrs->L1TblAllocVa = pg_tbl_va;
+			pPtAttrs->L1TblAllocSz = pPtAttrs->L1size * 2;
+			/* Align the PA to the next 'align'  boundary */
+			pPtAttrs->L1BasePa = ((pg_tbl_pa) + (align_size-1)) &
+				(~(align_size-1));
+			pPtAttrs->L1BaseVa = pg_tbl_va + (pPtAttrs->L1BasePa -
+				pg_tbl_pa);
+		} else {
+			/* We got aligned PA, cool */
+			pPtAttrs->L1TblAllocPa = pg_tbl_pa;
+			pPtAttrs->L1TblAllocVa = pg_tbl_va;
+			pPtAttrs->L1TblAllocSz = pPtAttrs->L1size;
+			pPtAttrs->L1BasePa = pg_tbl_pa;
+			pPtAttrs->L1BaseVa = pg_tbl_va;
+		}
+		if (pPtAttrs->L1BaseVa)
+			memset((u8 *)pPtAttrs->L1BaseVa, 0x00,
+				pPtAttrs->L1size);
 
 		/* number of L2 page tables = DMM pool used + SHMMEM +EXTMEM +
 		 * L4 pages */
@@ -1072,16 +1100,17 @@ static DSP_STATUS WMD_DEV_Create(OUT struct WMD_DEV_CONTEXT **ppDevContext,
 		/* we like to get aligned on L1 table size */
 		pg_tbl_va = (u32)MEM_AllocPhysMem(pPtAttrs->L2size,
 			    align_size, &pg_tbl_pa);
-	pPtAttrs->L2TblAllocPa = pg_tbl_pa;
-	pPtAttrs->L2TblAllocVa = pg_tbl_va;
-	pPtAttrs->L2TblAllocSz = pPtAttrs->L2size;
-	pPtAttrs->L2BasePa = pg_tbl_pa;
-	pPtAttrs->L2BaseVa = pg_tbl_va;
+		pPtAttrs->L2TblAllocPa = pg_tbl_pa;
+		pPtAttrs->L2TblAllocVa = pg_tbl_va;
+		pPtAttrs->L2TblAllocSz = pPtAttrs->L2size;
+		pPtAttrs->L2BasePa = pg_tbl_pa;
+		pPtAttrs->L2BaseVa = pg_tbl_va;
 
-       if (pPtAttrs->L2BaseVa)
-                       memset((u8 *)pPtAttrs->L2BaseVa, 0x00, pPtAttrs->L2size);
+		if (pPtAttrs->L2BaseVa)
+			memset((u8 *)pPtAttrs->L2BaseVa, 0x00,
+				pPtAttrs->L2size);
 
-	pPtAttrs->pgInfo = MEM_Calloc(pPtAttrs->L2NumPages *
+		pPtAttrs->pgInfo = MEM_Calloc(pPtAttrs->L2NumPages *
 				sizeof(struct PageInfo), MEM_NONPAGED);
 		DBG_Trace(DBG_LEVEL1, "L1 pa %x, va %x, size %x\n L2 pa %x, va "
 			 "%x, size %x\n", pPtAttrs->L1BasePa,
@@ -1185,7 +1214,6 @@ static DSP_STATUS WMD_DEV_Ctrl(struct WMD_DEV_CONTEXT *pDevContext, u32 dwCmd,
 		/* store away dsp-mmu setup values for later use */
 		for (ndx = 0; ndx < WMDIOCTL_NUMOFMMUTLB; ndx++, paExtProc++)
 			pDevContext->aTLBEntry[ndx] = *paExtProc;
-
 		break;
 	case WMDIOCTL_DEEPSLEEP:
 	case WMDIOCTL_EMERGENCYSLEEP:
@@ -1349,11 +1377,10 @@ static DSP_STATUS WMD_BRD_MemMap(struct WMD_DEV_CONTEXT *hDevContext,
 	DSP_STATUS status = DSP_SOK;
 	struct WMD_DEV_CONTEXT *pDevContext = hDevContext;
 	struct HW_MMUMapAttrs_t hwAttrs;
-	u32 numOfActualTabEntries = 0;
-	u32 *pPhysAddrPageTbl = NULL;
 	struct vm_area_struct *vma;
 	struct mm_struct *mm = current->mm;
-	u32 temp = 0;
+	u32 numUsrPgs = 0, nr_pages = 0;
+	u32 va = ulVirtAddr;
 
 	DBG_Trace(DBG_ENTER, "> WMD_BRD_MemMap hDevContext %x, pa %x, va %x, "
 		 "size %x, ulMapAttr %x\n", hDevContext, ulMpuAddr, ulVirtAddr,
@@ -1374,7 +1401,7 @@ static DSP_STATUS WMD_BRD_MemMap(struct WMD_DEV_CONTEXT *hDevContext,
 		hwAttrs.endianism = HW_LITTLE_ENDIAN;
 
 	hwAttrs.mixedSize = (enum HW_MMUMixedSize_t)
-                               ((attrs & DSP_MAPMIXEDELEMSIZE) >> 2);
+			       ((attrs & DSP_MAPMIXEDELEMSIZE) >> 2);
 	/* Ignore elementSize if mixedSize is enabled */
 	if (hwAttrs.mixedSize == 0) {
 		if (attrs & DSP_MAPELEMSIZE8) {
@@ -1390,101 +1417,167 @@ static DSP_STATUS WMD_BRD_MemMap(struct WMD_DEV_CONTEXT *hDevContext,
 			/* Size is 64 bit */
 			hwAttrs.elementSize = HW_ELEM_SIZE_64BIT;
 		} else {
-			/* Mixedsize isn't enabled, so size can't be
-			 * zero here */
+			/*
+			 * Mixedsize isn't enabled, so size can't be
+			 * zero here
+			 */
 			DBG_Trace(DBG_LEVEL7,
 				 "WMD_BRD_MemMap: MMU element size is zero\n");
 			return DSP_EINVALIDARG;
 		}
 	}
+	if (attrs & DSP_MAPDONOTLOCK)
+		hwAttrs.donotlockmpupage = 1;
+	else
+		hwAttrs.donotlockmpupage = 0;
+
 	if (attrs & DSP_MAPVMALLOCADDR) {
-		status = MemMapVmalloc(hDevContext, ulMpuAddr, ulVirtAddr,
-				       ulNumBytes, ulMapAttr);
-		return status;
+		return MemMapVmalloc(hDevContext, ulMpuAddr, ulVirtAddr,
+				       ulNumBytes, &hwAttrs);
 	}
-	 /* Do OS-specific user-va to pa translation.
+	/*
+	 * Do OS-specific user-va to pa translation.
 	 * Combine physically contiguous regions to reduce TLBs.
-	 * Pass the translated pa to PteUpdate.  */
+	 * Pass the translated pa to PteUpdate.
+	 */
 	if ((attrs & DSP_MAPPHYSICALADDR)) {
 		status = PteUpdate(pDevContext, ulMpuAddr, ulVirtAddr,
 			 ulNumBytes, &hwAttrs);
 		goto func_cont;
 	}
 
-	/* Important Note: ulMpuAddr is mapped from user application process
+	/*
+	 * Important Note: ulMpuAddr is mapped from user application process
 	 * to current process - it must lie completely within the current
-	 * virtual memory address space in order to be of use to us here!  */
+	 * virtual memory address space in order to be of use to us here!
+	 */
 	down_read(&mm->mmap_sem);
 	vma = find_vma(mm, ulMpuAddr);
-	up_read(&mm->mmap_sem);
 	if (vma)
 		DBG_Trace(DBG_LEVEL6, "VMAfor UserBuf: ulMpuAddr=%x, "
 			"ulNumBytes=%x, vm_start=%x vm_end=%x vm_flags=%x \n",
 			ulMpuAddr, ulNumBytes, vma->vm_start,
 			vma->vm_end, vma->vm_flags);
 
-	/* It is observed that under some circumstances, the user buffer is
+	/*
+	 * It is observed that under some circumstances, the user buffer is
 	 * spread across several VMAs. So loop through and check if the entire
-	 * user buffer is covered */
-	while ((vma != NULL) && (ulMpuAddr + ulNumBytes > vma->vm_end)) {
+	 * user buffer is covered
+	 */
+	while ((vma) && (ulMpuAddr + ulNumBytes > vma->vm_end)) {
 		/* jump to the next VMA region */
-		down_read(&mm->mmap_sem);
 		vma = find_vma(mm, vma->vm_end + 1);
-		up_read(&mm->mmap_sem);
 		DBG_Trace(DBG_LEVEL6, "VMAfor UserBuf ulMpuAddr=%x, "
-                       "ulNumBytes=%x, vm_start=%x vm_end=%x vm_flags=%x\n",
-                       ulMpuAddr, ulNumBytes, vma->vm_start,
-                       vma->vm_end, vma->vm_flags);
+		       "ulNumBytes=%x, vm_start=%x vm_end=%x vm_flags=%x\n",
+		       ulMpuAddr, ulNumBytes, vma->vm_start,
+		       vma->vm_end, vma->vm_flags);
 	}
-	if (vma == NULL) {
+	if (!vma) {
 		DBG_Trace(DBG_LEVEL7, "Failed to get the VMA region for "
 			  "MPU Buffer !!! \n");
 		status = DSP_EINVALIDARG;
-	}
-	if (DSP_FAILED(status))
+		up_read(&mm->mmap_sem);
 		goto func_cont;
-	pPhysAddrPageTbl = DMM_GetPhysicalAddrTable();
-	/* Build the array with virtual to physical translations */
-	status = TIOMAP_VirtToPhysical(mm, ulMpuAddr, ulNumBytes,
-				&numOfActualTabEntries, pPhysAddrPageTbl);
-	if (DSP_FAILED(status)) {
-		DBG_Trace(DBG_LEVEL7,
-			 "WMD_BRD_MemMap: TIOMAP_VirtToPhysical",
-			 " failed\n");
-		return DSP_EFAIL;
 	}
-	temp = 0;
-	DBG_Trace(DBG_LEVEL4, "WMD_BRD_MemMap: numOfActualTabEntries=%d, "
-		  "ulNumBytes= %d\n",  numOfActualTabEntries, ulNumBytes);
-	/* Update the DSP MMU table with the physical addresses received from
-       from translation function */
-	while (temp < numOfActualTabEntries) {
-		status = PteSet(pDevContext->pPtAttrs, pPhysAddrPageTbl[temp++],
-				ulVirtAddr, HW_PAGE_SIZE_4KB, &hwAttrs);
-		if (DSP_FAILED(status)) {
-			DBG_Trace(DBG_LEVEL7,
-				 "WMD_BRD_MemMap: FAILED IN PTESET \n");
-			return DSP_EFAIL;
-		}
-		ulVirtAddr += HW_PAGE_SIZE_4KB;
-	}
-	if (DSP_FAILED(status))
-		DBG_Trace(DBG_LEVEL5, "WMD_BRD_MemMap: PteSet failed \n");
-	else
-		DBG_Trace(DBG_LEVEL5, "WMD_BRD_MemMap: PteSet passed \n");
 
+	numUsrPgs =  PAGE_ALIGN(ulNumBytes) / PG_SIZE_4K;
+
+	DBG_Trace(DBG_LEVEL4, "%s :numOfActualTabEntries=%d, ulNumBytes= %d\n",
+		  %s, numUsrPgs, ulNumBytes);
+
+	if (vma->vm_flags & (VM_IO | VM_PFNMAP | VM_RESERVED)) {
+		for (nr_pages = numUsrPgs; nr_pages > 0;) {
+			u32 pa;
+
+			pa = user_va2pa(mm, ulMpuAddr);
+			if (!pa) {
+				status = DSP_EFAIL;
+				pr_err("DSPBRIDGE: VM_IO mapping physical"
+				       "address is invalid\n");
+				break;
+			}
+
+			status = PteSet(pDevContext->pPtAttrs, pa,
+					va, HW_PAGE_SIZE_4KB, &hwAttrs);
+			if (DSP_FAILED(status)) {
+				DBG_Trace(DBG_LEVEL7,
+					  "WMD_BRD_MemMap: FAILED IN VM_IO"
+					  "PTESET \n");
+				break;
+			}
+
+			va += HW_PAGE_SIZE_4KB;
+			ulMpuAddr += HW_PAGE_SIZE_4KB;
+			nr_pages--;
+		}
+	} else {
+		int write = 0;
+
+		if (vma->vm_flags & (VM_WRITE | VM_MAYWRITE))
+			write = 1;
+
+		for (nr_pages = numUsrPgs; nr_pages > 0;) {
+			int i, ret;
+			struct page *pages[16]; /* for a reasonable batch */
+
+			ret = get_user_pages(current, mm, ulMpuAddr,
+					     min_t(int,  nr_pages, ARRAY_SIZE(pages)),
+					     write, 1, pages, NULL);
+			if (ret <= 0) {
+				pr_err("DSPBRIDGE: get_user_pages FAILED,"
+				       "MPU addr = 0x%x,"
+				       "vma->vm_flags = 0x%lx,"
+				       "get_user_pages ErrValue = %d,"
+				       "Buffersize=0x%x\n",
+				       ulMpuAddr, vma->vm_flags, ret,
+				       ulNumBytes);
+				status = DSP_EFAIL;
+				goto fail_mapping;
+			}
+
+			for (i = 0; i < ret; i++) {
+				struct page *page = pages[i];
+
+				status = PteSet(pDevContext->pPtAttrs,
+						page_to_phys(page), va,
+						HW_PAGE_SIZE_4KB, &hwAttrs);
+				if (DSP_FAILED(status)) {
+					pr_err("%s: FAILED IN PTESET\n",
+					       __func__);
+					goto fail_mapping;
+				}
+				SetPageMlocked(page);
+				va += HW_PAGE_SIZE_4KB;
+				ulMpuAddr += HW_PAGE_SIZE_4KB;
+				nr_pages--;
+			}
+		}
+	}
+
+fail_mapping:
+	up_read(&mm->mmap_sem);
 func_cont:
 	/* Don't propogate Linux or HW status to upper layers */
 	if (DSP_SUCCEEDED(status)) {
 		status = DSP_SOK;
 	} else {
 		DBG_Trace(DBG_LEVEL7, "< WMD_BRD_MemMap status %x\n", status);
+		/*
+		 * Roll out the mapped pages incase it failed in middle of
+		 * mapping
+		 */
+		if (numUsrPgs - nr_pages) {
+			WMD_BRD_MemUnMap(pDevContext, ulVirtAddr,
+					 ((numUsrPgs - nr_pages) * PG_SIZE_4K));
+		}
 		status = DSP_EFAIL;
 	}
-	 /* In any case, flush the TLB
+	/*
+	 * In any case, flush the TLB
 	 * This is called from here instead from PteUpdate to avoid unnecessary
 	 * repetition while mapping non-contiguous physical regions of a virtual
-	 * region */
+	 * region
+	 */
 	flush_all(pDevContext);
 	DBG_Trace(DBG_ENTER, "< WMD_BRD_MemMap status %x\n", status);
 	return status;
@@ -1513,9 +1606,13 @@ static DSP_STATUS WMD_BRD_MemUnMap(struct WMD_DEV_CONTEXT *hDevContext,
 	u32 remBytes;
 	u32 remBytesL2;
 	u32 vaCurr;
+	struct page *pg = NULL;
 	DSP_STATUS status = DSP_SOK;
 	struct WMD_DEV_CONTEXT *pDevContext = hDevContext;
 	struct PgTableAttrs *pt = pDevContext->pPtAttrs;
+	u32 temp;
+	u32 pAddr;
+	u32 numof4KPages = 0;
 
 	DBG_Trace(DBG_ENTER, "> WMD_BRD_MemUnMap hDevContext %x, va %x, "
 		  "NumBytes %x\n", hDevContext, ulVirtAddr, ulNumBytes);
@@ -1533,98 +1630,154 @@ static DSP_STATUS WMD_BRD_MemUnMap(struct WMD_DEV_CONTEXT *hDevContext,
 		pteAddrL1 = HW_MMU_PteAddrL1(L1BaseVa, vaCurr);
 		pteVal = *(u32 *)pteAddrL1;
 		pteSize = HW_MMU_PteSizeL1(pteVal);
-		if (pteSize == HW_MMU_COARSE_PAGE_SIZE) {
-			/* Get the L2 PA from the L1 PTE, and find
-			 * corresponding L2 VA */
-			L2BasePa = HW_MMU_PteCoarseL1(pteVal);
-			L2BaseVa = L2BasePa - pt->L2BasePa + pt->L2BaseVa;
-			L2PageNum = (L2BasePa - pt->L2BasePa) /
-				    HW_MMU_COARSE_PAGE_SIZE;
-			 /* Find the L2 PTE address from which we will start
-			 * clearing, the number of PTEs to be cleared on this
-			 * page, and the size of VA space that needs to be
-			 * cleared on this L2 page */
-			pteAddrL2 = HW_MMU_PteAddrL2(L2BaseVa, vaCurr);
-			pteCount = pteAddrL2 & (HW_MMU_COARSE_PAGE_SIZE - 1);
-			pteCount = (HW_MMU_COARSE_PAGE_SIZE - pteCount) /
-				    sizeof(u32);
-			if (remBytes < (pteCount * PG_SIZE_4K))
-				pteCount = remBytes / PG_SIZE_4K;
 
-			remBytesL2 = pteCount * PG_SIZE_4K;
-			DBG_Trace(DBG_LEVEL1, "WMD_BRD_MemUnMap L2BasePa %x, "
-				  "L2BaseVa %x pteAddrL2 %x, remBytesL2 %x\n",
-				  L2BasePa, L2BaseVa, pteAddrL2, remBytesL2);
-			 /* Unmap the VA space on this L2 PT. A quicker way
-			 * would be to clear pteCount entries starting from
-			 * pteAddrL2. However, below code checks that we don't
-			 * clear invalid entries or less than 64KB for a 64KB
-			 * entry. Similar checking is done for L1 PTEs too
-			 * below */
-			while (remBytesL2 && (DSP_SUCCEEDED(status))) {
-				pteVal = *(u32 *)pteAddrL2;
-				pteSize = HW_MMU_PteSizeL2(pteVal);
-				/* vaCurr aligned to pteSize? */
-				if ((pteSize != 0) && (remBytesL2 >= pteSize) &&
-				   !(vaCurr & (pteSize - 1))) {
-					if (HW_MMU_PteClear(pteAddrL2,
-						vaCurr, pteSize) == RET_OK) {
-						status = DSP_SOK;
-						remBytesL2 -= pteSize;
-						vaCurr += pteSize;
-						pteAddrL2 += (pteSize >> 12) *
-								sizeof(u32);
-					} else {
-						status = DSP_EFAIL;
-						goto EXIT_LOOP;
-					}
-				} else {
-					status = DSP_EFAIL;
-				}
-			}
-			SYNC_EnterCS(pt->hCSObj);
-			if (remBytesL2 == 0) {
-				pt->pgInfo[L2PageNum].numEntries -= pteCount;
-				if (pt->pgInfo[L2PageNum].numEntries == 0) {
-					/* Clear the L1 PTE pointing to the
-					 * L2 PT */
-					if (RET_OK == HW_MMU_PteClear(L1BaseVa,
-					vaCurrOrig, HW_MMU_COARSE_PAGE_SIZE))
-						status = DSP_SOK;
-					else {
-						status = DSP_EFAIL;
-						goto EXIT_LOOP;
-					}
-				}
-				remBytes -= pteCount * PG_SIZE_4K;
-			} else {
-				status = DSP_EFAIL;
-			}
-			DBG_Trace(DBG_LEVEL1, "WMD_BRD_MemUnMap L2PageNum %x, "
-				  "numEntries %x, pteCount %x, status: 0x%x\n",
-				  L2PageNum, pt->pgInfo[L2PageNum].numEntries,
-				  pteCount, status);
-			SYNC_LeaveCS(pt->hCSObj);
-		} else
+		if (pteSize != HW_MMU_COARSE_PAGE_SIZE)
+			goto skip_coarse_page;
+
+		/*
+		 * Get the L2 PA from the L1 PTE, and find
+		 * corresponding L2 VA
+		 */
+		L2BasePa = HW_MMU_PteCoarseL1(pteVal);
+		L2BaseVa = L2BasePa - pt->L2BasePa + pt->L2BaseVa;
+		L2PageNum = (L2BasePa - pt->L2BasePa) / HW_MMU_COARSE_PAGE_SIZE;
+		/*
+		 * Find the L2 PTE address from which we will start
+		 * clearing, the number of PTEs to be cleared on this
+		 * page, and the size of VA space that needs to be
+		 * cleared on this L2 page
+		 */
+		pteAddrL2 = HW_MMU_PteAddrL2(L2BaseVa, vaCurr);
+		pteCount = pteAddrL2 & (HW_MMU_COARSE_PAGE_SIZE - 1);
+		pteCount = (HW_MMU_COARSE_PAGE_SIZE - pteCount) / sizeof(u32);
+		if (remBytes < (pteCount * PG_SIZE_4K))
+			pteCount = remBytes / PG_SIZE_4K;
+		remBytesL2 = pteCount * PG_SIZE_4K;
+		DBG_Trace(DBG_LEVEL1, "WMD_BRD_MemUnMap L2BasePa %x, "
+			  "L2BaseVa %x pteAddrL2 %x, remBytesL2 %x\n",
+			  L2BasePa, L2BaseVa, pteAddrL2, remBytesL2);
+		/*
+		 * Unmap the VA space on this L2 PT. A quicker way
+		 * would be to clear pteCount entries starting from
+		 * pteAddrL2. However, below code checks that we don't
+		 * clear invalid entries or less than 64KB for a 64KB
+		 * entry. Similar checking is done for L1 PTEs too
+		 * below
+		 */
+		while (remBytesL2 && (DSP_SUCCEEDED(status))) {
+			pteVal = *(u32 *)pteAddrL2;
+			pteSize = HW_MMU_PteSizeL2(pteVal);
 			/* vaCurr aligned to pteSize? */
-			/* pteSize = 1 MB or 16 MB */
-			if ((pteSize != 0) && (remBytes >= pteSize) &&
-			   !(vaCurr & (pteSize - 1))) {
-				if (HW_MMU_PteClear(L1BaseVa,
-					vaCurr, pteSize) == RET_OK) {
+			if (pteSize == 0 || remBytesL2 < pteSize ||
+						vaCurr & (pteSize - 1)) {
+				status = DSP_EFAIL;
+				break;
+			}
+
+			/* Collect Physical addresses from VA */
+			pAddr = (pteVal & ~(pteSize - 1));
+			if (pteSize == HW_PAGE_SIZE_64KB)
+				numof4KPages = 16;
+			else
+				numof4KPages = 1;
+			temp = 0;
+			while (temp++ < numof4KPages) {
+				if (!pfn_valid(__phys_to_pfn(pAddr))) {
+					pAddr += HW_PAGE_SIZE_4KB;
+					continue;
+				}
+				pg = phys_to_page(pAddr);
+				if (page_count(pg) < 1) {
+					pr_info("DSPBRIDGE: UNMAP function: "
+						"COUNT 0 FOR PA 0x%x, size = "
+						"0x%x\n", pAddr, ulNumBytes);
+					bad_page_dump(pAddr, pg);
+				}
+				ClearPageMlocked(pg);
+				SetPageDirty(pg);
+				page_cache_release(pg);
+				pAddr += HW_PAGE_SIZE_4KB;
+			}
+			if (HW_MMU_PteClear(pteAddrL2, vaCurr, pteSize)
+							 == RET_FAIL) {
+				status = DSP_EFAIL;
+				goto EXIT_LOOP;
+			}
+
+			status = DSP_SOK;
+			remBytesL2 -= pteSize;
+			vaCurr += pteSize;
+			pteAddrL2 += (pteSize >> 12) * sizeof(u32);
+		}
+		SYNC_EnterCS(pt->hCSObj);
+		if (remBytesL2 == 0) {
+			pt->pgInfo[L2PageNum].numEntries -= pteCount;
+			if (pt->pgInfo[L2PageNum].numEntries == 0) {
+				/*
+				 * Clear the L1 PTE pointing to the L2 PT
+				 */
+				if (HW_MMU_PteClear(L1BaseVa, vaCurrOrig,
+					    HW_MMU_COARSE_PAGE_SIZE) == RET_OK)
 					status = DSP_SOK;
-					remBytes -= pteSize;
-					vaCurr += pteSize;
-				} else {
+				else {
 					status = DSP_EFAIL;
+					SYNC_LeaveCS(pt->hCSObj);
 					goto EXIT_LOOP;
 				}
+			}
+			remBytes -= pteCount * PG_SIZE_4K;
+		} else
+			status = DSP_EFAIL;
+		DBG_Trace(DBG_LEVEL1, "WMD_BRD_MemUnMap L2PageNum %x, "
+			  "numEntries %x, pteCount %x, status: 0x%x\n",
+			  L2PageNum, pt->pgInfo[L2PageNum].numEntries,
+			  pteCount, status);
+		SYNC_LeaveCS(pt->hCSObj);
+		continue;
+skip_coarse_page:
+		/* vaCurr aligned to pteSize? */
+		/* pteSize = 1 MB or 16 MB */
+		if (pteSize == 0 || remBytes < pteSize ||
+						 vaCurr & (pteSize - 1)) {
+			status = DSP_EFAIL;
+			break;
+		}
+
+		if (pteSize == HW_PAGE_SIZE_1MB)
+			numof4KPages = 256;
+		else
+			numof4KPages = 4096;
+		temp = 0;
+		/* Collect Physical addresses from VA */
+		pAddr = (pteVal & ~(pteSize - 1));
+		while (temp++ < numof4KPages) {
+			if (pfn_valid(__phys_to_pfn(pAddr))) {
+				pg = phys_to_page(pAddr);
+				if (page_count(pg) < 1) {
+					pr_info("DSPBRIDGE: UNMAP function: "
+						"COUNT 0 FOR PA 0x%x, size = "
+						"0x%x\n", pAddr, ulNumBytes);
+					bad_page_dump(pAddr, pg);
+				}
+				ClearPageMlocked(pg);
+				SetPageDirty(pg);
+				page_cache_release(pg);
+			}
+			pAddr += HW_PAGE_SIZE_4KB;
+		}
+		if (HW_MMU_PteClear(L1BaseVa, vaCurr, pteSize) == RET_OK) {
+			status = DSP_SOK;
+			remBytes -= pteSize;
+			vaCurr += pteSize;
 		} else {
 			status = DSP_EFAIL;
+			goto EXIT_LOOP;
 		}
 	}
-	 /* It is better to flush the TLB here, so that any stale old entries
-	 * get flushed */
+	/*
+	 * It is better to flush the TLB here, so that any stale old entries
+	 * get flushed
+	 */
 EXIT_LOOP:
 	flush_all(pDevContext);
 	DBG_Trace(DBG_LEVEL1, "WMD_BRD_MemUnMap vaCurr %x, pteAddrL1 %x "
@@ -1633,239 +1786,35 @@ EXIT_LOOP:
 		  "remBytesL2 %x\n", status, remBytes, remBytesL2);
 	return status;
 }
+
 /*
- * ========= TIOMAP_VirtToPhysical ==========
- * Purpose:
- * 		This function builds the array with virtual to physical
- *	    address translation
+ *  ======== user_va2pa ========
+ *  Purpose:
+ *      This function walks through the Linux page tables to convert a userland
+ *      virtual address to physical address
  */
-static DSP_STATUS TIOMAP_VirtToPhysical(struct mm_struct *mm, u32 ulMpuAddr,
-					u32 ulNumBytes,
-					u32 *numOfTableEntries,
-					u32 *physicalAddrTable)
+static u32 user_va2pa(struct mm_struct *mm, u32 address)
 {
-	u32 pAddr;
-	u32 chunkSz;
-	DSP_STATUS status = DSP_SOK;
-	volatile u32 pteVal;
-	u32 pteSize;
 	pgd_t *pgd;
 	pmd_t *pmd;
-	volatile pte_t *ptep;
-	u32 numEntries = 0;
-	u32 numof4KPages = 0;
-	u32 phyEntryCounter = 0;
-	u32 temp = 0;
-	u32 numUsrPgs;
-	struct task_struct *curr_task = current;
+	pte_t *ptep, pte;
 
-	DBG_Trace(DBG_ENTER, "TIOMAP_VirtToPhysical: START:ulMpuAddr=%x, "
-		  "ulNumBytes=%x\n", ulMpuAddr, ulNumBytes);
-	if (physicalAddrTable == NULL)
-		return DSP_EMEMORY;
-	while (ulNumBytes) {
-		DBG_Trace(DBG_LEVEL4, "TIOMAP_VirtToPhysical:Read the next PGD "
-			  "and PMD entry\n");
-		numEntries = 0;
-		/* Get the first level page table entry information */
-		/* Read the pointer to first level page table entry */
-		pgd = pgd_offset(mm, ulMpuAddr);
-		/* Read the value in the first level page table entry */
-		pteVal = *(u32 *)pgd;
-		/* Find the page size that is pointed by the first level page
-		 * table entry */
-		pteSize = HW_MMU_PteSizeL1(pteVal); /* update 16 or 1 */
-		/* If pteSize is zero, then call the get_user_pages to create
-		 * the page table entries for this buffer
-		 */
-		if (!pteSize) {
-			down_read(&mm->mmap_sem);
-			/* This call invokes handle_mmu _fault call, which
-			 *causes all pages to be created before we scan the
-			 * page tables
-			 */
-			numUsrPgs = get_user_pages(curr_task, mm, ulMpuAddr, 1,
-							true, 0, NULL, NULL);
-			up_read(&mm->mmap_sem);
-			/* Get the first level page table entry information */
-			/* Read the pointer to first level page table entry */
-			pgd = pgd_offset(mm, ulMpuAddr);
-			/* Read the value in the first level page table entry*/
-			pteVal = *(u32 *)pgd;
-			/* Find the page size that is pointed by the first level
-			 * page table entry
-			 */
-			pteSize = HW_MMU_PteSizeL1(pteVal);
-			DBG_Trace(DBG_LEVEL4, "First level  get_user_pages "
-							"called\n");
-		}
-		/* If the page size is 4K or 64K, then we have to traverse to
-		 * second level page table */
-		if (pteSize == HW_MMU_COARSE_PAGE_SIZE) {
-			DBG_Trace(DBG_LEVEL5, "Read the next PMD entry\n");
-			/* Get the second level page table information */
-			pmd = pmd_offset(pgd, ulMpuAddr);
-			ptep = pte_offset_map(pmd, ulMpuAddr);
-			do {
-				ptep = ptep+numEntries;
-				/* Read the value of second level page table
-				 * entry */
-				pteVal = *(u32 *)ptep;
-				/* Find the size of page the second level
-				 * table entry is pointing */
-				/* update 64 or 4 */
-				pteSize = HW_MMU_PteSizeL2(pteVal);
-				/* If pteSize is invalid, then call
-				 * get_user_pages to create the
-				 * page table entries
-				 */
-				if (!pteSize) {
-					numUsrPgs =
-						(ulNumBytes/HW_PAGE_SIZE_4KB);
-					down_read(&mm->mmap_sem);
-					/* This call invokes
-					 *handle_mmu _fault call, which causes
-					 *all pages to be created before we scan
-					 * the page tables */
-					if (numUsrPgs <= PAGES_II_LVL_TABLE) {
-						get_user_pages(curr_task, mm,
-						ulMpuAddr, numUsrPgs, true,  0,
-						NULL, NULL);
-						DBG_Trace(DBG_LEVEL4,
-						"get_user_pages, numUsrPgs"
-						"= %d\n", numUsrPgs);
-					} else {
-						get_user_pages(curr_task, mm,
-						ulMpuAddr, PAGES_II_LVL_TABLE,
-						true, 0, NULL, NULL);
-						DBG_Trace(DBG_LEVEL4,
-						"get_user_pages, numUsrPgs"
-						"= %d\n", PAGES_II_LVL_TABLE);
-					}
-					up_read(&mm->mmap_sem);
-					/* Read the value of second level page
-					 * table  entry */
-					pteVal = *(u32 *)ptep;
-					/* Find the size of page the second
-					 * level table entry is pointing */
-					pteSize = HW_MMU_PteSizeL2(pteVal);
-				}
-				DBG_Trace(DBG_LEVEL4, "TIOMAP_VirtToPhysical:"
-					"*pmd=%x, *pgd=%x, ptep = %x, pteVal="
-					" %x, pteSize=%x\n", *pmd,
-					*(u32 *)pgd, (u32)ptep, pteVal,
-					pteSize);
-
-				/* Extract the physical Addresses */
-				switch (pteSize) {
-				case HW_PAGE_SIZE_64KB:
-					pAddr = pteVal & MMU_LARGE_PAGE_MASK;
-					chunkSz = HW_PAGE_SIZE_64KB;
-					numEntries = 16;
-					numof4KPages = 16;
-					break;
-				case HW_PAGE_SIZE_4KB:
-					pAddr = pteVal & MMU_SMALL_PAGE_MASK;
-					chunkSz = HW_PAGE_SIZE_4KB;
-					numEntries = 1;
-					numof4KPages = 1;
-					break;
-				default:
-					DBG_Trace(DBG_LEVEL7,
-						"TIOMAP_VirtToPhysical:"
-						"Descriptor"
-						"Format Fault-II level,"
-						" PTE size = %x\n",
-						pteSize);
-					return DSP_EFAIL;
-				}
-				temp = 0;
-				while (temp++ < numof4KPages) {
-					physicalAddrTable[phyEntryCounter++] =
-									pAddr;
-					DBG_Trace(DBG_LEVEL4,
-						 "TIOMAP_VirtToPhysical:"
-						 "physicalAddrTable[%d]= %x\n",
-						 (phyEntryCounter-1), pAddr);
-					pAddr += HW_PAGE_SIZE_4KB;
-				}
-				if (DSP_SUCCEEDED(status)) {
-					/* Go to the next page */
-					ulMpuAddr += chunkSz;
-					/* Update the number of bytes that
-					 * are copied */
-					ulNumBytes -= chunkSz;
-					DBG_Trace(DBG_LEVEL4,
-						"TIOMAP_VirtToPhysical: mpuCurr"
-						" = %x, pagesize = %x, "
-						"numBytesRem=%x\n",
-						ulMpuAddr, chunkSz, ulNumBytes);
-				} else {
-					DBG_Trace(DBG_LEVEL7,
-					     " TIOMAP_VirtToPhysical:PTEupdate"
-					     "failed\n");
-				}
-			/* It is observed that the pgd value (first level page
-			 * table entry) is changed after reading the 512
-			 * entries in second level table. So, call the pgd
-			 * functions after reaching 512 entries in second
-			 * level table */
-			} while ((ulMpuAddr & 0x001ff000) && (ulNumBytes));
-		} else {
-			/* Extract the Address to update the IVA MMU table
-			 * with */
-			switch (pteSize) {
-			case HW_PAGE_SIZE_16MB:
-				pAddr = pteVal & MMU_SSECTION_ADDR_MASK;
-					chunkSz = HW_PAGE_SIZE_16MB;
-					numEntries = 16;
-					numof4KPages = 4096;
-					break;
-			case HW_PAGE_SIZE_1MB:
-				pAddr = pteVal & MMU_SECTION_ADDR_MASK;
-					chunkSz = HW_PAGE_SIZE_1MB;
-					numEntries = 1;
-					numof4KPages = 256;
-					break;
-			default:
-				DBG_Trace(DBG_LEVEL7,
-				     "TIOMAP_VirtToPhysical:Descriptor"
-				     "Format Faul-I level, PTE size = "
-				     "%x\n", pteSize);
-				return DSP_EFAIL;
+	pgd = pgd_offset(mm, address);
+	if (!(pgd_none(*pgd) || pgd_bad(*pgd))) {
+		pmd = pmd_offset(pgd, address);
+		if (!(pmd_none(*pmd) || pmd_bad(*pmd))) {
+			ptep = pte_offset_map(pmd, address);
+			if (ptep) {
+				pte = *ptep;
+				if (pte_present(pte))
+					return pte & PAGE_MASK;
 			}
-			temp = 0;
-			while (temp++ < numof4KPages) {
-					physicalAddrTable[phyEntryCounter++] =
-									 pAddr;
-					DBG_Trace(DBG_LEVEL4,
-						 "TIOMAP_VirtToPhysical:"
-						 "physicalAddrTable[%d]= %x\n",
-						 (phyEntryCounter-1), pAddr);
-					pAddr += HW_PAGE_SIZE_4KB;
-			}
-			if (DSP_SUCCEEDED(status)) {
-				/* Go to the next page */
-				ulMpuAddr += chunkSz;
-				/* Update the number of bytes that are copied */
-				ulNumBytes -= chunkSz;
-				DBG_Trace(DBG_LEVEL4,
-					 "TIOMAP_VirtToPhysical: mpuCurr = %x, "
-					 "pagesize = %x, numBytesRem=%x\n",
-					 ulMpuAddr, chunkSz, ulNumBytes);
-			} else {
-				DBG_Trace(DBG_LEVEL7,
-					 " TIOMAP_VirtToPhysical:PTEupdate"
-					 "failed\n");
-			}
-
 		}
 	}
-	*numOfTableEntries = phyEntryCounter;
-	DBG_Trace(DBG_LEVEL4, " TIOMAP_VirtToPhysical:numofTableEntries=%d\n",
-		  phyEntryCounter);
-	return status;
+
+	return 0;
 }
+
 
 /*
  *  ======== PteUpdate ========
@@ -1928,7 +1877,7 @@ static DSP_STATUS PteSet(struct PgTableAttrs *pt, u32 pa, u32 va,
 	u32 pteSize;
 	u32 pgTblVa;      /* Base address of the PT that will be updated */
 	u32 L1BaseVa;
-	 /* Compiler warns that the next three variables might be used
+	/* Compiler warns that the next three variables might be used
 	 * uninitialized in this function. Doesn't seem so. Working around,
 	 * anyways.  */
 	u32 L2BaseVa = 0;
@@ -1987,7 +1936,6 @@ static DSP_STATUS PteSet(struct PgTableAttrs *pt, u32 pa, u32 va,
 				pt->pgInfo[L2PageNum].numEntries += 16;
 			else
 				pt->pgInfo[L2PageNum].numEntries++;
-
 			DBG_Trace(DBG_LEVEL1, "L2 BaseVa %x, BasePa %x, "
 				 "PageNum %x numEntries %x\n", L2BaseVa,
 				 L2BasePa, L2PageNum,
@@ -2008,14 +1956,11 @@ static DSP_STATUS PteSet(struct PgTableAttrs *pt, u32 pa, u32 va,
 }
 
 /* Memory map kernel VA -- memory allocated with vmalloc */
-static DSP_STATUS MemMapVmalloc(struct WMD_DEV_CONTEXT *hDevContext,
-				u32 ulMpuAddr, u32 ulVirtAddr,
-				u32 ulNumBytes, u32 ulMapAttr)
+static DSP_STATUS MemMapVmalloc(struct WMD_DEV_CONTEXT *pDevContext,
+				u32 ulMpuAddr, u32 ulVirtAddr, u32 ulNumBytes,
+				struct HW_MMUMapAttrs_t *hwAttrs)
 {
-	u32 attrs = ulMapAttr;
 	DSP_STATUS status = DSP_SOK;
-	struct WMD_DEV_CONTEXT *pDevContext = hDevContext;
-	struct HW_MMUMapAttrs_t hwAttrs;
 	struct page *pPage[1];
 	u32 i;
 	u32 paCurr;
@@ -2023,59 +1968,35 @@ static DSP_STATUS MemMapVmalloc(struct WMD_DEV_CONTEXT *hDevContext,
 	u32 vaCurr;
 	u32 sizeCurr;
 	u32 numPages;
+	u32 pa;
+	u32 numOf4KPages;
+	u32 temp = 0;
 
 	DBG_Trace(DBG_ENTER, "> MemMapVmalloc hDevContext %x, pa %x, va %x, "
-		  "size %x, ulMapAttr %x\n", hDevContext, ulMpuAddr,
-		  ulVirtAddr, ulNumBytes, ulMapAttr);
-	/* Take mapping properties */
-	if (attrs & DSP_MAPBIGENDIAN)
-		hwAttrs.endianism = HW_BIG_ENDIAN;
-	else
-		hwAttrs.endianism = HW_LITTLE_ENDIAN;
+		  "size %x\n", pDevContext, ulMpuAddr, ulVirtAddr, ulNumBytes);
 
-	hwAttrs.mixedSize = (enum HW_MMUMixedSize_t)
-			     ((attrs & DSP_MAPMIXEDELEMSIZE) >> 2);
-	/* Ignore elementSize if mixedSize is enabled */
-	if (hwAttrs.mixedSize == 0) {
-		if (attrs & DSP_MAPELEMSIZE8) {
-			/* Size is 8 bit */
-			hwAttrs.elementSize = HW_ELEM_SIZE_8BIT;
-		} else if (attrs & DSP_MAPELEMSIZE16) {
-			/* Size is 16 bit */
-			hwAttrs.elementSize = HW_ELEM_SIZE_16BIT;
-		} else if (attrs & DSP_MAPELEMSIZE32) {
-			/* Size is 32 bit */
-			hwAttrs.elementSize = HW_ELEM_SIZE_32BIT;
-		} else if (attrs & DSP_MAPELEMSIZE64) {
-			/* Size is 64 bit */
-			hwAttrs.elementSize = HW_ELEM_SIZE_64BIT;
-		} else {
-			/* Mixedsize isn't enabled, so size can't be zero
-			 * here */
-			DBG_Trace(DBG_LEVEL7, "WMD_BRD_MemMap: MMU element "
-				 "size is zero\n");
-			return DSP_EINVALIDARG;
-		}
-	}
-	 /* Do Kernel va to pa translation.
+	/*
+	 * Do Kernel va to pa translation.
 	 * Combine physically contiguous regions to reduce TLBs.
-	 * Pass the translated pa to PteUpdate.  */
+	 * Pass the translated pa to PteUpdate.
+	 */
 	numPages = ulNumBytes / PAGE_SIZE; /* PAGE_SIZE = OS page size */
-	if (DSP_FAILED(status))
-		goto func_cont;
-
 	i = 0;
 	vaCurr = ulMpuAddr;
 	pPage[0] = vmalloc_to_page((void *)vaCurr);
 	paNext = page_to_phys(pPage[0]);
 	while (DSP_SUCCEEDED(status) && (i < numPages)) {
-		/* Reuse paNext from the previous iteraion to avoid
-		 * an extra va2pa call */
+		/*
+		 * Reuse paNext from the previous iteraion to avoid
+		 * an extra va2pa call
+		 */
 		paCurr = paNext;
 		sizeCurr = PAGE_SIZE;
-		/* If the next page is physically contiguous,
+		/*
+		 * If the next page is physically contiguous,
 		 * map it with the current one by increasing
-		 * the size of the region to be mapped */
+		 * the size of the region to be mapped
+		 */
 		while (++i < numPages) {
 			pPage[0] = vmalloc_to_page((void *)(vaCurr + sizeCurr));
 			paNext = page_to_phys(pPage[0]);
@@ -2091,11 +2012,16 @@ static DSP_STATUS MemMapVmalloc(struct WMD_DEV_CONTEXT *hDevContext,
 			status = DSP_EMEMORY;
 			break;
 		}
+		pa = paCurr;
+		numOf4KPages = sizeCurr / HW_PAGE_SIZE_4KB;
+		while (temp++ < numOf4KPages) {
+			get_page(phys_to_page(pa));
+			pa += HW_PAGE_SIZE_4KB;
+		}
 		status = PteUpdate(pDevContext, paCurr, ulVirtAddr +
-				  (vaCurr - ulMpuAddr), sizeCurr, &hwAttrs);
+				  (vaCurr - ulMpuAddr), sizeCurr, hwAttrs);
 		vaCurr += sizeCurr;
 	}
-func_cont:
 	/* Don't propogate Linux or HW status to upper layers */
 	if (DSP_SUCCEEDED(status)) {
 		status = DSP_SOK;
@@ -2105,95 +2031,15 @@ func_cont:
 		DBG_Trace(DBG_LEVEL7, "< WMD_BRD_MemMap status %x\n", status);
 		status = DSP_EFAIL;
 	}
-	 /* In any case, flush the TLB
+	/*
+	 * In any case, flush the TLB
 	 * This is called from here instead from PteUpdate to avoid unnecessary
 	 * repetition while mapping non-contiguous physical regions of a virtual
-	 * region */
+	 * region
+	 */
 	flush_all(pDevContext);
-	DBG_Trace(DBG_LEVEL7, "< WMD_BRD_MemMap  at end status %x\n", status);
+	DBG_Trace(DBG_LEVEL7, "< WMD_BRD_MemMap at end status %x\n", status);
 	return status;
-}
-
-static DSP_STATUS run_IdleBoot(u32 prm_base, u32 cm_base,
-			       u32 sysctrl_base)
-{
-	u32 temp;
-	DSP_STATUS status = DSP_SOK;
-	DSP_STATUS clk_status = DSP_SOK;
-	enum HW_PwrState_t    pwrState;
-
-	/* Read PM_PWSTST_IVA2 */
-	HW_PWRST_IVA2RegGet(prm_base, &temp);
-	 if ((temp & 0x03) != 0x03 || (temp & 0x03) != 0x02) {
-		/* IVA2 is not in ON state */
-		/* Set PM_PWSTCTRL_IVA2  to ON */
-		HW_PWR_IVA2PowerStateSet(prm_base, HW_PWR_DOMAIN_DSP,
-					  HW_PWR_STATE_ON);
-		/* Set the SW supervised state transition */
-		HW_PWR_CLKCTRL_IVA2RegSet(cm_base, HW_SW_SUP_WAKEUP);
-		/* Wait until the state has moved to ON */
-		HW_PWR_IVA2StateGet(prm_base, HW_PWR_DOMAIN_DSP, &pwrState);
-	}
-	clk_status = CLK_Disable(SERVICESCLK_iva2_ck);
-	if (DSP_FAILED(clk_status)) {
-		DBG_Trace(DBG_LEVEL6, "CLK_Disbale failed for clk = 0x%x \n",
-			  SERVICESCLK_iva2_ck);
-	}
-	udelay(10);
-	/* Assert IVA2-RST1 and IVA2-RST2  */
-	*((REG_UWORD32 *)((u32)(prm_base) + 0x50)) = (u32)0x07;
-	udelay(30);
-	/* set the SYSC for Idle Boot */
-	*((REG_UWORD32 *)((u32)(sysctrl_base) + 0x404)) = (u32)0x01;
-               temp = (u32) *((REG_UWORD32 *)
-                               ((u32) (cm_base) + 0x34));
-               temp = (temp & 0xFFFFFFFE) | 0x1;
-               *((REG_UWORD32 *) ((u32) (cm_base) + 0x34)) =
-                       (u32) temp;
-               temp = (u32) *((REG_UWORD32 *)
-                       ((u32) (cm_base) + 0x4));
-               temp =  (temp & 0xFFFFFC8) | 0x37;
-               *((REG_UWORD32 *) ((u32) (cm_base) + 0x4)) =
-                       (u32) temp;
-	clk_status = CLK_Enable(SERVICESCLK_iva2_ck);
-	if (DSP_FAILED(clk_status)) {
-		DBG_Trace(DBG_LEVEL6, "CLK_Enable failed for clk = 0x%x \n",
-			  SERVICESCLK_iva2_ck);
-	}
-	udelay(20);
-	GetHWRegs(prm_base, cm_base);
-	/* Release Reset1 and Reset2 */
-	*((REG_UWORD32 *)((u32)(prm_base) + 0x50)) = (u32)0x05;
-	udelay(20);
-	*((REG_UWORD32 *)((u32)(prm_base) + 0x50)) = (u32)0x04;
-	udelay(30);
-	return status;
-}
-
-
-void GetHWRegs(u32 prm_base, u32 cm_base)
-{
-	u32 temp;
-       temp = (u32)*((REG_UWORD32 *)((u32)(cm_base) + 0x00));
-	   DBG_Trace(DBG_LEVEL6, "CM_FCLKEN_IVA2 = 0x%x \n", temp);
-       temp = (u32)*((REG_UWORD32 *)((u32)(cm_base) + 0x10));
-	   DBG_Trace(DBG_LEVEL6, "CM_ICLKEN1_IVA2 = 0x%x \n", temp);
-       temp = (u32)*((REG_UWORD32 *)((u32)(cm_base) + 0x20));
-	   DBG_Trace(DBG_LEVEL6, "CM_IDLEST_IVA2 = 0x%x \n", temp);
-       temp = (u32)*((REG_UWORD32 *)((u32)(cm_base) + 0x48));
-	   DBG_Trace(DBG_LEVEL6, "CM_CLKSTCTRL_IVA2 = 0x%x \n", temp);
-       temp = (u32)*((REG_UWORD32 *)((u32)(cm_base) + 0x4c));
-	   DBG_Trace(DBG_LEVEL6, "CM_CLKSTST_IVA2 = 0x%x \n", temp);
-       temp = (u32)*((REG_UWORD32 *)((u32)(prm_base) + 0x50));
-	   DBG_Trace(DBG_LEVEL6, "RM_RSTCTRL_IVA2 = 0x%x \n", temp);
-       temp = (u32)*((REG_UWORD32 *)((u32)(prm_base) + 0x58));
-	   DBG_Trace(DBG_LEVEL6, "RM_RSTST_IVA2 = 0x%x \n", temp);
-       temp = (u32)*((REG_UWORD32 *)((u32)(prm_base) + 0xE0));
-	   DBG_Trace(DBG_LEVEL6, "PM_PWSTCTRL_IVA2 = 0x%x \n", temp);
-       temp = (u32)*((REG_UWORD32 *)((u32)(prm_base) + 0xE4));
-	   DBG_Trace(DBG_LEVEL6, "PM_PWSTST_IVA2 = 0x%x \n", temp);
-       temp = (u32)*((REG_UWORD32 *)((u32)(cm_base) + 0xA10));
-	   DBG_Trace(DBG_LEVEL6, "CM_ICLKEN1_CORE = 0x%x \n", temp);
 }
 
 /*

@@ -51,47 +51,48 @@ struct HW_MMUMapAttrs_t {
 	enum HW_Endianism_t     endianism;
 	enum HW_ElementSize_t   elementSize;
 	enum HW_MMUMixedSize_t  mixedSize;
+	bool donotlockmpupage;
 } ;
 
-extern HW_STATUS HW_MMU_Enable(const u32 baseAddress);
+extern HW_STATUS HW_MMU_Enable(const void __iomem *baseAddress);
 
-extern HW_STATUS HW_MMU_Disable(const u32 baseAddress);
+extern HW_STATUS HW_MMU_Disable(const void __iomem *baseAddress);
 
-extern HW_STATUS HW_MMU_NumLockedSet(const u32 baseAddress,
+extern HW_STATUS HW_MMU_NumLockedSet(const void __iomem *baseAddress,
 					u32 numLockedEntries);
 
-extern HW_STATUS HW_MMU_VictimNumSet(const u32 baseAddress,
+extern HW_STATUS HW_MMU_VictimNumSet(const void __iomem *baseAddress,
 					u32 victimEntryNum);
 
 /* For MMU faults */
-extern HW_STATUS HW_MMU_EventAck(const u32 baseAddress,
+extern HW_STATUS HW_MMU_EventAck(const void __iomem *baseAddress,
 				    u32 irqMask);
 
-extern HW_STATUS HW_MMU_EventDisable(const u32 baseAddress,
+extern HW_STATUS HW_MMU_EventDisable(const void __iomem *baseAddress,
 					u32 irqMask);
 
-extern HW_STATUS HW_MMU_EventEnable(const u32 baseAddress,
+extern HW_STATUS HW_MMU_EventEnable(const void __iomem *baseAddress,
 				       u32 irqMask);
 
-extern HW_STATUS HW_MMU_EventStatus(const u32 baseAddress,
+extern HW_STATUS HW_MMU_EventStatus(const void __iomem *baseAddress,
 				       u32 *irqMask);
 
-extern HW_STATUS HW_MMU_FaultAddrRead(const u32 baseAddress,
+extern HW_STATUS HW_MMU_FaultAddrRead(const void __iomem *baseAddress,
 					 u32 *addr);
 
 /* Set the TT base address */
-extern HW_STATUS HW_MMU_TTBSet(const u32 baseAddress,
+extern HW_STATUS HW_MMU_TTBSet(const void __iomem *baseAddress,
 				  u32 TTBPhysAddr);
 
-extern HW_STATUS HW_MMU_TWLEnable(const u32 baseAddress);
+extern HW_STATUS HW_MMU_TWLEnable(const void __iomem *baseAddress);
 
-extern HW_STATUS HW_MMU_TWLDisable(const u32 baseAddress);
+extern HW_STATUS HW_MMU_TWLDisable(const void __iomem *baseAddress);
 
-extern HW_STATUS HW_MMU_TLBFlush(const u32 baseAddress,
+extern HW_STATUS HW_MMU_TLBFlush(const void __iomem *baseAddress,
 				    u32 virtualAddr,
 				    u32 pageSize);
 
-extern HW_STATUS HW_MMU_TLBAdd(const u32     baseAddress,
+extern HW_STATUS HW_MMU_TLBAdd(const void __iomem *baseAddress,
 				  u32	   physicalAddr,
 				  u32	   virtualAddr,
 				  u32	   pageSize,

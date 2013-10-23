@@ -33,7 +33,7 @@
 
 #define ANY_SSI_CONTROLLER	-1
 #define ANY_CHANNEL		-1
-#define CHANNEL(channel)	(1 << channel)
+#define CHANNEL(channel)	(1 << (channel))
 
 enum {
 	SSI_EVENT_BREAK_DETECTED = 0,
@@ -52,6 +52,8 @@ enum {
 	SSI_IOCTL_FLUSH_RX,
 	SSI_IOCTL_FLUSH_TX,
 	SSI_IOCTL_CAWAKE,
+	SSI_IOCTL_TX_CH_FULL,
+	SSI_IOCTL_CH_DATAACCEPT,
 };
 
 /* Forward references */

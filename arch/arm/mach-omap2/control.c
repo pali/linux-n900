@@ -94,6 +94,7 @@ void *omap3_secure_ram_storage;
  * during the restore path.
  */
 u32 omap3_arm_context[128];
+u32 omap3_aux_ctrl[2] = { 0x1, 0x0 };
 
 struct omap3_control_regs {
 	u32 sysconfig;
@@ -235,7 +236,7 @@ void omap3_save_scratchpad_contents(void)
 	prcm_block_contents.cm_clksel_wkup =
 			cm_read_mod_reg(WKUP_MOD, CM_CLKSEL);
 	prcm_block_contents.cm_clken_pll =
-			cm_read_mod_reg(PLL_MOD, OMAP3430_CM_CLKEN_PLL);
+			cm_read_mod_reg(PLL_MOD, CM_CLKEN);
 	prcm_block_contents.cm_autoidle_pll =
 			cm_read_mod_reg(PLL_MOD, OMAP3430_CM_AUTOIDLE_PLL);
 	prcm_block_contents.cm_clksel1_pll =
@@ -265,7 +266,10 @@ void omap3_save_scratchpad_contents(void)
 			(sdrc_read_reg(SDRC_ERR_TYPE) & 0xFFFF);
 	sdrc_block_contents.dll_a_ctrl = sdrc_read_reg(SDRC_DLLA_CTRL);
 	sdrc_block_contents.dll_b_ctrl = 0x0;
-	sdrc_block_contents.power = sdrc_read_reg(SDRC_POWER);
+	sdrc_block_contents.power = (sdrc_read_reg(SDRC_POWER) &
+			~(SDRC_POWER_AUTOCOUNT_MASK|SDRC_POWER_CLKCTRL_MASK)) |
+			(1 << SDRC_POWER_AUTOCOUNT_SHIFT) |
+			SDRC_SELF_REFRESH_ON_AUTOCOUNT;
 	sdrc_block_contents.cs_0 = 0x0;
 	sdrc_block_contents.mcfg_0 = sdrc_read_reg(SDRC_MCFG_0);
 	sdrc_block_contents.mr_0 = (sdrc_read_reg(SDRC_MR_0) & 0xFFFF);

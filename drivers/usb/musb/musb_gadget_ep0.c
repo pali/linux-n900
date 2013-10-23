@@ -55,7 +55,7 @@
  * the gadget driver, or adjusting endpoint halt status.
  */
 
-static char *decode_ep0stage(u8 stage)
+static inline char *decode_ep0stage(u8 stage)
 {
 	switch (stage) {
 	case MUSB_EP0_STAGE_SETUP:	return "idle";
@@ -404,7 +404,7 @@ stall:
 					csr |= MUSB_RXCSR_P_SENDSTALL
 						| MUSB_RXCSR_FLUSHFIFO
 						| MUSB_RXCSR_CLRDATATOG
-						| MUSB_TXCSR_P_WZC_BITS;
+						| MUSB_RXCSR_P_WZC_BITS;
 					musb_writew(regs, MUSB_RXCSR,
 							csr);
 				}

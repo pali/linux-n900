@@ -79,23 +79,29 @@ static struct dma_channel *dma_channel_allocate(struct dma_controller *c,
 	struct dma_channel *channel = NULL;
 	u8 bit;
 
-	for (bit = 0; bit < MUSB_HSDMA_CHANNELS; bit++) {
-		if (!(controller->used_channels & (1 << bit))) {
-			controller->used_channels |= (1 << bit);
-			musb_channel = &(controller->channel[bit]);
-			musb_channel->controller = controller;
-			musb_channel->idx = bit;
-			musb_channel->epnum = hw_ep->epnum;
-			musb_channel->transmit = transmit;
-			channel = &(musb_channel->channel);
-			channel->private_data = musb_channel;
-			channel->status = MUSB_DMA_STATUS_FREE;
-			channel->max_len = 0x7fffffff;
-			/* always use mode1 */
-			channel->desired_mode = true;
-			channel->actual_len = 0;
-			break;
-		}
+	/* musb on omap3 has a problem with using dma channels simultaneously
+	 * so we will only allocate 1 dma channel at a time to avoid problems
+	 * related to that bug
+	 */
+	for (bit = 0; bit < 1; bit++) {
+		if (controller->used_channels & (1 << bit))
+			continue;
+
+		controller->used_channels |= (1 << bit);
+		musb_channel = &(controller->channel[bit]);
+		musb_channel->controller = controller;
+		musb_channel->idx = bit;
+		musb_channel->epnum = hw_ep->epnum;
+		musb_channel->transmit = transmit;
+		channel = &(musb_channel->channel);
+		channel->private_data = musb_channel;
+		channel->status = MUSB_DMA_STATUS_FREE;
+		channel->max_len = 0x7fffffff;
+		/* always use mode1 */
+		channel->desired_mode = true;
+		channel->actual_len = 0;
+
+		break;
 	}
 
 	return channel;
@@ -128,6 +134,9 @@ static void configure_channel(struct dma_channel *channel,
 	DBG(4, "%p, pkt_sz %d, addr 0x%x, len %d, mode %d\n",
 			channel, packet_sz, dma_addr, len, mode);
 
+	if (mode)
+		csr |= MUSB_HSDMA_MODE1;
+
 	if (packet_sz >= 64)
 		csr |= MUSB_HSDMA_BURSTMODE_INCR16;
 	else if (packet_sz >= 32)
@@ -136,7 +145,6 @@ static void configure_channel(struct dma_channel *channel,
 		csr |= MUSB_HSDMA_BURSTMODE_INCR4;
 
 	csr |= (musb_channel->epnum << MUSB_HSDMA_ENDPOINT_SHIFT)
-		| MUSB_HSDMA_MODE1
 		| MUSB_HSDMA_ENABLE
 		| MUSB_HSDMA_IRQENABLE
 		| (musb_channel->transmit
@@ -194,8 +202,11 @@ static int dma_channel_abort(struct dma_channel *channel)
 				MUSB_EP_OFFSET(musb_channel->epnum,
 						MUSB_TXCSR));
 			csr &= ~(MUSB_TXCSR_AUTOSET |
-				 MUSB_TXCSR_DMAENAB |
-				 MUSB_TXCSR_DMAMODE);
+				 MUSB_TXCSR_DMAENAB);
+			musb_writew(mbase,
+				MUSB_EP_OFFSET(musb_channel->epnum, MUSB_TXCSR),
+				csr);
+			csr &= ~MUSB_TXCSR_DMAMODE;
 			musb_writew(mbase,
 				MUSB_EP_OFFSET(musb_channel->epnum, MUSB_TXCSR),
 				csr);
@@ -204,8 +215,11 @@ static int dma_channel_abort(struct dma_channel *channel)
 				MUSB_EP_OFFSET(musb_channel->epnum,
 						MUSB_RXCSR));
 			csr &= ~(MUSB_RXCSR_AUTOCLEAR |
-				 MUSB_RXCSR_DMAENAB |
-				 MUSB_RXCSR_DMAMODE);
+				 MUSB_RXCSR_DMAENAB);
+			musb_writew(mbase,
+				MUSB_EP_OFFSET(musb_channel->epnum, MUSB_RXCSR),
+				csr);
+			csr &= ~MUSB_RXCSR_DMAMODE;
 			musb_writew(mbase,
 				MUSB_EP_OFFSET(musb_channel->epnum, MUSB_RXCSR),
 				csr);
@@ -228,7 +242,7 @@ static irqreturn_t dma_controller_irq(int irq, void *private_data)
 {
 	struct musb_dma_controller *controller = private_data;
 	struct musb *musb = controller->private_data;
-	struct musb_dma_channel *musb_channel;
+	struct musb_dma_channel *mchannel;
 	struct dma_channel *channel;
 
 	void __iomem *mbase = controller->base;
@@ -250,59 +264,55 @@ static irqreturn_t dma_controller_irq(int irq, void *private_data)
 		goto done;
 
 	for (bchannel = 0; bchannel < MUSB_HSDMA_CHANNELS; bchannel++) {
-		if (int_hsdma & (1 << bchannel)) {
-			musb_channel = (struct musb_dma_channel *)
-					&(controller->channel[bchannel]);
-			channel = &musb_channel->channel;
+		u8 devctl;
 
-			csr = musb_readw(mbase,
-					MUSB_HSDMA_CHANNEL_OFFSET(bchannel,
-							MUSB_HSDMA_CONTROL));
+		if (!(int_hsdma & (1 << bchannel)))
+			continue;
 
-			if (csr & MUSB_HSDMA_BUSERROR) {
-				musb_channel->channel.status =
-					MUSB_DMA_STATUS_BUS_ABORT;
-			} else {
-				u8 devctl;
+		mchannel = &(controller->channel[bchannel]);
+		channel = &mchannel->channel;
 
-				addr = musb_read_hsdma_addr(mbase,
-						bchannel);
-				channel->actual_len = addr
-					- musb_channel->start_addr;
+		csr = musb_readw(mbase, MUSB_HSDMA_CHANNEL_OFFSET(bchannel,
+					MUSB_HSDMA_CONTROL));
 
-				DBG(2, "ch %p, 0x%x -> 0x%x (%d / %d) %s\n",
-					channel, musb_channel->start_addr,
-					addr, channel->actual_len,
-					musb_channel->len,
-					(channel->actual_len
-						< musb_channel->len) ?
-					"=> reconfig 0" : "=> complete");
+		if (csr & MUSB_HSDMA_BUSERROR) {
+			mchannel->channel.status = MUSB_DMA_STATUS_BUS_ABORT;
+			goto done;
+		}
 
-				devctl = musb_readb(mbase, MUSB_DEVCTL);
+		addr = musb_read_hsdma_addr(mbase, bchannel);
+		channel->actual_len = addr - mchannel->start_addr;
 
-				channel->status = MUSB_DMA_STATUS_FREE;
+		DBG(2, "ch %p, 0x%x -> 0x%x (%d / %d) %s\n", channel,
+				mchannel->start_addr, addr,
+				channel->actual_len, mchannel->len,
+				(channel->actual_len < mchannel->len) ?
+				"=> reconfig 0" : "=> complete");
 
-				/* completed */
-				if ((devctl & MUSB_DEVCTL_HM)
-					&& (musb_channel->transmit)
-					&& ((channel->desired_mode == 0)
-					    || (channel->actual_len &
-					    (musb_channel->max_packet_sz - 1)))
-					 ) {
-					/* Send out the packet */
-					musb_ep_select(mbase,
-						musb_channel->epnum);
-					musb_writew(mbase, MUSB_EP_OFFSET(
-							musb_channel->epnum,
-							MUSB_TXCSR),
-						MUSB_TXCSR_TXPKTRDY);
-				} else {
-					musb_dma_completion(
-						musb,
-						musb_channel->epnum,
-						musb_channel->transmit);
-				}
-			}
+		devctl = musb_readb(mbase, MUSB_DEVCTL);
+		channel->status = MUSB_DMA_STATUS_FREE;
+
+		/* completed */
+		if ((devctl & MUSB_DEVCTL_HM) && (mchannel->transmit)
+				&& ((channel->desired_mode == 0)
+				|| (channel->actual_len &
+				(mchannel->max_packet_sz - 1)))) {
+			u8 txcsr;
+
+			musb_ep_select(mbase, mchannel->epnum);
+			txcsr = musb_readw(mbase, MUSB_EP_OFFSET(
+						mchannel->epnum, MUSB_TXCSR));
+			txcsr &= ~(MUSB_TXCSR_DMAENAB | MUSB_TXCSR_AUTOSET);
+			musb_writew(mbase, MUSB_EP_OFFSET(mchannel->epnum,
+						MUSB_TXCSR), txcsr);
+			txcsr &= ~MUSB_TXCSR_DMAMODE;
+			txcsr |= MUSB_TXCSR_TXPKTRDY;
+			/* Send out the packet */
+			musb_writew(mbase, MUSB_EP_OFFSET(mchannel->epnum,
+						MUSB_TXCSR), txcsr);
+		} else {
+			musb_dma_completion(musb, mchannel->epnum,
+					mchannel->transmit);
 		}
 	}
 

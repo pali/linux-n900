@@ -46,10 +46,19 @@
 /* MODULE ID3 */
 #define VIBRA_CFG		0x60
 
+#define MAX_SEQ_LEN		5
+
+struct pulse_info {
+	unsigned int		dir:1;
+	unsigned int		pwm:31;
+	unsigned long		duration;
+};
+
 struct vibra_info {
 	struct mutex		lock;
 	struct device		*dev;
 
+	struct workqueue_struct *workqueue;
 	struct delayed_work	work;
 	struct work_struct	led_work;
 
@@ -58,6 +67,10 @@ struct vibra_info {
 	unsigned long		duration;
 	int			enabled;
 	int			speed;
+
+	struct pulse_info	seq[MAX_SEQ_LEN];
+	unsigned int		iseq;
+	unsigned int		nseq;
 };
 
 /* Powers H-Bridge and enables audio clk */
@@ -111,40 +124,74 @@ static void vibra_disable(struct vibra_info *info)
 	info->enabled = 0;
 }
 
-static void vibra_pwm(struct vibra_info *info, int dir, int pwm)
+static int vibra_seq(struct vibra_info *info, const struct pulse_info *seq,
+		unsigned int n)
 {
-	u8 reg;
+	if (n == 0 || n > ARRAY_SIZE(info->seq))
+		return -EINVAL;
+
+	/* stop previous sequence, if any */
+	cancel_delayed_work_sync(&info->work);
 
 	mutex_lock(&info->lock);
-	if (pwm == 0) {
+
+	info->iseq = 0;
+	info->nseq = n;
+	memcpy(info->seq, seq, n * sizeof(*seq));
+
+	queue_delayed_work(info->workqueue, &info->work, 0);
+
+	mutex_unlock(&info->lock);
+
+	return 0;
+}
+
+static void vibra_pwm(struct vibra_info *info, int dir, int pwm)
+{
+	struct pulse_info seq[2] = {
+		{ .dir = dir, .pwm = pwm, .duration = info->duration },
+	};
+
+	vibra_seq(info, seq, ARRAY_SIZE(seq));
+}
+
+static void vibra_next_pulse(struct vibra_info *info)
+{
+	unsigned int pwm;
+	unsigned int dir;
+	unsigned long duration;
+
+	mutex_lock(&info->lock);
+
+	pwm = info->seq[info->iseq].pwm;
+	dir = info->seq[info->iseq].dir;
+	duration = info->seq[info->iseq].duration;
+
+	if (pwm) {
+		u8 reg;
+
+		if (!info->enabled)
+			vibra_enable(info);
+
+		/* set vibra rotation direction */
+		twl4030_i2c_read_u8(TWL4030_MODULE_AUDIO_VOICE,
+				&reg, VIBRA_CTL);
+		reg = (dir) ? (reg | VIBRA_DIR) : (reg & ~VIBRA_DIR);
+		twl4030_i2c_write_u8(TWL4030_MODULE_AUDIO_VOICE,
+				reg, VIBRA_CTL);
+
+		/* set PWM, 1 = max, 255 = min */
+		twl4030_i2c_write_u8(TWL4030_MODULE_AUDIO_VOICE,
+				256 - pwm, VIBRA_SET);
+	} else {
 		vibra_disable(info);
-		mutex_unlock(&info->lock);
-		return;
 	}
-	if (!info->enabled)
-		vibra_enable(info);
 
-	/* set vibra rotation direction */
-	twl4030_i2c_read_u8(TWL4030_MODULE_AUDIO_VOICE,
-			    &reg, VIBRA_CTL);
-	reg = (dir) ? (reg | VIBRA_DIR) : (reg & ~VIBRA_DIR);
-	twl4030_i2c_write_u8(TWL4030_MODULE_AUDIO_VOICE,
-			     reg, VIBRA_CTL);
+	info->iseq++;
+	if (info->iseq < info->nseq && duration)
+		queue_delayed_work(info->workqueue, &info->work,
+				msecs_to_jiffies(duration));
 
-	/* set PWM, 1 = max, 255 = min */
-	twl4030_i2c_write_u8(TWL4030_MODULE_AUDIO_VOICE,
-			     256 - pwm, VIBRA_SET);
-
-	/* If previous work is scheduled cancel it */
-	if (delayed_work_pending(&info->work))
-		cancel_delayed_work(&info->work);
-
-	/* if duration is zero it means continous action.  */
-	/* Otherwise schedule vibra_disable to the future  */
-	if (info->duration) {
-		schedule_delayed_work(&info->work,
-				      msecs_to_jiffies(info->duration));
-	}
 	mutex_unlock(&info->lock);
 }
 
@@ -152,7 +199,8 @@ static void vibra_work(struct work_struct *work)
 {
 	struct vibra_info *info = container_of(work,
 			struct vibra_info, work.work);
-	vibra_disable(info);
+
+	vibra_next_pulse(info);
 }
 
 static void vibra_led_work(struct work_struct *work)
@@ -176,6 +224,58 @@ static void vibra_led_set(struct led_classdev *led,
 /*******************************************************************************
  * SYSFS                                                                       *
  ******************************************************************************/
+
+static ssize_t vibra_set_seq(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t len)
+{
+	const char *p;
+	unsigned int i;
+	struct vibra_info *info = dev_get_drvdata(dev);
+	struct pulse_info seq[ARRAY_SIZE(info->seq)];
+
+	for (p = buf, i = 0;
+	     *p != '\0' && *p != '\n' && i < ARRAY_SIZE(seq); i++) {
+		long val;
+		char *endp;
+
+		/* speed and direction */
+		val = simple_strtol(p, &endp, 0);
+		if (p == endp || *endp != ' ')
+			return -EINVAL;
+		for (p = endp; *p == ' '; p++)
+			;
+
+		seq[i].dir = val < 0 ? 1 : 0;
+		seq[i].pwm = min(abs(val), 255);
+
+		/* duration */
+		val = simple_strtol(p, &endp, 0);
+		if (p == endp ||
+			(*endp != ' ' && *endp != '\0' && *endp != '\n'))
+			return -EINVAL;
+		for (p = endp; *p == ' '; p++)
+			;
+
+		if (val < 0)
+			return -EINVAL;
+
+		seq[i].duration = val;
+	}
+
+	/* no room for end of sequence */
+	if (i == ARRAY_SIZE(seq))
+		return -EINVAL;
+
+	/* end of sequence */
+	seq[i].pwm = 0;
+	seq[i].dir = 0;
+	seq[i++].duration = 0;
+
+	vibra_seq(info, seq, i);
+
+	return len;
+}
+
 static ssize_t vibra_set_pwm(struct device *dev, struct device_attribute *attr,
 			     const char *buf, size_t len)
 {
@@ -243,6 +343,8 @@ static struct device_attribute vibra_attrs[] = {
 	       vibra_show_pwm, vibra_set_pwm),
 	__ATTR(duration, S_IRUGO | S_IWUSR,
 	       vibra_show_duration, vibra_set_duration),
+	__ATTR(pulse, S_IWUSR,
+	       NULL, vibra_set_seq),
 };
 
 static int vibra_register_sysfs(struct vibra_info *info)
@@ -281,8 +383,17 @@ static int __init twl4030_vibra_probe(struct platform_device *pdev)
 	info->dev = &pdev->dev;
 	info->enabled = 0;
 	info->duration = 0;
+	info->iseq = 0;
+	info->nseq = 0;
 
 	platform_set_drvdata(pdev, info);
+
+	info->workqueue = create_singlethread_workqueue("vibra");
+	if (info->workqueue == NULL) {
+		dev_err(&pdev->dev, "couldn't create workqueue\n");
+		kfree(info);
+		return -ENOMEM;
+	}
 
 	mutex_init(&info->lock);
 	INIT_DELAYED_WORK(&info->work, vibra_work);
@@ -306,6 +417,9 @@ static int __init twl4030_vibra_probe(struct platform_device *pdev)
 static int __exit twl4030_vibra_remove(struct platform_device *pdev)
 {
 	struct vibra_info *info = platform_get_drvdata(pdev);
+
+	cancel_delayed_work_sync(&info->work);
+	destroy_workqueue(info->workqueue);
 
 	vibra_unregister_sysfs(info);
 	led_classdev_unregister(&info->vibra);

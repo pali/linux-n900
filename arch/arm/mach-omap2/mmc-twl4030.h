@@ -14,6 +14,8 @@ struct twl4030_hsmmc_info {
 	u8      vmmc_dev_grp;   /* override default regulator */
 	bool	vsim_18v;	/* MMC-2 option */
 	bool	cover_only;	/* No card detect - just cover switch */
+	bool	power_saving;	/* Try to sleep or power off when possible */
+	unsigned long caps;	/* MMC host capabilities */
 	int	gpio_cd;	/* or -EINVAL */
 	int	gpio_wp;	/* or -EINVAL */
 	char	*name;		/* or NULL for default */

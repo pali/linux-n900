@@ -80,6 +80,17 @@ static inline u32 dss_read_reg(const struct dss_reg idx)
 #define RR(reg) \
 	dss_write_reg(DSS_##reg, dss.ctx[(DSS_##reg).idx / sizeof(u32)])
 
+int dss_check_context(void)
+{
+	if (cpu_is_omap24xx())
+		return 0;
+
+	if (dss_read_reg(DSS_CONTROL) == 0)
+		return -EINVAL;
+
+	return 0;
+}
+
 void dss_save_context(void)
 {
 	if (cpu_is_omap24xx())
@@ -130,8 +141,10 @@ void dss_sdi_init(u8 datapairs)
 	dss_write_reg(DSS_PLL_CONTROL, l);
 }
 
-void dss_sdi_enable(void)
+int dss_sdi_enable(void)
 {
+	unsigned long timeout;
+
 	dispc_pck_free_enable(1);
 
 	/* Reset SDI PLL */
@@ -142,21 +155,48 @@ void dss_sdi_enable(void)
 	REG_FLD_MOD(DSS_PLL_CONTROL, 1, 28, 28); /* SDI_PLL_GOBIT */
 
 	/* Waiting for PLL lock request to complete */
-	while (dss_read_reg(DSS_SDI_STATUS) & (1 << 6))
-		;
+	timeout = jiffies + msecs_to_jiffies(500);
+	while (dss_read_reg(DSS_SDI_STATUS) & (1 << 6)) {
+		if (time_after_eq(jiffies, timeout)) {
+			DSSERR("PLL lock request timed out\n");
+			goto err1;
+		}
+	}
 
 	/* Clearing PLL_GO bit */
 	REG_FLD_MOD(DSS_PLL_CONTROL, 0, 28, 28);
 
 	/* Waiting for PLL to lock */
-	while (!(dss_read_reg(DSS_SDI_STATUS) & (1 << 5)))
-		;
+	timeout = jiffies + msecs_to_jiffies(500);
+	while (!(dss_read_reg(DSS_SDI_STATUS) & (1 << 5))) {
+		if (time_after_eq(jiffies, timeout)) {
+			DSSERR("PLL lock timed out\n");
+			goto err1;
+		}
+	}
 
 	dispc_lcd_enable_signal(1);
 
 	/* Waiting for SDI reset to complete */
-	while (!(dss_read_reg(DSS_SDI_STATUS) & (1 << 2)))
-		;
+	timeout = jiffies + msecs_to_jiffies(500);
+	while (!(dss_read_reg(DSS_SDI_STATUS) & (1 << 2))) {
+		if (time_after_eq(jiffies, timeout)) {
+			DSSERR("SDI reset timed out\n");
+			goto err2;
+		}
+	}
+
+	return 0;
+
+ err2:
+	dispc_lcd_enable_signal(0);
+ err1:
+	/* Reset SDI PLL */
+	REG_FLD_MOD(DSS_PLL_CONTROL, 0, 18, 18); /* SDI_PLL_SYSRESET */
+
+	dispc_pck_free_enable(0);
+
+	return -ETIMEDOUT;
 }
 
 void dss_sdi_disable(void)
@@ -245,7 +285,7 @@ static int _omap_dss_wait_reset(void)
 	return 0;
 }
 
-static int _omap_dss_reset(void)
+int dss_reset(void)
 {
 	/* Soft reset */
 	REG_FLD_MOD(DSS_SYSCONFIG, 1, 1, 1);
@@ -285,6 +325,11 @@ int dss_init(bool skip_init)
 	}
 
 	if (!skip_init) {
+		/* disable LCD and DIGIT output. This seems to fix the synclost
+		 * problem that we get, if the bootloader starts the DSS and
+		 * the kernel resets it */
+		omap_writel(omap_readl(0x48050440) & ~0x3, 0x48050440);
+
 		/* We need to wait here a bit, otherwise we sometimes start to
 		 * get synclost errors, and after that only power cycle will
 		 * restore DSS functionality. I have no idea why this happens.
@@ -293,11 +338,8 @@ int dss_init(bool skip_init)
 		 */
 		msleep(50);
 
-		_omap_dss_reset();
-
+		dss_reset();
 	}
-	else
-		printk("DSS SKIP RESET\n");
 
 	/* autoidle */
 	REG_FLD_MOD(DSS_SYSCONFIG, 1, 0, 0);

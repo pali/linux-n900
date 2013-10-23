@@ -266,7 +266,7 @@ void VFP_bounce(u32 trigger, u32 fpexc, struct pt_regs *regs)
 		 * on VFP subarch 1.
 		 */
 		 vfp_raise_exceptions(VFP_EXCEPTION_ERROR, trigger, fpscr, regs);
-		 return;
+		goto exit;
 	}
 
 	/*
@@ -297,7 +297,7 @@ void VFP_bounce(u32 trigger, u32 fpexc, struct pt_regs *regs)
 	 * the FPEXC.FP2V bit is valid only if FPEXC.EX is 1.
 	 */
 	if (fpexc ^ (FPEXC_EX | FPEXC_FP2V))
-		return;
+		goto exit;
 
 	/*
 	 * The barrier() here prevents fpinst2 being read
@@ -310,9 +310,11 @@ void VFP_bounce(u32 trigger, u32 fpexc, struct pt_regs *regs)
 	exceptions = vfp_emulate_instruction(trigger, orig_fpscr, regs);
 	if (exceptions)
 		vfp_raise_exceptions(exceptions, trigger, orig_fpscr, regs);
+ exit:
+	preempt_enable();
 }
 
-static void vfp_enable(void *unused)
+void vfp_enable(void *unused)
 {
 	u32 access = get_copro_access();
 
@@ -320,6 +322,151 @@ static void vfp_enable(void *unused)
 	 * Enable full access to VFP (cp10 and cp11)
 	 */
 	set_copro_access(access | CPACC_FULL(10) | CPACC_FULL(11));
+}
+
+#ifdef CONFIG_PM
+#include <linux/sysdev.h>
+
+void vfp_pm_save_context(void)
+{
+	struct thread_info *ti = current_thread_info();
+	u32 fpexc = fmrx(FPEXC);
+
+	/* if vfp is on, then save state for resumption */
+	if (fpexc & FPEXC_EN) {
+		printk(KERN_DEBUG "%s: saving vfp state\n", __func__);
+		vfp_save_state(&(ti->vfpstate.hard.fpexc), fpexc);
+		vfp_save_regs((u32 *)(ti->vfpstate.hard.fpregs));
+	} else {
+		vfp_enable(NULL); /* enable VFP for now to save context. */
+		vfp_save_regs((u32 *)(ti->vfpstate.hard.fpregs));
+		fmxr(FPEXC, fmrx(FPEXC) & ~FPEXC_EN);
+	}
+}
+
+static int vfp_pm_suspend(struct sys_device *dev, pm_message_t state)
+{
+	u32 fpexc = fmrx(FPEXC);
+	vfp_pm_save_context();
+
+	/* disable, just in case */
+	if (fpexc & FPEXC_EN)
+		fmxr(FPEXC, fmrx(FPEXC) & ~FPEXC_EN);
+
+	/* clear any information we had about last context state */
+	memset(last_VFP_context, 0, sizeof(last_VFP_context));
+
+	return 0;
+}
+
+void vfp_pm_restore_context(void)
+{
+	struct thread_info *ti = current_thread_info();
+	u32 fpexc = fmrx(FPEXC);
+	/* if vfp is on, then save state for resumption */
+	if (fpexc & FPEXC_EN) {
+		printk(KERN_DEBUG "%s: restoring vfp state\n", __func__);
+		vfp_restore_state(&(ti->vfpstate.hard.fpexc));
+		vfp_restore_regs((u32 *)(ti->vfpstate.hard.fpregs));
+	}
+}
+
+static int vfp_pm_resume(struct sys_device *dev)
+{
+	/* ensure we have access to the vfp */
+	vfp_enable(NULL);
+
+	vfp_pm_restore_context();
+	/* and disable it to ensure the next usage restores the state */
+	fmxr(FPEXC, fmrx(FPEXC) & ~FPEXC_EN);
+
+	return 0;
+}
+
+static struct sysdev_class vfp_pm_sysclass = {
+	.name		= "vfp",
+	.suspend	= vfp_pm_suspend,
+	.resume		= vfp_pm_resume,
+};
+
+static struct sys_device vfp_pm_sysdev = {
+	.cls	= &vfp_pm_sysclass,
+};
+
+static void vfp_pm_init(void)
+{
+	sysdev_class_register(&vfp_pm_sysclass);
+	sysdev_register(&vfp_pm_sysdev);
+}
+
+
+#else
+static inline void vfp_pm_init(void) { }
+#endif /* CONFIG_PM */
+
+/*
+ * Synchronise the hardware VFP state of a thread with the saved one.
+ * This function is used by the ptrace mechanism and the signal handler path.
+ */
+void vfp_sync_state(struct thread_info *thread)
+{
+	unsigned int cpu = get_cpu();
+	u32 fpexc = fmrx(FPEXC);
+	int vfp_enabled;
+	int self;
+
+	vfp_enabled = fpexc & FPEXC_EN;
+	self = thread == current_thread_info();
+#ifdef CONFIG_SMP
+	/*
+	 * On SMP systems, the VFP state is automatically saved at every
+	 * context switch. We mark the thread VFP state as belonging to a
+	 * non-existent CPU so that the saved one will be reloaded when
+	 * needed.
+	 */
+	thread->vfpstate.hard.cpu = NR_CPUS;
+	/*
+	 * Only the current thread's saved VFP context can be out-of-date.
+	 * For others there is nothing else to do, since we already ensured
+	 * force loading above.
+	 */
+	if (!self)
+		goto out;
+#endif
+	/*
+	 * If the VFP is enabled only the current thread's saved VFP
+	 * context can get out-of-date. For other threads the context
+	 * was updated when the current thread started to use the VFP.
+	 * This also means that the context will be reloaded next time
+	 * the thread uses the VFP, so no need to enforce it.
+	 */
+	if (vfp_enabled && !self)
+		goto out;
+
+	if (!last_VFP_context[cpu])
+		goto out;
+
+	/*
+	 * Save the last VFP state on this CPU.
+	 */
+	if (!vfp_enabled)
+		fmxr(FPEXC, fpexc | FPEXC_EN);
+	vfp_save_state(last_VFP_context[cpu], fpexc);
+	/*
+	 * Disable VFP in case it was enabled so that the force reload
+	 * can happen.
+	 */
+	fpexc &= ~FPEXC_EN;
+	fmxr(FPEXC, fpexc);
+
+	/*
+	 * Set the context to NULL to force a reload the next time the thread
+	 * uses the VFP.
+	 */
+	last_VFP_context[cpu] = NULL;
+
+out:
+	put_cpu();
 }
 
 #include <linux/smp.h>
@@ -365,12 +512,34 @@ static int __init vfp_init(void)
 		vfp_vector = vfp_support_entry;
 
 		thread_register_notifier(&vfp_notifier_block);
+		vfp_pm_init();
 
 		/*
 		 * We detected VFP, and the support code is
 		 * in place; report VFP support to userspace.
 		 */
 		elf_hwcap |= HWCAP_VFP;
+#ifdef CONFIG_VFPv3
+		if (VFP_arch >= 3) {
+			elf_hwcap |= HWCAP_VFPv3;
+
+			/*
+			 * Check for VFPv3 D16. CPUs in this configuration
+			 * only have 16 x 64bit registers.
+			 */
+			if (((fmrx(MVFR0) & MVFR0_A_SIMD_MASK)) == 1)
+				elf_hwcap |= HWCAP_VFPv3D16;
+		}
+#endif
+#ifdef CONFIG_NEON
+		/*
+		 * Check for the presence of the Advanced SIMD
+		 * load/store instructions, integer and single
+		 * precision floating point operations.
+		 */
+		if ((fmrx(MVFR1) & 0x000fff00) == 0x00011100)
+			elf_hwcap |= HWCAP_NEON;
+#endif
 	}
 	return 0;
 }

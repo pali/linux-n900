@@ -129,6 +129,8 @@
 #define SI4713_TX_LINE_INPUT_MUTE	0x2105
 #define SI4713_TX_PREEMPHASIS		0x2106
 #define SI4713_TX_PILOT_FREQUENCY	0x2107
+#define SI4713_TX_TONE_DEVIATION	0x2108
+#define SI4713_TX_TONE_FREQUENCY	0x2109
 #define SI4713_TX_ACOMP_ENABLE		0x2200
 #define SI4713_TX_ACOMP_THRESHOLD	0x2201
 #define SI4713_TX_ACOMP_ATTACK_TIME	0x2202
@@ -148,6 +150,8 @@
 #define SI4713_TX_RDS_PS_MESSAGE_COUNT	0x2C05
 #define SI4713_TX_RDS_PS_AF		0x2C06
 #define SI4713_TX_RDS_FIFO_SIZE		0x2C07
+#define SI4713_TX_TONE_ON_TIME		0xF000
+#define SI4713_TX_TONE_OFF_TIME		0xF001
 
 #define PREEMPHASIS_USA			75
 #define PREEMPHASIS_EU			50
@@ -207,6 +211,17 @@ struct region_info {
 	u8 region;
 };
 
+struct tone_info {
+#define MAX_TONE_DEVIATION		90000
+	unsigned long deviation;
+#define MAX_TONE_FREQUENCY		19000
+	u16 frequency;
+#define MAX_TONE_ON_TIME		0xFFFF
+	u16 on_time;
+#define MAX_TONE_OFF_TIME		0xFFFF
+	u16 off_time;
+};
+
 /*
  * si4713_device - private data
  */
@@ -223,6 +238,7 @@ struct si4713_device {
 	struct pilot_info pilot_info;
 	struct acomp_info acomp_info;
 	struct region_info region_info;
+	struct tone_info tone_info;
 	u16 frequency;
 	u8 mute;
 	u8 power_level;
@@ -291,4 +307,13 @@ int si4713_set_region(struct si4713_device *sdev, u8 region);
 int si4713_get_region(struct si4713_device *sdev);
 int si4713_set_tune_measure(struct si4713_device *sdev, u32 frequency);
 int si4713_get_tune_measure(struct si4713_device *sdev);
+int si4713_set_tone_frequency(struct si4713_device *sdev, u16 freq);
+int si4713_get_tone_frequency(struct si4713_device *sdev);
+int si4713_set_tone_deviation(struct si4713_device *sdev,
+					unsigned long deviation);
+long si4713_get_tone_deviation(struct si4713_device *sdev);
+int si4713_set_tone_on_time(struct si4713_device *sdev, u16 on_time);
+int si4713_get_tone_on_time(struct si4713_device *sdev);
+int si4713_set_tone_off_time(struct si4713_device *sdev, u16 off_time);
+int si4713_get_tone_off_time(struct si4713_device *sdev);
 #endif /* ifndef SI4713_H */

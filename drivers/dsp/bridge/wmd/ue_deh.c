@@ -74,6 +74,8 @@ static struct HW_MMUMapAttrs_t  mapAttrs = { HW_LITTLE_ENDIAN,
 					HW_ELEM_SIZE_16BIT,
 					HW_MMU_CPUES} ;
 #define VirtToPhys(x)       ((x) - PAGE_OFFSET + PHYS_OFFSET)
+
+static u32 dummyVaAddr;
 /*
  *  ======== WMD_DEH_Create ========
  *      Creates DEH manager object.
@@ -94,6 +96,7 @@ DSP_STATUS WMD_DEH_Create(OUT struct DEH_MGR **phDehMgr,
 	/* Get WMD context info. */
 	DEV_GetWMDContext(hDevObject, &hWmdContext);
 	DBC_Assert(hWmdContext);
+	dummyVaAddr = 0;
 	/* Allocate IO manager object: */
 	MEM_AllocObject(pDehMgr, struct DEH_MGR, SIGNATURE);
 	if (pDehMgr == NULL) {
@@ -151,6 +154,8 @@ DSP_STATUS WMD_DEH_Destroy(struct DEH_MGR *hDehMgr)
 
 	DBG_Trace(DBG_LEVEL1, "Entering DEH_Destroy: 0x%x\n", pDehMgr);
 	if (MEM_IsValidHandle(pDehMgr, SIGNATURE)) {
+		/* Release dummy VA buffer */
+		WMD_DEH_ReleaseDummyMem();
 		/* If notification object exists, delete it */
 		if (pDehMgr->hNtfy)
 			(void)NTFY_Delete(pDehMgr->hNtfy);
@@ -197,11 +202,11 @@ void WMD_DEH_Notify(struct DEH_MGR *hDehMgr, u32 ulEventMask,
 	struct DEH_MGR *pDehMgr = (struct DEH_MGR *)hDehMgr;
 	struct WMD_DEV_CONTEXT *pDevContext;
 	DSP_STATUS status = DSP_SOK;
+	DSP_STATUS status1 = DSP_EFAIL;
 	u32 memPhysical = 0;
 	u32 HW_MMU_MAX_TLB_COUNT = 31;
-	u32 extern faultAddr;
+	extern u32 faultAddr;
 	struct CFG_HOSTRES resources;
-	u32 dummyVaAddr;
 	HW_STATUS hwStatus;
 
 	status = CFG_GetHostResources(
@@ -245,12 +250,9 @@ void WMD_DEH_Notify(struct DEH_MGR *hDehMgr, u32 ulEventMask,
 				"address = 0x%x\n", (unsigned int)faultAddr);
 			dummyVaAddr = (u32)MEM_Calloc(sizeof(char) * 0x1000,
 					MEM_PAGED);
-			memPhysical = (u32)MEM_Calloc(sizeof(char) * 0x1000,
-					MEM_PAGED);
-			dummyVaAddr = PG_ALIGN_LOW((u32)dummyVaAddr,
-					PG_SIZE_4K);
-			memPhysical  = VirtToPhys(dummyVaAddr);
-			DBG_Trace(DBG_LEVEL6, "WMD_DEH_Notify: DSP_MMUFAULT, "
+			memPhysical  = VirtToPhys(PG_ALIGN_LOW((u32)dummyVaAddr,
+								PG_SIZE_4K));
+DBG_Trace(DBG_LEVEL6, "WMD_DEH_Notify: DSP_MMUFAULT, "
 				 "mem Physical= 0x%x\n", memPhysical);
 			pDevContext = (struct WMD_DEV_CONTEXT *)
 						pDehMgr->hWmdContext;
@@ -279,12 +281,35 @@ void WMD_DEH_Notify(struct DEH_MGR *hDehMgr, u32 ulEventMask,
 			HW_MMU_EventAck(resources.dwDmmuBase,
 					 HW_MMU_TRANSLATION_FAULT);
 			break;
+		case DSP_PWRERROR:
+			/* reset errInfo structure before use */
+			pDehMgr->errInfo.dwErrMask = DSP_PWRERROR;
+			pDehMgr->errInfo.dwVal1 = 0L;
+			pDehMgr->errInfo.dwVal2 = 0L;
+			pDehMgr->errInfo.dwVal3 = 0L;
+			pDehMgr->errInfo.dwVal1 = dwErrInfo;
+			printk(KERN_ERR "WMD_DEH_Notify: DSP_PWRERROR, errInfo "
+					"= 0x%x\n", dwErrInfo);
+			break;
 		default:
 			DBG_Trace(DBG_LEVEL6,
 				 "WMD_DEH_Notify: Unknown Error, errInfo = "
 				 "0x%x\n", dwErrInfo);
 			break;
 		}
+
+		/* Filter subsequent notifications when an error occurs */
+		if (pDevContext->dwBrdState != BRD_ERROR) {
+			/* Use it as a flag to send notifications the
+			 * first time and error occurred, next time
+			 * state will be BRD_ERROR */
+			status1 = DSP_EFAIL;
+		}
+
+		/* Filter subsequent notifications when an error occurs */
+		if (pDevContext->dwBrdState != BRD_ERROR)
+			status1 = DSP_SOK;
+
 		/* Set the Board state as ERROR */
 		pDevContext->dwBrdState = BRD_ERROR;
 		/* Disable all the clocks that were enabled by DSP */
@@ -292,8 +317,11 @@ void WMD_DEH_Notify(struct DEH_MGR *hDehMgr, u32 ulEventMask,
 		/* Call DSP Trace Buffer */
 		PrintDspTraceBuffer(hDehMgr->hWmdContext);
 
-		/* Signal DSP error/exception event. */
-		NTFY_Notify(pDehMgr->hNtfy, ulEventMask);
+		if (DSP_SUCCEEDED(status1)) {
+			/* Signal DSP error/exception event. */
+			NTFY_Notify(pDehMgr->hNtfy, ulEventMask);
+		}
+
 	}
 	DBG_Trace(DBG_LEVEL1, "Exiting WMD_DEH_Notify\n");
 
@@ -327,3 +355,17 @@ DSP_STATUS WMD_DEH_GetInfo(struct DEH_MGR *hDehMgr,
 
 	return status;
 }
+
+
+/*
+ *  ======== WMD_DEH_ReleaseDummyMem ========
+ *      Releases memory allocated for dummy page
+ */
+void WMD_DEH_ReleaseDummyMem(void)
+{
+	if (dummyVaAddr) {
+		MEM_Free((void *)dummyVaAddr);
+		dummyVaAddr = 0;
+	}
+}
+

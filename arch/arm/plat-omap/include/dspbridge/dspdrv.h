@@ -50,23 +50,6 @@
 #define MAX_DEV     10		/* Max support of 10 devices */
 
 /*
- *  ======== DSP_Close ========
- *  Purpose:
- *      Called when the client application/driver unloads the DDSP DLL. Upon
- *      unloading, the DDSP DLL will call CloseFile().
- *  Parameters:
- *      dwDeviceContext:    Handle returned by XXX_Open used to identify
- *                          the open context of the device
- *  Returns:
- *      TRUE indicates the device is successfully closed. FALSE indicates
- *      otherwise.
- *  Requires:
- *      dwOpenContext!= NULL.
- *  Ensures:The Application instance owned objects are cleaned up.
- */
-extern bool DSP_Close(u32 dwDeviceContext);
-
-/*
  *  ======== DSP_Deinit ========
  *  Purpose:
  *      This function is called by Device Manager to de-initialize a device.

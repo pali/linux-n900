@@ -22,5 +22,6 @@
 
 int rx51_set_eci_mode(int mode);
 void rx51_jack_report(int status);
+int allow_button_press(void);
 
 #endif /* _RX51_H_ */

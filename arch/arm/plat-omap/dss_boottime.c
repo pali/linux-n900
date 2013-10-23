@@ -27,6 +27,7 @@
 #include <linux/err.h>
 #include <linux/clk.h>
 #include <linux/omapfb.h>
+#include <linux/delay.h>
 
 #include <asm/io.h>
 
@@ -178,6 +179,18 @@ static u32 __init dispc_read_reg(int reg)
 }
 
 /**
+ * dispc_write_reg          Write a DISPC register
+ * @reg - DISPC register to write
+ * @val - value to write
+ *
+ * Assumes that clocks are on.
+ */
+static void __init dispc_write_reg(int reg, u32 val)
+{
+	omap_writel(val, DISPC_BASE + reg);
+}
+
+/**
  * dss_read_reg          Read a DSS register
  * @reg - DSS register to read
  *
@@ -308,6 +321,20 @@ enum omapfb_color_format __init dss_boottime_get_plane_format(int plane_idx)
 	return mode_info[mode].format;
 }
 
+int __init dss_boottime_get_plane_bpp(int plane_idx)
+{
+	unsigned mode;
+	unsigned bpp;
+
+	if (!dss_boottime_plane_is_enabled(plane_idx))
+		return -1;
+
+	mode = get_plane_mode(plane_idx);
+	bpp = mode_info[mode].bpp;
+
+	return bpp;
+}
+
 /**
  * dss_boottime_get_plane_size - get size of a plane's FB
  * @plane_idx - plane index
@@ -318,7 +345,6 @@ enum omapfb_color_format __init dss_boottime_get_plane_format(int plane_idx)
 size_t __init dss_boottime_get_plane_size(int plane_idx)
 {
 	u32 l;
-	unsigned mode;
 	unsigned bpp;
 	unsigned x, y;
 	size_t size;
@@ -326,8 +352,7 @@ size_t __init dss_boottime_get_plane_size(int plane_idx)
 	if (!dss_boottime_plane_is_enabled(plane_idx))
 		return -1;
 
-	mode = get_plane_mode(plane_idx);
-	bpp = mode_info[mode].bpp;
+	bpp = dss_boottime_get_plane_bpp(plane_idx);
 
 	l = dispc_read_reg(siz_reg[plane_idx]);
 	x = l & ((1 << 11) - 1);
@@ -361,6 +386,15 @@ int __init dss_boottime_reset(void)
 
 	if (enable_digit_clocks() < 0)
 		goto err2;
+
+	/* Resetting DSS right after enabling clocks, or if
+	 * bootloader has enabled the display, seems to put
+	 * DSS sometimes in an invalid state. Disabling output
+	 * and waiting after enabling clocks seem to fix this */
+
+	/* disable LCD & DIGIT output */
+	dispc_write_reg(DISPC_CONTROL, dispc_read_reg(DISPC_CONTROL) & ~0x3);
+	msleep(50);
 
 	/* Soft reset */
 	l = dss_read_reg(DSS_SYSCONFIG);

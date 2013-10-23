@@ -40,7 +40,12 @@ struct prm_setup_times {
 	u16 voltoffset;
 	u16 voltsetup2;
 };
+#endif
 
+extern void vfp_pm_save_context(void);
+extern void vfp_pm_restore_context(void);
+extern void vfp_enable(void);
+#if defined(CONFIG_ARCH_OMAP3) && defined(CONFIG_PM)
 extern void omap3_pm_off_mode_enable(int);
 extern int omap3_pm_get_suspend_state(struct powerdomain *pwrdm);
 extern int omap3_pm_set_suspend_state(struct powerdomain *pwrdm, int state);
@@ -49,6 +54,7 @@ extern void omap3_set_prm_setup_times(struct prm_setup_times *setup_times);
 #define omap3_pm_off_mode_enable(int) do {} while (0);
 #define omap3_pm_get_suspend_state(pwrdm) do {} while (0);
 #define omap3_pm_set_suspend_state(pwrdm, state) do {} while (0);
+#define omap3_set_prm_setup_times(setup_times) do {} while (0);
 #endif
 extern int set_pwrdm_state(struct powerdomain *pwrdm, u32 state);
 extern int resource_set_opp_level(int res, u32 target_level, int flags);
@@ -65,11 +71,13 @@ extern int omap2_pm_debug;
 extern void pm_dbg_update_time(struct powerdomain *pwrdm, int prev);
 extern int pm_dbg_regset_save(int reg_set);
 extern int pm_dbg_regset_init(int reg_set);
+extern int resource_dump_reqs(struct seq_file *s, void *unused);
 #else
 #define omap2_pm_dump(mode, resume, us)		do {} while (0);
 #define omap2_pm_debug				0
 #define pm_dbg_update_time(pwrdm, prev) do {} while (0);
 #define pm_dbg_regset_save(reg_set) do {} while (0);
 #define pm_dbg_regset_init(reg_set) do {} while (0);
+#define resource_dump_reqs(s,unused) do {} while (0);
 #endif /* CONFIG_PM_DEBUG */
 #endif

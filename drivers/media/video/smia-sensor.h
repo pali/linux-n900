@@ -62,7 +62,6 @@ struct smia_sensor {
 	const struct firmware *fw;
 	struct smia_meta_reglist *meta_reglist;
 
-	bool dev_init_done;
 	enum v4l2_power power;
 };
 

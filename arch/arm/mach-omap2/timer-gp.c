@@ -81,8 +81,20 @@ static void omap2_gp_timer_set_mode(enum clock_event_mode mode,
 	case CLOCK_EVT_MODE_ONESHOT:
 		break;
 	case CLOCK_EVT_MODE_UNUSED:
-	case CLOCK_EVT_MODE_SHUTDOWN:
 	case CLOCK_EVT_MODE_RESUME:
+		break;
+	case CLOCK_EVT_MODE_SHUTDOWN:
+		/*
+		 * Wait for min period x 2 to make sure that timer is
+		 * stopped
+		 */
+		udelay(evt->min_delta_ns / 500);
+		/*
+		 * Clear possibly pending interrupt, this will occasionally
+		 * generate spurious timer IRQs during suspend but this
+		 * is okay, as another option is not to enter suspend at all
+		 */
+		omap_dm_timer_write_status(gptimer, OMAP_TIMER_INT_OVERFLOW);
 		break;
 	}
 }

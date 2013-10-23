@@ -45,15 +45,21 @@
 
 #define HS_BTN_KEY		KEY_PHONE
 #define HS_BTN_IRQ_FLAGS	(IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING)
-#define HS_BTN_DEBOUNCE_FALLING	50 /* press */
-#define HS_BTN_DEBOUNCE_RISING	50 /* release */
+#define HS_BTN_DEBOUNCE_PRESS	100
+#define HS_BTN_DEBOUNCE_RELEASE	100
 #define HS_BTN_REPORT_DELAY	1000
+
+#define HEADPH_IRQ_FLAGS	(IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING |\
+				IRQF_SHARED)
+#define HEADPH_DEBOUNCE		300
 
 #define DET_OPEN_CABLE_DELAY	100
 #define DET_REPEAT_DELAY	50
 #define DET_PLUG_DELAY		10
 #define DET_PROBE_DELAY		10
+#define DET_ECI_RESET_DELAY	600
 #define DET_REPEAT_COUNT	5
+#define DET_COUNT_MAX		10
 
 enum {
 	UNKNOWN,
@@ -69,37 +75,36 @@ struct nokia_av_drvdata {
 	struct mutex detection_lock;
 
 	struct workqueue_struct *workqueue;
+	struct work_struct headph_work;
+	struct timer_list headph_timer;
 	struct delayed_work detection_work;
 
 	struct input_dev *input;
 	struct work_struct hs_btn_work;
 	struct timer_list hs_btn_timer;
 	struct delayed_work hs_btn_report_work;
-
-	int debounce_rising;
-	int debounce_falling;
+	int hs_btn_pressed;
 
 	int autodetect;
 	int type;
 	int dettype;
 	int detcount;
+	int dettotal;
 
 	int eci0_gpio;
 	int eci1_gpio;
 	int headph_gpio;
+	int headph_plugged;
 };
 
 /* Delayed reporting of button press-release cycle */
 static void hs_btn_report(struct work_struct *work)
 {
-	struct delayed_work *dwork =
-		container_of(work, struct delayed_work, work);
-	struct nokia_av_drvdata *drvdata =
-		container_of(dwork, struct nokia_av_drvdata,
-			hs_btn_report_work);
+	struct nokia_av_drvdata *drvdata = container_of(work,
+		struct nokia_av_drvdata, hs_btn_report_work.work);
 
 	/* Don't report if unplugged */
-	if (drvdata->input && !gpio_get_value(drvdata->headph_gpio)) {
+	if (drvdata->input && drvdata->headph_plugged) {
 		input_report_key(drvdata->input, HS_BTN_KEY, 1);
 		input_sync(drvdata->input);
 		input_report_key(drvdata->input, HS_BTN_KEY, 0);
@@ -120,11 +125,19 @@ static void hs_btn_handler(struct work_struct *work)
 {
 	struct nokia_av_drvdata *drvdata =
 		container_of(work, struct nokia_av_drvdata, hs_btn_work);
+	int pressed;
+
+	if (!allow_button_press())
+		return;
+
+	pressed = !gpio_get_value(drvdata->eci0_gpio);
+	if (drvdata->hs_btn_pressed == pressed)
+		return;
+
+	drvdata->hs_btn_pressed = pressed;
 
 	/* Only report on key release */
-	if (drvdata->type == BASIC_HEADSET &&
-		gpio_get_value(drvdata->eci0_gpio)) {
-
+	if (drvdata->type == BASIC_HEADSET && !pressed) {
 		/* Delay reporting to avoid false events on unplug */
 		queue_delayed_work(drvdata->workqueue,
 				&drvdata->hs_btn_report_work,
@@ -136,13 +149,16 @@ static void hs_btn_handler(struct work_struct *work)
 static irqreturn_t hs_btn_irq(int irq, void *_drvdata)
 {
 	struct nokia_av_drvdata *drvdata = _drvdata;
-	int state, timeout;
+	int pressed, timeout;
 
-	state = gpio_get_value(drvdata->eci0_gpio);
-	if (state)
-		timeout = drvdata->debounce_rising;
+	pressed = !gpio_get_value(drvdata->eci0_gpio);
+	if (drvdata->hs_btn_pressed == pressed)
+		return IRQ_HANDLED;
+
+	if (pressed)
+		timeout = HS_BTN_DEBOUNCE_PRESS;
 	else
-		timeout = drvdata->debounce_falling;
+		timeout = HS_BTN_DEBOUNCE_RELEASE;
 
 	if (!timeout)
 		schedule_work(&drvdata->hs_btn_work);
@@ -153,12 +169,14 @@ static irqreturn_t hs_btn_irq(int irq, void *_drvdata)
 	return IRQ_HANDLED;
 }
 
-static int input_init(struct nokia_av_drvdata *drvdata)
+static int hs_btn_input_init(struct nokia_av_drvdata *drvdata)
 {
 	int ret;
 
 	if (drvdata->input)
 		return -EEXIST;
+
+	drvdata->hs_btn_pressed = 0;
 
 	drvdata->input = input_allocate_device();
 	if (!drvdata->input) {
@@ -174,6 +192,7 @@ static int input_init(struct nokia_av_drvdata *drvdata)
 	if (ret) {
 		dev_err(drvdata->dev, "Could not register input device\n");
 		input_free_device(drvdata->input);
+		drvdata->input = NULL;
 		return ret;
 	}
 
@@ -183,18 +202,23 @@ static int input_init(struct nokia_av_drvdata *drvdata)
 		dev_err(drvdata->dev, "Could not request irq %d\n",
 			gpio_to_irq(drvdata->eci0_gpio));
 		input_unregister_device(drvdata->input);
+		drvdata->input = NULL;
 		return ret;
 	}
 
 	return 0;
 }
 
-static void input_free(struct nokia_av_drvdata *drvdata)
+static void hs_btn_input_free(struct nokia_av_drvdata *drvdata)
 {
 	if (!drvdata->input)
 		return;
 
 	free_irq(gpio_to_irq(drvdata->eci0_gpio), drvdata);
+
+	del_timer(&drvdata->hs_btn_timer);
+	cancel_delayed_work(&drvdata->hs_btn_report_work);
+
 	input_unregister_device(drvdata->input);
 	drvdata->input = NULL;
 }
@@ -242,12 +266,16 @@ static int madc_stable_voltage(int d, int t, int tmax)
 	return mv2;
 }
 
-#define NEED_BIAS_CORRECTION(hwid)	((hwid) <= 0x1700) /* < pre-B3 */
+/* < pre-B3 */
+#define NEED_BIAS_CORRECTION(hwid)	(((hwid) > 0x0013 && \
+					(hwid) <= 0x1700) || ((hwid) < 0x0008))
 #define BIAS_CORRECTION		80
 
 #define THRESHOLD_GROUNDED	40
-#define THRESHOLD_VIDEO_HI	110
+#define THRESHOLD_VIDEO_HI	150
 #define THRESHOLD_HEADSET_HI	200
+#define THRESHOLD_ECI_LO	1950
+#define THRESHOLD_ECI_HI	2200
 
 static int detect(struct nokia_av_drvdata *drvdata)
 {
@@ -304,14 +332,45 @@ done:
 	return type;
 }
 
-/* Note: unplug-replug during detection won't be detected */
+/* HACK: Try to detect ECI headsets */
+static int detect_eci(struct nokia_av_drvdata *drvdata)
+{
+	int t = DET_ECI_RESET_DELAY;
+	int mv;
+	int type = UNKNOWN;
+
+	mutex_lock(&drvdata->detection_lock);
+
+	rx51_set_eci_mode(4);
+
+	/* Give the ECI headset sufficient time (more than 500 ms) to
+	 * reset and stabilize the mic line, bail out on unplug */
+	while (t > 0) {
+		if (!drvdata->headph_plugged) {
+			type = -1;
+			goto out;
+		}
+
+		msleep(t < 100 ? t : 100);
+		t -= 100;
+	}
+
+	mv = madc_stable_voltage(50, 5, 100);
+	if (mv > THRESHOLD_ECI_LO && mv < THRESHOLD_ECI_HI)
+		type = BASIC_HEADSET;
+
+	rx51_set_eci_mode(1);
+out:
+	mutex_unlock(&drvdata->detection_lock);
+
+	return type;
+}
+
+/* Main accessory detection routine. */
 static void detection_handler(struct work_struct *work)
 {
-	struct delayed_work *dwork =
-		container_of(work, struct delayed_work, work);
-	struct nokia_av_drvdata *drvdata =
-		container_of(dwork, struct nokia_av_drvdata, detection_work);
-	int status = 0;
+	struct nokia_av_drvdata *drvdata = container_of(work,
+		struct nokia_av_drvdata, detection_work.work);
 	int type;
 
 	/* This is a shortcut detection for connecting open cable */
@@ -324,25 +383,13 @@ static void detection_handler(struct work_struct *work)
 	drvdata->type = UNKNOWN;
 
 	type = detect(drvdata);
-	switch (type) {
-	case BASIC_HEADSET:
-		status = SND_JACK_HEADSET;
-		break;
-	case HEADPHONES:
-		status = SND_JACK_HEADPHONE;
-		break;
-	case VIDEO_CABLE:
-		status = SND_JACK_AVOUT;
-		break;
-	}
-	status |= SND_JACK_MECHANICAL;
-
-	/* Unplug in the middle of detection will have been reported
-	 * immediately */
-	if (gpio_get_value(drvdata->headph_gpio))
-		return;
 
 	mutex_lock(&drvdata->lock);
+
+	/* Unplug in the middle of detection */
+	if (!drvdata->headph_plugged)
+		goto out;
+
 	if (type == drvdata->dettype) {
 		drvdata->detcount++;
 	} else {
@@ -350,26 +397,49 @@ static void detection_handler(struct work_struct *work)
 		drvdata->dettype = type;
 	}
 
-	if (drvdata->detcount >= DET_REPEAT_COUNT) {
+	drvdata->dettotal++;
+
+	if (drvdata->detcount >= DET_REPEAT_COUNT ||
+		drvdata->dettotal >= DET_COUNT_MAX) {
+		int status = 0;
+
+		/* HACK: Try to detect the accessory as an ECI headset
+		 * only if unable to detect it as anything else. */
+		if (type == UNKNOWN || drvdata->dettotal >= DET_COUNT_MAX) {
+			/* Unlock to allow headph_handler to work */
+			mutex_unlock(&drvdata->lock);
+			type = detect_eci(drvdata);
+			mutex_lock(&drvdata->lock);
+
+			/* Unplug in the middle of ECI detection. */
+			if (type < 0 || !drvdata->headph_plugged)
+				goto out;
+		}
+
 		drvdata->type = type;
 		drvdata->dettype = UNKNOWN;
 		drvdata->detcount = 0;
+		drvdata->dettotal = 0;
 
-		if (type == BASIC_HEADSET) {
-			/* REVISIT: Button needs bias to work, but
-			 * ALSA should have bias control. However,
-			 * switching bias off and on causes a button
-			 * event. */
-			rx51_set_eci_mode(4); /* Detect button */
-			input_init(drvdata);
-		}
-
-		if (type == OPEN_CABLE) {
+		switch (type) {
+		case BASIC_HEADSET:
+			status = SND_JACK_HEADSET;
+			hs_btn_input_init(drvdata);
+			break;
+		case HEADPHONES:
+			status = SND_JACK_HEADPHONE;
+			break;
+		case VIDEO_CABLE:
+			status = SND_JACK_AVOUT;
+			break;
+		case OPEN_CABLE:
 			rx51_set_eci_mode(3); /* Detect connection */
 			queue_delayed_work(drvdata->workqueue,
 					&drvdata->detection_work,
 					msecs_to_jiffies(DET_OPEN_CABLE_DELAY));
+			break;
 		}
+		status |= SND_JACK_MECHANICAL;
 
 		rx51_jack_report(status);
 
@@ -378,45 +448,68 @@ static void detection_handler(struct work_struct *work)
 				&drvdata->detection_work,
 				msecs_to_jiffies(DET_REPEAT_DELAY));
 	}
+out:
 	mutex_unlock(&drvdata->lock);
 }
 
-#if defined(CONFIG_SND_JACK)
-static void headphone_notify(void *data, int state)
+/* Debounced headphone plug handler */
+static void headph_handler(struct work_struct *work)
 {
-	struct nokia_av_drvdata *drvdata = data;
-
-	dev_dbg(drvdata->dev, "headphone_notify(): state %d, autodetect %d\n",
-		state, drvdata->autodetect);
+	struct nokia_av_drvdata *drvdata =
+		container_of(work, struct nokia_av_drvdata, headph_work);
+	int plugged;
 
 	if (!drvdata->autodetect) {
 		return;
 	}
 
+	plugged = !gpio_get_value(drvdata->headph_gpio);
+	if (drvdata->headph_plugged == plugged)
+		return;
+
 	mutex_lock(&drvdata->lock);
+
+	drvdata->headph_plugged = plugged;
 
 	drvdata->type = UNKNOWN;
 	drvdata->dettype = UNKNOWN;
 	drvdata->detcount = 0;
+	drvdata->dettotal = 0;
+
+	hs_btn_input_free(drvdata);
 
 	mutex_unlock(&drvdata->lock);
 
-	input_free(drvdata);
-
-	if (state) {
+	if (drvdata->headph_plugged) {
 		queue_delayed_work(drvdata->workqueue,
 				&drvdata->detection_work,
 				msecs_to_jiffies(DET_PLUG_DELAY));
 	} else {
+		cancel_delayed_work_sync(&drvdata->detection_work);
+
 		rx51_set_eci_mode(1);
 		rx51_jack_report(0);
 	}
 }
-#else
-static void headphone_notify(void *data, int state)
+
+/* Headphone plug debounce timer */
+static void headph_timer(unsigned long arg)
 {
+	struct nokia_av_drvdata *drvdata = (struct nokia_av_drvdata *) arg;
+
+	schedule_work(&drvdata->headph_work);
 }
-#endif
+
+/* Headphone plug irq */
+static irqreturn_t headph_irq(int irq, void *_drvdata)
+{
+	struct nokia_av_drvdata *drvdata = _drvdata;
+
+	mod_timer(&drvdata->headph_timer,
+		jiffies + msecs_to_jiffies(HEADPH_DEBOUNCE));
+
+	return IRQ_HANDLED;
+}
 
 static ssize_t detect_show(struct device *dev,
 			struct device_attribute *attr, char *buf)
@@ -531,13 +624,6 @@ static int __init nokia_av_probe(struct platform_device *pdev)
 	struct nokia_av_drvdata *drvdata;
 	int ret;
 
-	struct omap_gpio_switch headphone_switch = {
-		.debounce_rising	= 400, /* Plug */
-		.debounce_falling	= 200, /* Unplug */
-		.notify			= headphone_notify,
-		.notify_data		= NULL,
-	};
-
 	drvdata = kzalloc(sizeof(*drvdata), GFP_KERNEL);
 	if (!drvdata) {
 		dev_err(&pdev->dev, "could not allocate memory\n");
@@ -570,8 +656,6 @@ static int __init nokia_av_probe(struct platform_device *pdev)
 	mutex_init(&drvdata->detection_lock);
 	INIT_DELAYED_WORK(&drvdata->detection_work, detection_handler);
 
-	drvdata->debounce_rising = HS_BTN_DEBOUNCE_RISING;
-	drvdata->debounce_falling = HS_BTN_DEBOUNCE_FALLING;
 	INIT_WORK(&drvdata->hs_btn_work, hs_btn_handler);
 	init_timer(&drvdata->hs_btn_timer);
 	drvdata->hs_btn_timer.function = hs_btn_timer;
@@ -604,25 +688,32 @@ static int __init nokia_av_probe(struct platform_device *pdev)
 	gpio_direction_input(drvdata->eci0_gpio);
 	gpio_direction_input(drvdata->eci1_gpio);
 
-	/* Add headphone switch callback */
-	headphone_switch.notify_data = drvdata;
-	headphone_switch.gpio = drvdata->headph_gpio;
-	ret = omap_update_gpio_switch(&headphone_switch);
+	/* Plug/unplug detection */
+	drvdata->headph_plugged = !gpio_get_value(drvdata->headph_gpio);
+
+	INIT_WORK(&drvdata->headph_work, headph_handler);
+	init_timer(&drvdata->headph_timer);
+	drvdata->headph_timer.function = headph_timer;
+	drvdata->headph_timer.data = (unsigned long)drvdata;
+
+	ret = request_irq(gpio_to_irq(drvdata->headph_gpio), headph_irq,
+			HEADPH_IRQ_FLAGS, "headph", drvdata);
 	if (ret) {
-		dev_err(&pdev->dev, "gpio switch update failed, %d\n", ret);
-		goto err_omap_gpio;
+		dev_err(&pdev->dev, "gpio %d irq request failed, %d\n",
+			drvdata->headph_gpio, ret);
+		goto err_headph;
 	}
 
 	dev_info(&pdev->dev, "accessory detect module initialized\n");
 
-	if (!gpio_get_value(drvdata->headph_gpio))
+	if (drvdata->headph_plugged)
 		queue_delayed_work(drvdata->workqueue,
 				&drvdata->detection_work,
 				msecs_to_jiffies(DET_PROBE_DELAY));
 
 	return 0;
 
-err_omap_gpio:
+err_headph:
 	gpio_free(drvdata->eci1_gpio);
 
 err_eci1:
@@ -649,19 +740,16 @@ static int __exit nokia_av_remove(struct platform_device *pdev)
 {
 	struct nokia_av_drvdata *drvdata = platform_get_drvdata(pdev);
 
-	struct omap_gpio_switch headphone_switch = {
-		.gpio			= drvdata->headph_gpio,
-	};
+	free_irq(gpio_to_irq(drvdata->headph_gpio), drvdata);
 
-	/* Remove headphone switch callback */
-	omap_update_gpio_switch(&headphone_switch);
+	hs_btn_input_free(drvdata);
 
-	input_free(drvdata);
+	nokia_av_unregister_sysfs(pdev);
 
 	gpio_free(drvdata->eci0_gpio);
 	gpio_free(drvdata->eci1_gpio);
 
-	nokia_av_unregister_sysfs(pdev);
+	cancel_delayed_work_sync(&drvdata->detection_work);
 
 	destroy_workqueue(drvdata->workqueue);
 

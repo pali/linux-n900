@@ -56,7 +56,7 @@
 #define SDRC_MPURATE_SCALE		8
 
 /* 2^SDRC_MPURATE_BASE_SHIFT: MPU MHz that SDRC_MPURATE_LOOPS is defined for */
-#define SDRC_MPURATE_BASE_SHIFT		9
+#define SDRC_MPURATE_BASE_SHIFT		11
 
 /*
  * SDRC_MPURATE_LOOPS: Number of MPU loops to execute at
@@ -136,7 +136,7 @@ static u16 _omap3_dpll_compute_freqsel(struct clk *clk, u8 n)
 	unsigned long fint;
 	u16 f = 0;
 
-	fint = clk->parent->rate / (n + 1);
+	fint = clk->parent->rate / n;
 
 	pr_debug("clock: fint is %lu\n", fint);
 
@@ -478,7 +478,9 @@ static int omap3_core_dpll_m2_set_rate(struct clk *clk, unsigned long rate)
 	u32 unlock_dll = 0;
 	u32 c;
 	unsigned long validrate, sdrcrate, mpurate;
-	struct omap_sdrc_params *sp;
+	struct omap_sdrc_params *sdrc_cs0;
+	struct omap_sdrc_params *sdrc_cs1;
+	int ret;
 
 	if (!clk || !rate)
 		return -EINVAL;
@@ -496,8 +498,8 @@ static int omap3_core_dpll_m2_set_rate(struct clk *clk, unsigned long rate)
 	else
 		sdrcrate >>= ((clk->rate / rate) >> 1);
 
-	sp = omap2_sdrc_get_params(sdrcrate);
-	if (!sp)
+	ret = omap2_sdrc_get_params(sdrcrate, &sdrc_cs0, &sdrc_cs1);
+	if (ret)
 		return -EINVAL;
 
 	if (sdrcrate < MIN_SDRC_DLL_LOCK_FREQ) {
@@ -516,14 +518,37 @@ static int omap3_core_dpll_m2_set_rate(struct clk *clk, unsigned long rate)
 	if (c == 0)
 		c = 1;
 
+	/* Increase delay for OPP2 & OPP3 by one to avoid random crashes */
+	if (c == 12 || c == 23)
+		c++;
 	pr_debug("clock: changing CORE DPLL rate from %lu to %lu\n", clk->rate,
 		 validrate);
-	pr_debug("clock: SDRC timing params used: %08x %08x %08x\n",
-		 sp->rfr_ctrl, sp->actim_ctrla, sp->actim_ctrlb);
+	pr_debug("clock: SDRC CS0 timing params used:"
+		 " RFR %08x CTRLA %08x CTRLB %08x MR %08x\n",
+		 sdrc_cs0->rfr_ctrl, sdrc_cs0->actim_ctrla,
+		 sdrc_cs0->actim_ctrlb, sdrc_cs0->mr);
+	if (sdrc_cs1)
+		pr_debug("clock: SDRC CS1 timing params used: "
+		 " RFR %08x CTRLA %08x CTRLB %08x MR %08x\n",
+		 sdrc_cs1->rfr_ctrl, sdrc_cs1->actim_ctrla,
+		 sdrc_cs1->actim_ctrlb, sdrc_cs1->mr);
 
-	omap3_configure_core_dpll(sp->rfr_ctrl, sp->actim_ctrla,
-				  sp->actim_ctrlb, new_div, unlock_dll, c,
-				  sp->mr, rate > clk->rate);
+	/*
+	 * Only the SDRC RFRCTRL value is seen to be safe to be
+	 * changed during dvfs.
+	 * The ACTiming values are left unchanged and should be
+	 * the ones programmed by the bootloader for higher OPP.
+	 */
+	if (sdrc_cs1)
+		omap3_configure_core_dpll(
+				  new_div, unlock_dll, c, rate > clk->rate,
+				  sdrc_cs0->rfr_ctrl, sdrc_cs0->mr,
+				  sdrc_cs1->rfr_ctrl, sdrc_cs1->mr);
+	else
+		omap3_configure_core_dpll(
+				  new_div, unlock_dll, c, rate > clk->rate,
+				  sdrc_cs0->rfr_ctrl, sdrc_cs0->mr,
+				  0, 0);
 
 	return 0;
 }
@@ -634,7 +659,7 @@ static void omap3_clkoutx2_recalc(struct clk *clk, unsigned long parent_rate,
 		pclk = pclk->parent;
 
 	/* clk does not have a DPLL as a parent? */
-	WARN_ON(!pclk);
+	BUG_ON(!pclk);
 
 	dd = pclk->dpll_data;
 

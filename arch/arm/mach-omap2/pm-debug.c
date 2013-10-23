@@ -169,6 +169,7 @@ static int pm_dbg_init_done;
 enum {
 	DEBUG_FILE_COUNTERS = 0,
 	DEBUG_FILE_TIMERS,
+	DEBUG_FILE_RESOURCES
 };
 
 struct pm_module_def {
@@ -433,6 +434,9 @@ static int pm_dbg_open(struct inode *inode, struct file *file)
 	case DEBUG_FILE_COUNTERS:
 		return single_open(file, pm_dbg_show_counters,
 			&inode->i_private);
+	case DEBUG_FILE_RESOURCES:
+		return single_open(file, resource_dump_reqs,
+			&inode->i_private);
 	case DEBUG_FILE_TIMERS:
 	default:
 		return single_open(file, pm_dbg_show_timers,
@@ -542,6 +546,8 @@ static int __init pm_dbg_init(void)
 		d, (void *)DEBUG_FILE_COUNTERS, &debug_fops);
 	(void) debugfs_create_file("time", S_IRUGO,
 		d, (void *)DEBUG_FILE_TIMERS, &debug_fops);
+	(void) debugfs_create_file("resources", S_IRUGO,
+		d, (void *)DEBUG_FILE_RESOURCES, &debug_fops);
 
 	pwrdm_for_each(pwrdms_setup, (void *)d);
 

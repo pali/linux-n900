@@ -629,7 +629,7 @@ xfs_trans_apply_sb_deltas(
 				  offsetof(xfs_dsb_t, sb_frextents) +
 				  sizeof(sbp->sb_frextents) - 1);
 
-	tp->t_mountp->m_super->s_dirt = 1;
+	mark_sb_dirty(tp->t_mountp->m_super);
 }
 
 /*

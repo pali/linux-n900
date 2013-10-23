@@ -219,6 +219,14 @@ struct mtd_info {
 	 * supposed to be called by MTD users */
 	int (*get_device) (struct mtd_info *mtd);
 	void (*put_device) (struct mtd_info *mtd);
+
+	uint32_t read_cnt;
+	uint32_t read_sz;
+	uint32_t write_cnt;
+	uint32_t write_sz;
+	uint32_t erase_cnt;
+	uint32_t erase_sz;
+	uint32_t other_cnt;
 };
 
 

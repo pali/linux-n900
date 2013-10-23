@@ -23,6 +23,8 @@
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/err.h>
+#include <linux/io.h>
+#include <linux/i2c/twl4030.h>
 
 #include <mach/board.h>
 #include <mach/display.h>
@@ -30,11 +32,113 @@
 
 #include "dss.h"
 
+#define CONTROL_PADCONF_BASE	0x48002000
+
+#define OMAP_SDI_PAD_DIS(pe,pu)	((7 << 0)		| /* MODE 7 = safe */ \
+				 (((pe) ? 1 : 0) << 3)	| /* PULL_ENA */      \
+				 (((pu) ? 1 : 0) << 4)	| /* PULL_UP  */      \
+				 (1 << 8))		  /* INPUT_EN */
+
+#define OMAP_SDI_PAD_EN		 (1 << 0)		  /* MODE 1 = SDI_xx */
+
+#define OMAP_SDI_PAD_MASK	OMAP_SDI_PAD_DIS(1, 1)
 
 static struct {
 	bool skip_init;
 	bool update_enabled;
 } sdi;
+
+/* CONTROL_PADCONF_DSS_DATAXX */
+static const u16 sdi_pads[] =
+{
+	0x0f0,		/* 10[ 7..0]:SDI_DAT1N */
+	0x0f2,		/* 10[15..0]:SDI_DAT1P */
+	0x0f4,		/* 12[ 7..0]:SDI_DAT2N */
+	0x0f6,		/* 12[15..0]:SDI_DAT2P */
+	0x0f8,		/* 14[ 7..0]:SDI_DAT3N */
+	0x0fa,		/* 14[15..0]:SDI_DAT3P */
+	0x108,		/* 22[ 7..0]:SDI_CLKN */
+	0x10a,		/* 22[15..0]:SDI_CLKP */
+};
+
+/*
+ * Check if bootloader / platform code has configured the SDI pads properly.
+ * This means it either configured all required pads for SDI mode, or that it
+ * left all the required pads unconfigured.
+ */
+static int sdi_pad_init(struct omap_display *display)
+{
+	unsigned req_map;
+	bool configured = false;
+	bool unconfigured = false;
+	int data_pairs;
+	int i;
+
+	data_pairs = display->hw_config.u.sdi.datapairs;
+	req_map = (1 << (data_pairs * 2)) - 1;		/* data lanes */
+	req_map |= 3 << 6;				/* clk lane */
+	for (i = 0; i < ARRAY_SIZE(sdi_pads); i++) {
+		u32 reg;
+		u32 val;
+
+		if (!((1 << i) & req_map))
+			/* Ignore unneded pads. */
+			continue;
+		reg = CONTROL_PADCONF_BASE + sdi_pads[i];
+		val = omap_readw(reg);
+		switch (val & 0x07) {	/* pad mode */
+		case 1:
+			if (unconfigured)
+				break;
+			/* Is the pull configuration ok for SDI mode? */
+			if ((val & OMAP_SDI_PAD_MASK) != OMAP_SDI_PAD_EN)
+				break;
+			configured = true;
+			break;
+		case 0:
+		case 7:
+			if (configured)
+				break;
+			unconfigured = true;
+			break;
+		default:
+			break;
+		}
+	}
+	if (i != ARRAY_SIZE(sdi_pads)) {
+		DSSERR("SDI: invalid pad configuration\n");
+		return -1;
+	}
+
+	return 0;
+}
+
+static void sdi_pad_config(struct omap_display *display, bool enable)
+{
+	int data_pairs;
+	bool pad_off_pe, pad_off_pu;
+	unsigned req_map;
+	int i;
+
+	data_pairs = display->hw_config.u.sdi.datapairs;
+	pad_off_pe = display->hw_config.u.sdi.pad_off_pe;
+	pad_off_pu = display->hw_config.u.sdi.pad_off_pu;
+	req_map = (1 << (data_pairs * 2)) - 1;		/* data lanes */
+	req_map |= 3 << 6;				/* clk lane */
+	for (i = 0; i < ARRAY_SIZE(sdi_pads); i++) {
+		u32 reg;
+		u16 val;
+
+		if (!((1 << i) & req_map))
+			continue;
+		if (enable)
+			val = OMAP_SDI_PAD_EN;
+		else
+			val = OMAP_SDI_PAD_DIS(pad_off_pe, pad_off_pu);
+		reg = CONTROL_PADCONF_BASE + sdi_pads[i];
+		omap_writew(val, reg);
+	}
+}
 
 static void sdi_basic_init(void)
 {
@@ -58,6 +162,10 @@ static int sdi_display_enable(struct omap_display *display)
 		DSSERR("display already enabled\n");
 		return -EINVAL;
 	}
+
+	twl4030_enable_regulator(RES_VAUX1);
+
+	sdi_pad_config(display, 1);
 
 	/* In case of skip_init sdi_init has already enabled the clocks */
 	if (!sdi.skip_init)
@@ -102,7 +210,9 @@ static int sdi_display_enable(struct omap_display *display)
 
 	if (!sdi.skip_init) {
 		dss_sdi_init(display->hw_config.u.sdi.datapairs);
-		dss_sdi_enable();
+		r = dss_sdi_enable();
+		if (r)
+			goto err1;
 		mdelay(2);
 	}
 
@@ -122,6 +232,8 @@ err2:
 err1:
 err0:
 	dss_clk_disable(DSS_CLK_ICK | DSS_CLK_FCK1);
+	twl4030_disable_regulator(RES_VAUX1);
+
 	return r;
 }
 
@@ -132,8 +244,10 @@ static void sdi_display_disable(struct omap_display *display)
 	if (display->state == OMAP_DSS_DISPLAY_DISABLED)
 		return;
 
-	if (display->state == OMAP_DSS_DISPLAY_SUSPENDED)
-		sdi_display_resume(display);
+	if (display->state == OMAP_DSS_DISPLAY_SUSPENDED) {
+		if (sdi_display_resume(display))
+			return;
+	}
 
 	display->panel->disable(display);
 
@@ -142,6 +256,9 @@ static void sdi_display_disable(struct omap_display *display)
 	dss_sdi_disable();
 
 	dss_clk_disable(DSS_CLK_ICK | DSS_CLK_FCK1);
+	sdi_pad_config(display, 0);
+
+	twl4030_disable_regulator(RES_VAUX1);
 
 	display->state = OMAP_DSS_DISPLAY_DISABLED;
 }
@@ -159,6 +276,9 @@ static int sdi_display_suspend(struct omap_display *display)
 	dss_sdi_disable();
 
 	dss_clk_disable(DSS_CLK_ICK | DSS_CLK_FCK1);
+	sdi_pad_config(display, 0);
+
+	twl4030_disable_regulator(RES_VAUX1);
 
 	display->state = OMAP_DSS_DISPLAY_SUSPENDED;
 
@@ -167,12 +287,19 @@ static int sdi_display_suspend(struct omap_display *display)
 
 static int sdi_display_resume(struct omap_display *display)
 {
+	int r;
+
 	if (display->state != OMAP_DSS_DISPLAY_SUSPENDED)
 		return -EINVAL;
 
+	twl4030_enable_regulator(RES_VAUX1);
+
+	sdi_pad_config(display, 1);
 	dss_clk_enable(DSS_CLK_ICK | DSS_CLK_FCK1);
 
-	dss_sdi_enable();
+	r = dss_sdi_enable();
+	if (r)
+		goto err;
 	mdelay(2);
 
 	dispc_enable_lcd_out(1);
@@ -183,6 +310,14 @@ static int sdi_display_resume(struct omap_display *display)
 	display->state = OMAP_DSS_DISPLAY_ACTIVE;
 
 	return 0;
+
+ err:
+	dss_clk_disable(DSS_CLK_ICK | DSS_CLK_FCK1);
+	sdi_pad_config(display, 0);
+
+	twl4030_disable_regulator(RES_VAUX1);
+
+	return r;
 }
 
 static int sdi_display_set_update_mode(struct omap_display *display,
@@ -215,7 +350,7 @@ static void sdi_get_timings(struct omap_display *display,
 	*timings = display->panel->timings;
 }
 
-void sdi_init_display(struct omap_display *display)
+int sdi_init_display(struct omap_display *display)
 {
 	DSSDBG("SDI init\n");
 
@@ -226,6 +361,8 @@ void sdi_init_display(struct omap_display *display)
 	display->set_update_mode = sdi_display_set_update_mode;
 	display->get_update_mode = sdi_display_get_update_mode;
 	display->get_timings = sdi_get_timings;
+
+	return sdi_pad_init(display);
 }
 
 int sdi_init(bool skip_init)

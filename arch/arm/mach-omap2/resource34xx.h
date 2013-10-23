@@ -26,8 +26,9 @@
 #include <mach/clock.h>
 #include <mach/powerdomain.h>
 #include <mach/omap-pm.h>
+#include "resource34xx_mutex.h"
 
-extern int sr_voltagescale_vcbypass(u32 target_opp, u8 vsel);
+extern int sr_voltagescale_vcbypass(u32 t_opp, u32 c_opp, u8 t_vsel, u8 c_vsel);
 
 /*
  * mpu_latency/core_latency are used to control the cpuidle C state.
@@ -92,6 +93,7 @@ static struct shared_resource core_pwrdm_latency = {
 	.ops		= &lat_res_ops,
 };
 
+#if !defined(CONFIG_MPU_BRIDGE) && !defined(CONFIG_MPU_BRIDGE_MODULE)
 static struct pd_latency_db iva2_pwrdm_lat_db = {
 	.pwrdm_name = "iva2_pwrdm",
 	.latency[PD_LATENCY_OFF] = 1100,
@@ -106,6 +108,7 @@ static struct shared_resource iva2_pwrdm_latency = {
 	.resource_data	= &iva2_pwrdm_lat_db,
 	.ops		= &pd_lat_res_ops,
 };
+#endif
 
 static struct pd_latency_db gfx_pwrdm_lat_db = {
 	.pwrdm_name = "gfx_pwrdm",
@@ -132,7 +135,7 @@ static struct shared_resource gfx_pwrdm_latency = {
 
 static struct shared_resource sgx_pwrdm_latency = {
 	.name 		= "sgx_pwrdm_latency",
-	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430ES2),
+	.omap_chip	= OMAP_CHIP_INIT(CHIP_GE_OMAP3430ES2),
 	.resource_data  = &sgx_pwrdm_lat_db,
 	.ops		= &pd_lat_res_ops,
 };
@@ -207,7 +210,7 @@ static struct pd_latency_db usbhost_pwrdm_lat_db = {
 
 static struct shared_resource usbhost_pwrdm_latency = {
 	.name		= "usbhost_pwrdm_latency",
-	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430ES2),
+	.omap_chip	= OMAP_CHIP_INIT(CHIP_GE_OMAP3430ES2),
 	.resource_data  = &usbhost_pwrdm_lat_db,
 	.ops		= &pd_lat_res_ops,
 };
@@ -279,7 +282,9 @@ struct shared_resource *resources_omap[] __initdata = {
 	&core_latency,
 	/* Power Domain Latency resources */
 	&core_pwrdm_latency,
+#if !defined(CONFIG_MPU_BRIDGE) && !defined(CONFIG_MPU_BRIDGE_MODULE)
 	&iva2_pwrdm_latency,
+#endif
 	&gfx_pwrdm_latency,
 	&sgx_pwrdm_latency,
 	&dss_pwrdm_latency,

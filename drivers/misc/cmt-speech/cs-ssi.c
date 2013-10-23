@@ -500,8 +500,11 @@ int cs_ssi_buf_config(struct cs_buffer_config *buf_cfg)
 
 	spin_unlock_bh(&ssi_iface.lock);
 
-	if (ssi_iface.buf_size)
+	if (ssi_iface.buf_size) {
+		local_bh_disable();
 		cs_ssi_read_on_data();
+		local_bh_enable();
+	}
 
 error:
 	DLEAVE(r);
@@ -540,7 +543,9 @@ int cs_ssi_start(unsigned long mmap_base, unsigned long mmap_size)
 
 	spin_unlock_bh(&ssi_iface.lock);
 
+	local_bh_disable();
 	cs_ssi_read_on_control();
+	local_bh_enable();
 
 error:
 	DLEAVE(err);

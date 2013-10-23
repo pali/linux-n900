@@ -107,6 +107,7 @@ struct ieee80211_bss {
 	 * otherwise, you probably don't want to use them. */
 	int has_erp_value;
 	u8 erp_value;
+	bool hold;
 };
 
 static inline u8 *bss_mesh_cfg(struct ieee80211_bss *bss)
@@ -274,11 +275,6 @@ struct mesh_config {
 	u16 dot11MeshHWMPnetDiameterTraversalTime;
 };
 
-enum rssi_signal_state {
-	RSSI_SIGNAL_STATE_HIGH,
-	RSSI_SIGNAL_STATE_LOW,
-};
-
 /* flags used in struct ieee80211_if_sta.flags */
 #define IEEE80211_STA_SSID_SET		BIT(0)
 #define IEEE80211_STA_BSSID_SET		BIT(1)
@@ -318,6 +314,8 @@ enum ieee80211_sta_mlme_state {
 struct ieee80211_if_sta {
 	struct timer_list timer;
 	struct work_struct work;
+	struct work_struct beacon_loss_work;
+
 	u8 bssid[ETH_ALEN], prev_bssid[ETH_ALEN];
 	u8 ssid[IEEE80211_MAX_SSID_LEN];
 	enum ieee80211_sta_mlme_state state;
@@ -343,6 +341,7 @@ struct ieee80211_if_sta {
 	unsigned long request;
 
 	unsigned long last_probe;
+	unsigned long last_beacon;
 
 	unsigned int flags;
 
@@ -358,7 +357,7 @@ struct ieee80211_if_sta {
 
 	int num_beacons; /* number of TXed beacon frames by this STA */
 	unsigned int roam_threshold_count;
-	enum rssi_signal_state rssi_signal_state;
+	enum ieee80211_rssi_state rssi_state;
 };
 
 struct ieee80211_if_mesh {
@@ -1038,6 +1037,9 @@ u64 ieee80211_mandatory_rates(struct ieee80211_local *local,
 void ieee80211_dynamic_ps_enable_work(struct work_struct *work);
 void ieee80211_dynamic_ps_disable_work(struct work_struct *work);
 void ieee80211_dynamic_ps_timer(unsigned long data);
+void ieee80211_sta_rx_notify(struct ieee80211_sub_if_data *sdata,
+			     struct ieee80211_hdr *hdr);
+void ieee80211_beacon_loss_work(struct work_struct *work);
 
 void ieee80211_wake_queues_by_reason(struct ieee80211_hw *hw,
 				     enum queue_stop_reason reason);

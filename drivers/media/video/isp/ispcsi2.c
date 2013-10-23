@@ -1760,9 +1760,12 @@ int isp_csi2_timings_get_all(void)
 
 /**
  * isp_csi2_isr - CSI2 interrupt handling.
+ *
+ * Return -EIO on Transmission error
  **/
-void isp_csi2_isr(void)
+int isp_csi2_isr(void)
 {
+	int retval = 0;
 	u32 csi2_irqstatus, cpxio1_irqstatus, ctxirqstatus;
 
 	csi2_irqstatus = isp_reg_readl(current_csi2_cfg.dev,
@@ -1771,6 +1774,7 @@ void isp_csi2_isr(void)
 	isp_reg_writel(current_csi2_cfg.dev, csi2_irqstatus,
 		       OMAP3_ISP_IOMEM_CSI2A, ISPCSI2_IRQSTATUS);
 
+	/* Failure Cases */
 	if (csi2_irqstatus & ISPCSI2_IRQSTATUS_COMPLEXIO1_ERR_IRQ) {
 		cpxio1_irqstatus = isp_reg_readl(current_csi2_cfg.dev,
 						 OMAP3_ISP_IOMEM_CSI2A,
@@ -1778,10 +1782,37 @@ void isp_csi2_isr(void)
 		isp_reg_writel(current_csi2_cfg.dev, cpxio1_irqstatus,
 			       OMAP3_ISP_IOMEM_CSI2A,
 			       ISPCSI2_COMPLEXIO1_IRQSTATUS);
-		printk(KERN_ERR "CSI2: ComplexIO Error IRQ %x\n",
-		       cpxio1_irqstatus);
+		dev_dbg(current_csi2_cfg.dev, "CSI2: ComplexIO Error IRQ %x\n",
+			cpxio1_irqstatus);
+		retval = -EIO;
 	}
 
+	if (csi2_irqstatus & (ISPCSI2_IRQSTATUS_OCP_ERR_IRQ |
+			      ISPCSI2_IRQSTATUS_SHORT_PACKET_IRQ |
+			      ISPCSI2_IRQSTATUS_ECC_NO_CORRECTION_IRQ |
+			      ISPCSI2_IRQSTATUS_COMPLEXIO2_ERR_IRQ |
+			      ISPCSI2_IRQSTATUS_FIFO_OVF_IRQ)) {
+		dev_dbg(current_csi2_cfg.dev, "CSI2 Err:"
+			" OCP:%d,"
+			" Short_pack:%d,"
+			" ECC:%d,"
+			" CPXIO2:%d,"
+			" FIFO_OVF:%d,"
+			"\n",
+			(csi2_irqstatus &
+			 ISPCSI2_IRQSTATUS_OCP_ERR_IRQ) ? 1 : 0,
+			(csi2_irqstatus &
+			 ISPCSI2_IRQSTATUS_SHORT_PACKET_IRQ) ? 1 : 0,
+			(csi2_irqstatus &
+			 ISPCSI2_IRQSTATUS_ECC_NO_CORRECTION_IRQ) ? 1 : 0,
+			(csi2_irqstatus &
+			 ISPCSI2_IRQSTATUS_COMPLEXIO2_ERR_IRQ) ? 1 : 0,
+			(csi2_irqstatus &
+			 ISPCSI2_IRQSTATUS_FIFO_OVF_IRQ) ? 1 : 0);
+		retval = -EIO;
+	}
+
+	/* Successful cases */
 	if (csi2_irqstatus & ISPCSI2_IRQSTATUS_CONTEXT(0)) {
 		ctxirqstatus = isp_reg_readl(current_csi2_cfg.dev,
 					     OMAP3_ISP_IOMEM_CSI2A,
@@ -1791,25 +1822,10 @@ void isp_csi2_isr(void)
 			       ISPCSI2_CTX_IRQSTATUS(0));
 	}
 
-	if (csi2_irqstatus & ISPCSI2_IRQSTATUS_OCP_ERR_IRQ)
-		printk(KERN_ERR "CSI2: OCP Transmission Error\n");
-
-	if (csi2_irqstatus & ISPCSI2_IRQSTATUS_SHORT_PACKET_IRQ)
-		printk(KERN_ERR "CSI2: Short packet receive error\n");
-
 	if (csi2_irqstatus & ISPCSI2_IRQSTATUS_ECC_CORRECTION_IRQ)
-		printk(KERN_DEBUG "CSI2: ECC correction done\n");
+		dev_dbg(current_csi2_cfg.dev, "CSI2: ECC correction done\n");
 
-	if (csi2_irqstatus & ISPCSI2_IRQSTATUS_ECC_NO_CORRECTION_IRQ)
-		printk(KERN_ERR "CSI2: ECC correction failed\n");
-
-	if (csi2_irqstatus & ISPCSI2_IRQSTATUS_COMPLEXIO2_ERR_IRQ)
-		printk(KERN_ERR "CSI2: ComplexIO #2 failed\n");
-
-	if (csi2_irqstatus & ISPCSI2_IRQSTATUS_FIFO_OVF_IRQ)
-		printk(KERN_ERR "CSI2: FIFO overflow error\n");
-
-	return;
+	return retval;
 }
 EXPORT_SYMBOL(isp_csi2_isr);
 
@@ -1916,21 +1932,6 @@ void isp_csi2_irq_status_set(int enable)
 EXPORT_SYMBOL(isp_csi2_irq_status_set);
 
 /**
- * isp_csi2_irq_status_set - Enables main CSI2 IRQ.
- * @enable: Enable/disable main CSI2 interrupt
- **/
-void isp_csi2_irq_set(int enable)
-{
-	isp_reg_writel(current_csi2_cfg.dev, IRQ0STATUS_CSIA_IRQ,
-		       OMAP3_ISP_IOMEM_MAIN,
-		       ISP_IRQ0STATUS);
-	isp_reg_and_or(current_csi2_cfg.dev, OMAP3_ISP_IOMEM_MAIN,
-		       ISP_IRQ0ENABLE, ~IRQ0ENABLE_CSIA_IRQ,
-		       (enable ? IRQ0ENABLE_CSIA_IRQ : 0));
-}
-EXPORT_SYMBOL(isp_csi2_irq_set);
-
-/**
  * isp_csi2_irq_all_set - Enable/disable CSI2 interrupts.
  * @enable: 0-Disable, 1-Enable.
  **/
@@ -1940,9 +1941,7 @@ void isp_csi2_irq_all_set(int enable)
 		isp_csi2_irq_complexio1_set(enable);
 		isp_csi2_irq_ctx_set(enable);
 		isp_csi2_irq_status_set(enable);
-		isp_csi2_irq_set(enable);
 	} else {
-		isp_csi2_irq_set(enable);
 		isp_csi2_irq_status_set(enable);
 		isp_csi2_irq_ctx_set(enable);
 		isp_csi2_irq_complexio1_set(enable);

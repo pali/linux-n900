@@ -42,9 +42,13 @@
 #define INFO(fmt, args...) yprintk(KERN_INFO, fmt, ## args)
 #define ERR(fmt, args...) yprintk(KERN_ERR, fmt, ## args)
 
+extern const char *otg_state_string(struct musb *);
+
+#ifdef CONFIG_USB_MUSB_DEBUG
+
 #define xprintk(level, facility, format, args...) do { \
 	if (_dbg_level(level)) { \
-		printk(facility "%s %d: " format , \
+		printk(facility "%-20s %4d: " format , \
 				__func__, __LINE__ , ## args); \
 	} } while (0)
 
@@ -54,9 +58,10 @@ static inline int _dbg_level(unsigned l)
 {
 	return musb_debug >= l;
 }
-
 #define DBG(level, fmt, args...) xprintk(level, KERN_DEBUG, fmt, ## args)
+#else
+#define DBG(level, fmt, args...)	do {} while(0)
+#endif	/* CONFIG_USB_MUSB_DEBUG */
 
-extern const char *otg_state_string(struct musb *);
 
 #endif				/*  __MUSB_LINUX_DEBUG_H__ */

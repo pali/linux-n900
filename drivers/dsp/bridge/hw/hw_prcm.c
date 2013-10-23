@@ -29,21 +29,21 @@
 #include <hw_defs.h>
 #include <hw_prcm.h>
 
-static HW_STATUS HW_RST_WriteVal(const u32 baseAddress,
+static HW_STATUS HW_RST_WriteVal(const void __iomem *baseAddress,
 				    enum HW_RstModule_t r,
 				    enum HW_SetClear_t val);
 
-HW_STATUS HW_RST_Reset(const u32 baseAddress, enum HW_RstModule_t r)
+HW_STATUS HW_RST_Reset(const void __iomem *baseAddress, enum HW_RstModule_t r)
 {
 	return HW_RST_WriteVal(baseAddress, r, HW_SET);
 }
 
-HW_STATUS HW_RST_UnReset(const u32 baseAddress, enum HW_RstModule_t r)
+HW_STATUS HW_RST_UnReset(const void __iomem *baseAddress, enum HW_RstModule_t r)
 {
 	return HW_RST_WriteVal(baseAddress, r, HW_CLEAR);
 }
 
-static HW_STATUS HW_RST_WriteVal(const u32 baseAddress,
+static HW_STATUS HW_RST_WriteVal(const void __iomem *baseAddress,
 				    enum HW_RstModule_t r,
 				    enum HW_SetClear_t val)
 {
@@ -66,8 +66,8 @@ static HW_STATUS HW_RST_WriteVal(const u32 baseAddress,
 	return status;
 }
 
-HW_STATUS HW_PWR_IVA2StateGet(const u32 baseAddress, enum HW_PwrModule_t p,
-				enum HW_PwrState_t *value)
+HW_STATUS HW_PWR_IVA2StateGet(const void __iomem *baseAddress,
+		enum HW_PwrModule_t p, enum HW_PwrState_t *value)
 {
 	HW_STATUS status = RET_OK;
 	u32 temp;
@@ -93,7 +93,7 @@ HW_STATUS HW_PWR_IVA2StateGet(const u32 baseAddress, enum HW_PwrModule_t p,
 	return status;
 }
 
-HW_STATUS HW_PWRST_IVA2RegGet(const u32 baseAddress, u32 *value)
+HW_STATUS HW_PWRST_IVA2RegGet(const void __iomem *baseAddress, u32 *value)
 {
 	HW_STATUS status = RET_OK;
 
@@ -103,7 +103,7 @@ HW_STATUS HW_PWRST_IVA2RegGet(const u32 baseAddress, u32 *value)
 }
 
 
-HW_STATUS HW_PWR_IVA2PowerStateSet(const u32 baseAddress,
+HW_STATUS HW_PWR_IVA2PowerStateSet(const void __iomem *baseAddress,
 				     enum HW_PwrModule_t p,
 				     enum HW_PwrState_t value)
 {
@@ -135,7 +135,7 @@ HW_STATUS HW_PWR_IVA2PowerStateSet(const u32 baseAddress,
 	return status;
 }
 
-HW_STATUS HW_PWR_CLKCTRL_IVA2RegSet(const u32 baseAddress,
+HW_STATUS HW_PWR_CLKCTRL_IVA2RegSet(const void __iomem *baseAddress,
 				      enum HW_TransitionState_t val)
 {
 	HW_STATUS status = RET_OK;
@@ -146,8 +146,8 @@ HW_STATUS HW_PWR_CLKCTRL_IVA2RegSet(const u32 baseAddress,
 
 }
 
-HW_STATUS HW_RSTST_RegGet(const u32 baseAddress, enum HW_RstModule_t m,
-			    u32 *value)
+HW_STATUS HW_RSTST_RegGet(const void __iomem *baseAddress,
+		enum HW_RstModule_t m, u32 *value)
 {
 	HW_STATUS status = RET_OK;
 
@@ -156,8 +156,8 @@ HW_STATUS HW_RSTST_RegGet(const u32 baseAddress, enum HW_RstModule_t m,
 	return status;
 }
 
-HW_STATUS HW_RSTCTRL_RegGet(const u32 baseAddress, enum HW_RstModule_t m,
-			      u32 *value)
+HW_STATUS HW_RSTCTRL_RegGet(const void __iomem *baseAddress,
+		enum HW_RstModule_t m, u32 *value)
 {
 	HW_STATUS status = RET_OK;
 

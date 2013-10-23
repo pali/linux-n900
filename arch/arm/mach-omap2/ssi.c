@@ -32,6 +32,8 @@
 #include <linux/ssi_driver_if.h>
 #include "clock.h"
 #include <mach/omap-pm.h>
+#include "cm.h"
+#include "cm-regbits-34xx.h"
 
 #define SSI_RATE_CHANGE		1
 
@@ -153,8 +155,7 @@ static int ssi_clk_notifier_unregister(struct clk *clk,
 
 	ssi_clk = container_of(clk, struct ssi_internal_clk, clk);
 	ssi_clk->drv_nb = NULL;
-	ssi_clk->nb.priority = INT_MAX;
-	return clk_notifier_unregister(ssi_clk->childs[1], nb); /* FCK */
+	return clk_notifier_unregister(ssi_clk->childs[1], &ssi_clk->nb);
 }
 
 static void ssi_save_ctx(struct platform_device *pdev)
@@ -363,12 +364,32 @@ static int ssi_clk_init(struct ssi_internal_clk *ssi_clk)
 	return 0;
 }
 
+static void disable_dpll3_autoidle(void)
+{
+	u32 v;
+
+	v = cm_read_mod_reg(PLL_MOD, CM_AUTOIDLE);
+	v &= ~0x7;
+	cm_write_mod_reg(v, PLL_MOD, CM_AUTOIDLE);
+}
+
+static void enable_dpll3_autoidle(void)
+{
+	u32 v;
+
+	v = cm_read_mod_reg(PLL_MOD, CM_AUTOIDLE);
+	v |= 1;
+	cm_write_mod_reg(v, PLL_MOD, CM_AUTOIDLE);
+}
+
 static int ssi_clk_enable(struct clk *clk)
 {
 	struct ssi_internal_clk *ssi_clk =
 				container_of(clk, struct ssi_internal_clk, clk);
 	int err;
 	int i;
+
+	disable_dpll3_autoidle();
 
 	for (i = 0; i < ssi_clk->n_childs; i++) {
 		err = omap2_clk_enable(ssi_clk->childs[i]);
@@ -392,6 +413,8 @@ rollback:
 	for (i = i - 1; i >= 0; i--)
 		omap2_clk_disable(ssi_clk->childs[i]);
 
+	enable_dpll3_autoidle();
+
 	return err;
 }
 
@@ -410,6 +433,9 @@ static void ssi_clk_disable(struct clk *clk)
 
 	for (i = 0; i < ssi_clk->n_childs; i++)
 		omap2_clk_disable(ssi_clk->childs[i]);
+
+	enable_dpll3_autoidle();
+
 }
 
 int omap_ssi_config(struct omap_ssi_board_config *ssi_config)
@@ -434,8 +460,6 @@ int omap_ssi_config(struct omap_ssi_board_config *ssi_config)
 		ssi_resources[6 + port].flags &= ~IORESOURCE_UNSET;
 		ssi_resources[6 + port].flags |= IORESOURCE_IRQ_HIGHEDGE |
 							IORESOURCE_IRQ_LOWEDGE;
-
-		set_irq_type(gpio_to_irq(cawake_gpio), IRQ_TYPE_EDGE_BOTH);
 	}
 	return 0;
 }

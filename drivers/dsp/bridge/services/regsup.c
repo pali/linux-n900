@@ -238,8 +238,10 @@ DSP_STATUS regsupSetValue(char *valName, void *pBuf, u32 dataSize)
 		/*  No match, need to make a new entry  */
 		/*  First check to see if we can make any more entries.  */
 		if (pRegKey->numValueEntries < BRIDGE_MAX_NUM_REG_ENTRIES) {
-                       strncpy(pRegKey->values[pRegKey->numValueEntries].name,
-                               valName, BRIDGE_MAX_NAME_SIZE);
+			char *tmp_name =
+				pRegKey->values[pRegKey->numValueEntries].name;
+			strncpy(tmp_name, valName, BRIDGE_MAX_NAME_SIZE - 1);
+			tmp_name[BRIDGE_MAX_NAME_SIZE - 1] = '\0';
 			pRegKey->values[pRegKey->numValueEntries].pData =
 					MEM_Alloc(dataSize, MEM_NONPAGED);
 			if (pRegKey->values[pRegKey->numValueEntries].pData !=

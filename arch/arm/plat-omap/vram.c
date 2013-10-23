@@ -31,13 +31,13 @@
 #include <linux/seq_file.h>
 #include <linux/bootmem.h>
 #include <linux/omapfb.h>
+#include <linux/completion.h>
 
 #include <asm/setup.h>
 
 #include <mach/sram.h>
 #include <mach/vram.h>
-
-#include <mach/dss_boottime.h>
+#include <mach/dma.h>
 
 #ifdef DEBUG
 #define DBG(format, ...) printk(KERN_DEBUG "VRAM: " format, ## __VA_ARGS__)
@@ -62,11 +62,12 @@
  * time when we cannot yet allocate the region list */
 #define MAX_POSTPONED_REGIONS 10
 
-static int postponed_cnt __initdata;
+static bool vram_initialized;
+static int postponed_cnt;
 static struct {
 	unsigned long paddr;
 	size_t size;
-} postponed_regions[MAX_POSTPONED_REGIONS] __initdata;
+} postponed_regions[MAX_POSTPONED_REGIONS];
 
 struct vram_alloc {
 	struct list_head list;
@@ -147,39 +148,32 @@ static void omap_vram_free_allocation(struct vram_alloc *va)
 	kfree(va);
 }
 
-static __init int omap_vram_add_region_postponed(unsigned long paddr,
-		size_t size)
-{
-	if (postponed_cnt == MAX_POSTPONED_REGIONS)
-		return -ENOMEM;
-
-	postponed_regions[postponed_cnt].paddr = paddr;
-	postponed_regions[postponed_cnt].size = size;
-
-	++postponed_cnt;
-
-	return 0;
-}
-
-/* add/remove_region can be exported if there's need to add/remove regions
- * runtime */
-static int omap_vram_add_region(unsigned long paddr, size_t size)
+int omap_vram_add_region(unsigned long paddr, size_t size)
 {
 	struct vram_region *rm;
 	unsigned pages;
 
-	DBG("adding region paddr %08lx size %d\n",
-			paddr, size);
+	if (vram_initialized) {
+		DBG("adding region paddr %08lx size %d\n",
+				paddr, size);
 
-	size &= PAGE_MASK;
-	pages = size >> PAGE_SHIFT;
+		size &= PAGE_MASK;
+		pages = size >> PAGE_SHIFT;
 
-	rm = omap_vram_create_region(paddr, pages);
-	if (rm == NULL)
-		return -ENOMEM;
+		rm = omap_vram_create_region(paddr, pages);
+		if (rm == NULL)
+			return -ENOMEM;
 
-	list_add(&rm->list, &region_list);
+		list_add(&rm->list, &region_list);
+	} else {
+		if (postponed_cnt == MAX_POSTPONED_REGIONS)
+			return -ENOMEM;
 
+		postponed_regions[postponed_cnt].paddr = paddr;
+		postponed_regions[postponed_cnt].size = size;
+
+		++postponed_cnt;
+	}
 	return 0;
 }
 
@@ -284,6 +278,59 @@ int omap_vram_reserve(unsigned long paddr, size_t size)
 }
 EXPORT_SYMBOL(omap_vram_reserve);
 
+static void _omap_vram_dma_cb(int lch, u16 ch_status, void *data)
+{
+	struct completion *compl = data;
+	complete(compl);
+}
+
+static int _omap_vram_clear(u32 paddr, unsigned pages)
+{
+	struct completion compl;
+	unsigned elem_count;
+	unsigned frame_count;
+	int r;
+	int lch;
+
+	init_completion(&compl);
+
+	r = omap_request_dma(OMAP_DMA_NO_DEVICE, "VRAM DMA",
+			_omap_vram_dma_cb,
+			&compl, &lch);
+	if (r) {
+		pr_err("VRAM: request_dma failed for memory clear\n");
+		return -EBUSY;
+	}
+
+	elem_count = pages * PAGE_SIZE / 4;
+	frame_count = 1;
+
+	omap_set_dma_transfer_params(lch, OMAP_DMA_DATA_TYPE_S32,
+			elem_count, frame_count,
+			OMAP_DMA_SYNC_ELEMENT,
+			0, 0);
+
+	omap_set_dma_dest_params(lch, 0, OMAP_DMA_AMODE_POST_INC,
+			paddr, 0, 0);
+
+	omap_set_dma_color_mode(lch, OMAP_DMA_CONSTANT_FILL, 0x000000);
+
+	omap_start_dma(lch);
+
+	if (wait_for_completion_timeout(&compl, msecs_to_jiffies(1000)) == 0) {
+		omap_stop_dma(lch);
+		pr_err("VRAM: dma timeout while clearing memory\n");
+		r = -EIO;
+		goto err;
+	}
+
+	r = 0;
+err:
+	omap_free_dma(lch);
+
+	return r;
+}
+
 static int _omap_vram_alloc(int mtype, unsigned pages, unsigned long *paddr)
 {
 	struct vram_region *rm;
@@ -321,6 +368,8 @@ found:
 
 		*paddr = start;
 
+		_omap_vram_clear(start, pages);
+
 		return 0;
 	}
 
@@ -348,6 +397,44 @@ int omap_vram_alloc(int mtype, size_t size, unsigned long *paddr)
 	return r;
 }
 EXPORT_SYMBOL(omap_vram_alloc);
+
+void omap_vram_get_info(unsigned long *vram,
+		unsigned long *free_vram,
+		unsigned long *largest_free_block)
+{
+	struct vram_region *vr;
+	struct vram_alloc *va;
+
+	*vram = 0;
+	*free_vram = 0;
+	*largest_free_block = 0;
+
+	mutex_lock(&region_mutex);
+
+	list_for_each_entry(vr, &region_list, list) {
+		unsigned free;
+		unsigned long pa;
+
+		pa = vr->paddr;
+		*vram += vr->pages << PAGE_SHIFT;
+
+		list_for_each_entry(va, &vr->alloc_list, list) {
+			free = va->paddr - pa;
+			*free_vram += free;
+			if (free > *largest_free_block)
+				*largest_free_block = free;
+			pa = va->paddr + (va->pages << PAGE_SHIFT);
+		}
+
+		free = vr->paddr + (vr->pages << PAGE_SHIFT) - pa;
+		*free_vram += free;
+		if (free > *largest_free_block)
+			*largest_free_block = free;
+	}
+
+	mutex_unlock(&region_mutex);
+}
+EXPORT_SYMBOL(omap_vram_get_info);
 
 #ifdef CONFIG_PROC_FS
 static void *r_next(struct seq_file *m, void *v, loff_t *pos)
@@ -440,6 +527,8 @@ static __init int omap_vram_init(void)
 {
 	int i, r;
 
+	vram_initialized = 1;
+
 	for (i = 0; i < postponed_cnt; i++)
 		omap_vram_add_region(postponed_regions[i].paddr,
 				postponed_regions[i].size);
@@ -474,10 +563,6 @@ static void __init omapfb_early_vram(char **p)
 	omapfb_def_sdram_vram_size = memparse(*p, p);
 	if (**p == ',')
 		omapfb_def_sdram_vram_start = simple_strtoul((*p) + 1, p, 16);
-
-	printk("omapfb_early_vram, %d, 0x%x\n",
-			omapfb_def_sdram_vram_size,
-			omapfb_def_sdram_vram_start);
 }
 __early_param("vram=", omapfb_early_vram);
 
@@ -519,28 +604,6 @@ void __init omapfb_reserve_sdram(void)
 	sdram_start = bdata->node_min_pfn << PAGE_SHIFT;
 	sdram_size = (bdata->node_low_pfn << PAGE_SHIFT) - sdram_start;
 
-#ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
-	if (!paddr) {
-		unsigned long fb_paddr;
-		size_t fb_size;
-
-		fb_paddr = dss_boottime_get_plane_base(0);
-		fb_size = dss_boottime_get_plane_size(0);
-
-		if (fb_paddr != -1UL && fb_size > 0) {
-			size += fb_size;
-			if (fb_paddr + size <= sdram_start + sdram_size)
-				paddr = fb_paddr;
-			else
-				paddr = fb_paddr + fb_size - size;
-
-			pr_info("Bootloader framebuffer: %zd bytes at 0x%lx. "
-					"Setting VRAM start to 0x%x.\n",
-					fb_size, fb_paddr, paddr);
-		}
-	}
-#endif
-
 	if (paddr) {
 		if ((paddr & ~PAGE_MASK) || paddr < sdram_start ||
 				paddr + size > sdram_start + sdram_size) {
@@ -548,7 +611,10 @@ void __init omapfb_reserve_sdram(void)
 			return;
 		}
 
-		reserve_bootmem(paddr, size, BOOTMEM_DEFAULT);
+		if (reserve_bootmem(paddr, size, BOOTMEM_EXCLUSIVE) < 0) {
+			pr_err("FB: failed to reserve VRAM\n");
+			return;
+		}
 	} else {
 		if (size > sdram_size) {
 			printk(KERN_ERR "Illegal SDRAM size for VRAM\n");
@@ -559,7 +625,7 @@ void __init omapfb_reserve_sdram(void)
 		BUG_ON(paddr & ~PAGE_MASK);
 	}
 
-	omap_vram_add_region_postponed(paddr, size);
+	omap_vram_add_region(paddr, size);
 
 	pr_info("Reserving %u bytes SDRAM for VRAM\n", size);
 }
@@ -615,7 +681,7 @@ unsigned long __init omapfb_reserve_sram(unsigned long sram_pstart,
 		reserved = pend_avail - paddr;
 	size_avail = pend_avail - reserved - pstart_avail;
 
-	omap_vram_add_region_postponed(paddr, size);
+	omap_vram_add_region(paddr, size);
 
 	if (reserved)
 		pr_info("Reserving %lu bytes SRAM for VRAM\n", reserved);

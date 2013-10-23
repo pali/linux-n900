@@ -264,10 +264,12 @@ ErrorExit:
 
 	if(psDCInfo->psFuncTable)
 	{
-		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psDCInfo->psFuncTable, IMG_NULL);
+		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_DC_SRV2DISP_KMJTABLE),
+				psDCInfo->psFuncTable, IMG_NULL);
 	}
 	
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psDCInfo, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_DISPLAYCLASS_INFO),
+			psDCInfo, IMG_NULL);
 
 	return PVRSRV_ERROR_OUT_OF_MEMORY;
 }
@@ -324,9 +326,12 @@ FoundDevice:
 	psDCInfo = (PVRSRV_DISPLAYCLASS_INFO*)psDeviceNode->pvDevice;
 	PVR_ASSERT(psDCInfo->ui32RefCount == 0);
 	FreeDeviceID(psSysData, ui32DevIndex);
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psDCInfo->psFuncTable, IMG_NULL);
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psDCInfo, IMG_NULL);
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psDeviceNode, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_DC_SRV2DISP_KMJTABLE),
+			psDCInfo->psFuncTable, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_DISPLAYCLASS_INFO),
+			psDCInfo, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_DEVICE_NODE),
+			psDeviceNode, IMG_NULL);
 	return PVRSRV_OK;
 }
 
@@ -418,10 +423,12 @@ ErrorExit:
 
 	if(psBCInfo->psFuncTable)
 	{
-		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psBCInfo->psFuncTable, IMG_NULL);
+		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_BC_SRV2BUFFER_KMJTABLE),
+				psBCInfo->psFuncTable, IMG_NULL);
 	}
 
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psBCInfo, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_BUFFERCLASS_INFO),
+			psBCInfo, IMG_NULL);
 
 	return PVRSRV_ERROR_OUT_OF_MEMORY;	
 }
@@ -474,9 +481,12 @@ FoundDevice:
 
 	FreeDeviceID(psSysData, ui32DevIndex);
 	psBCInfo = (PVRSRV_BUFFERCLASS_INFO*)psDevNode->pvDevice;
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psBCInfo->psFuncTable, IMG_NULL);
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psBCInfo, IMG_NULL);
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psDevNode, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_BC_SRV2BUFFER_KMJTABLE),
+			psBCInfo->psFuncTable, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_BUFFERCLASS_INFO),
+			psBCInfo, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_DEVICE_NODE),
+			psDevNode, IMG_NULL);
 	return PVRSRV_OK;
 }
 
@@ -523,7 +533,8 @@ static PVRSRV_ERROR CloseDCDeviceCallBack(IMG_PVOID		pvParam,
 		psDCInfo->hExtDevice = IMG_NULL;
 	}
 
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psDCPerContextInfo, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_DISPLAYCLASS_PERCONTEXT_INFO),
+			psDCPerContextInfo, IMG_NULL);
 
 	return PVRSRV_OK;
 }
@@ -796,7 +807,8 @@ static PVRSRV_ERROR DestroyDCSwapChainCallBack(IMG_PVOID pvParam, IMG_UINT32 ui3
 		}
 	}
 
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psSwapChain, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_DC_SWAPCHAIN),
+			psSwapChain, IMG_NULL);
 
 	return eError;
 }
@@ -942,7 +954,8 @@ ErrorExit:
 
 	if(psSwapChain)
 	{
-		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psSwapChain, IMG_NULL);
+		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_DC_SWAPCHAIN),
+				psSwapChain, IMG_NULL);
 	}
 
 	return eError;
@@ -1485,11 +1498,14 @@ static PVRSRV_ERROR CloseBCDeviceCallBack(IMG_PVOID		pvParam,
 		
 		if(psBCInfo->psBuffer)
 		{
-			OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psBCInfo->psBuffer, IMG_NULL);
+			OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,
+					sizeof(PVRSRV_BC_BUFFER) * psBCInfo->ui32BufferCount,
+					psBCInfo->psBuffer, IMG_NULL);
 		}
 	}
 
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psBCPerContextInfo, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_BUFFERCLASS_PERCONTEXT_INFO),
+			psBCPerContextInfo, IMG_NULL);
 
 	return PVRSRV_OK;
 }
@@ -1507,6 +1523,7 @@ PVRSRV_ERROR PVRSRVOpenBCDeviceKM (PVRSRV_PER_PROCESS_DATA	*psPerProc,
 	SYS_DATA 				*psSysData;
 	IMG_UINT32 				i;
 	PVRSRV_ERROR			eError;
+	BUFFER_INFO sBufferInfo;
 
 	if(!phDeviceKM)
 	{
@@ -1556,8 +1573,6 @@ FoundDevice:
 
 	if(psBCInfo->ui32RefCount++ == 0)
 	{
-		BUFFER_INFO sBufferInfo;
-
 		psDeviceNode = (PVRSRV_DEVICE_NODE *)hDevCookie;
 		PVR_ASSERT(psDeviceNode != IMG_NULL);
 
@@ -1656,7 +1671,9 @@ ErrorExit:
 	
 	if(psBCInfo->psBuffer)
 	{
-		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, 0, psBCInfo->psBuffer, IMG_NULL);
+		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,
+				sizeof(PVRSRV_BC_BUFFER) * sBufferInfo.ui32BufferCount,
+				psBCInfo->psBuffer, IMG_NULL);
 	}
 
 	return eError;

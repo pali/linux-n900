@@ -201,6 +201,7 @@ static void twl4030_kp_report_changes(struct omap_keypad *kp, u16 *new_state)
 		}
 		kp->kp_state[row] = new_state[row];
 	}
+	input_sync(kp->omap_twl4030kp);
 }
 
 static inline int twl4030_kp_disabled(struct omap_keypad *kp)

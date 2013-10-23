@@ -58,9 +58,15 @@ extern struct omap_opp *l3_opps;
  * framework starts.  The "_if_" is to avoid name collisions with the
  * PM idle-loop code.
  */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline int __init omap_pm_if_early_init(struct omap_opp *mpu_opp_table,
+				 struct omap_opp *dsp_opp_table,
+				 struct omap_opp *l3_opp_table) { return 0; }
+#else
 int __init omap_pm_if_early_init(struct omap_opp *mpu_opp_table,
 				 struct omap_opp *dsp_opp_table,
 				 struct omap_opp *l3_opp_table);
+#endif
 
 /**
  * omap_pm_if_init - OMAP PM init code called after clock fw init
@@ -68,7 +74,11 @@ int __init omap_pm_if_early_init(struct omap_opp *mpu_opp_table,
  * The main initialization code.  OPP tables are passed in here.  The
  * "_if_" is to avoid name collisions with the PM idle-loop code.
  */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline int __init omap_pm_if_init(void) { return 0; }
+#else
 int __init omap_pm_if_init(void);
+#endif
 
 /**
  * omap_pm_if_exit - OMAP PM exit code
@@ -76,7 +86,11 @@ int __init omap_pm_if_init(void);
  * Exit code; currently unused.  The "_if_" is to avoid name
  * collisions with the PM idle-loop code.
  */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline void omap_pm_if_exit(void) { }
+#else
 void omap_pm_if_exit(void);
+#endif
 
 /*
  * Device-driver-originated constraints (via board-*.c files, platform_data)
@@ -113,7 +127,11 @@ void omap_pm_if_exit(void);
  *
  * No return value.
  */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline void omap_pm_set_max_mpu_wakeup_lat(struct device *dev, long t) { }
+#else
 void omap_pm_set_max_mpu_wakeup_lat(struct device *dev, long t);
+#endif
 
 
 /**
@@ -144,7 +162,31 @@ void omap_pm_set_max_mpu_wakeup_lat(struct device *dev, long t);
  *
  * No return value.
  */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline void omap_pm_set_min_bus_tput(struct device *dev, u8 agent_id, unsigned long r) { }
+#else
 void omap_pm_set_min_bus_tput(struct device *dev, u8 agent_id, unsigned long r);
+#endif
+
+/**
+ * omap_pm_set_min_mpu_freq - set minimum MPU frequency needed by device
+ * @dev: struct device * requesting the constraint
+ * @r: minimum MPU frequency (in Hz)
+ *
+ * Request that the minimum MPU frequency be no less than 'r' Hz.
+ *
+ * Multiple calls to set_min_mpu_freq() will replace the previous rate value
+ * for this device. To remove the frequency restriction for this device,
+ * call with r = 0.
+ *
+ * No return value.
+ */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline void omap_pm_set_min_mpu_freq(struct device *dev,
+		unsigned long r) { }
+#else
+void omap_pm_set_min_mpu_freq(struct device *dev, unsigned long r);
+#endif
 
 
 /**
@@ -171,7 +213,11 @@ void omap_pm_set_min_bus_tput(struct device *dev, u8 agent_id, unsigned long r);
  *
  * No return value.
  */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline void omap_pm_set_max_dev_wakeup_lat(struct device *dev, long t) { }
+#else
 void omap_pm_set_max_dev_wakeup_lat(struct device *dev, long t);
+#endif
 
 
 /**
@@ -200,7 +246,11 @@ void omap_pm_set_max_dev_wakeup_lat(struct device *dev, long t);
  *
  * No return value.
  */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline void omap_pm_set_max_sdma_lat(struct device *dev, long t) { }
+#else
 void omap_pm_set_max_sdma_lat(struct device *dev, long t);
+#endif
 
 
 /*
@@ -225,7 +275,11 @@ const struct omap_opp *omap_pm_dsp_get_opp_table(void);
  * information that code receives from the DSP/BIOS load estimator is the
  * target OPP ID; hence, this interface.  No return value.
  */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline void omap_pm_dsp_set_min_opp(u8 opp_id) { }
+#else
 void omap_pm_dsp_set_min_opp(u8 opp_id);
+#endif
 
 /**
  * omap_pm_dsp_get_opp - report the current DSP OPP ID
@@ -237,7 +291,11 @@ void omap_pm_dsp_set_min_opp(u8 opp_id);
  *
  * Returns the current VDD1 OPP ID, or 0 upon error.
  */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline u8 omap_pm_dsp_get_opp(void) { return 0; }
+#else
 u8 omap_pm_dsp_get_opp(void);
+#endif
 
 
 /*
@@ -265,14 +323,22 @@ struct cpufreq_frequency_table **omap_pm_cpu_get_freq_table(void);
  * Intended to be called by plat-omap/cpu_omap.c:omap_target().  No
  * return value.
  */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline void omap_pm_cpu_set_freq(unsigned long f) { }
+#else
 void omap_pm_cpu_set_freq(unsigned long f);
+#endif
 
 /**
  * omap_pm_cpu_get_freq - report the current CPU frequency
  *
  * Returns the current MPU frequency, or 0 upon error.
  */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline unsigned long omap_pm_cpu_get_freq(void) { return 0; }
+#else
 unsigned long omap_pm_cpu_get_freq(void);
+#endif
 
 
 /*
@@ -295,7 +361,11 @@ unsigned long omap_pm_cpu_get_freq(void);
  * continue counting.  Returns the number of context losses for this device,
  * or -EINVAL upon error.
  */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline int omap_pm_get_dev_context_loss_count(struct device *dev) { return 0; }
+#else
 int omap_pm_get_dev_context_loss_count(struct device *dev);
+#endif
 
 
 /*
@@ -311,7 +381,11 @@ int omap_pm_get_dev_context_loss_count(struct device *dev);
  * function is intended to be called by the clockdomain code, not by drivers.
  * No return value.
  */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline void omap_pm_pwrdm_active(struct powerdomain *pwrdm) { }
+#else
 void omap_pm_pwrdm_active(struct powerdomain *pwrdm);
+#endif
 
 
 /**
@@ -323,6 +397,10 @@ void omap_pm_pwrdm_active(struct powerdomain *pwrdm);
  * clock.  This function is intended to be called by the clockdomain
  * code, not by drivers.  No return value.
  */
+#ifdef CONFIG_OMAP_PM_NONE
+static inline void omap_pm_pwrdm_inactive(struct powerdomain *pwrdm) { }
+#else
 void omap_pm_pwrdm_inactive(struct powerdomain *pwrdm);
+#endif
 
 #endif

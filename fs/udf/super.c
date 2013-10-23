@@ -546,7 +546,7 @@ static void udf_write_super(struct super_block *sb)
 
 	if (!(sb->s_flags & MS_RDONLY))
 		udf_open_lvid(sb);
-	sb->s_dirt = 0;
+	mark_sb_clean(sb);
 
 	unlock_kernel();
 }
@@ -1924,7 +1924,7 @@ static int udf_fill_super(struct super_block *sb, void *options, int silent)
 	sb->s_op = &udf_sb_ops;
 	sb->s_export_op = &udf_export_ops;
 	sb->dq_op = NULL;
-	sb->s_dirt = 0;
+	mark_sb_clean(sb);
 	sb->s_magic = UDF_SUPER_MAGIC;
 	sb->s_time_gran = 1000;
 
@@ -2037,7 +2037,7 @@ static void udf_error(struct super_block *sb, const char *function,
 
 	if (!(sb->s_flags & MS_RDONLY)) {
 		/* mark sb error */
-		sb->s_dirt = 1;
+		mark_sb_dirty(sb);
 	}
 	va_start(args, fmt);
 	vsnprintf(error_buf, sizeof(error_buf), fmt, args);

@@ -893,7 +893,7 @@ bool NLDR_Init(void)
 
 	if (cRefs == 0) {
 		DBC_Assert(!NLDR_debugMask.flags);
-		GT_create(&NLDR_debugMask, "DL");	/* "DL" for DLdr */
+		GT_create(&NLDR_debugMask, "NL");	/* "NL" for NLdr */
 
 		RMM_init();
 	}

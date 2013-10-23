@@ -31,6 +31,8 @@
 #include "prm.h"
 #include "prm-regbits-24xx.h"
 
+#define OTG_SYSCONFIG (OMAP34XX_HSUSB_OTG_BASE + 0x404)
+
 static void __iomem *prm_base;
 static void __iomem *cm_base;
 
@@ -53,6 +55,7 @@ struct omap3_prcm_regs {
 	u32 pll_cm_clken2;
 	u32 cm_polctrl;
 	u32 iva2_cm_fclken;
+	u32 iva2_cm_clken_pll;
 	u32 core_cm_fclken1;
 	u32 core_cm_fclken3;
 	u32 sgx_cm_fclken;
@@ -112,6 +115,7 @@ struct omap3_prcm_regs {
 	u32 per_pm_mpugrpsel;
 	u32 per_pm_ivagrpsel;
 	u32 wkup_pm_wken;
+	u32 otg_sysconfig;
 };
 
 struct omap3_prcm_regs prcm_context;
@@ -268,6 +272,8 @@ void omap3_prcm_save_context(void)
 	prcm_context.cm_polctrl = __raw_readl(OMAP3430_CM_POLCTRL);
 	prcm_context.iva2_cm_fclken =
 			 cm_read_mod_reg(OMAP3430_IVA2_MOD, CM_FCLKEN);
+	prcm_context.iva2_cm_clken_pll = cm_read_mod_reg(OMAP3430_IVA2_MOD,
+			OMAP3430_CM_CLKEN_PLL);
 	prcm_context.core_cm_fclken1 =
 			 cm_read_mod_reg(CORE_MOD, CM_FCLKEN1);
 	prcm_context.core_cm_fclken3 =
@@ -385,6 +391,11 @@ void omap3_prcm_save_context(void)
 	prcm_context.per_pm_ivagrpsel =
 		 prm_read_mod_reg(OMAP3430_PER_MOD, OMAP3430_PM_IVAGRPSEL);
 	prcm_context.wkup_pm_wken = prm_read_mod_reg(WKUP_MOD, PM_WKEN);
+	/*
+	 * OTG_SYSCONFIG must be saved & restored because enabled AUTOIDLE
+	 * bit will eventually block sleep due to OMAP bug
+	 */
+	prcm_context.otg_sysconfig = omap_readl(OTG_SYSCONFIG);
 	return;
 }
 
@@ -422,6 +433,8 @@ void omap3_prcm_restore_context(void)
 	__raw_writel(prcm_context.cm_polctrl, OMAP3430_CM_POLCTRL);
 	cm_write_mod_reg(prcm_context.iva2_cm_fclken, OMAP3430_IVA2_MOD,
 					 CM_FCLKEN);
+	cm_write_mod_reg(prcm_context.iva2_cm_clken_pll, OMAP3430_IVA2_MOD,
+					OMAP3430_CM_CLKEN_PLL);
 	cm_write_mod_reg(prcm_context.core_cm_fclken1, CORE_MOD, CM_FCLKEN1);
 	cm_write_mod_reg(prcm_context.core_cm_fclken3, CORE_MOD,
 					 OMAP3430ES2_CM_FCLKEN3);
@@ -529,6 +542,7 @@ void omap3_prcm_restore_context(void)
 	prm_write_mod_reg(prcm_context.per_pm_ivagrpsel, OMAP3430_PER_MOD,
 					 OMAP3430_PM_IVAGRPSEL);
 	prm_write_mod_reg(prcm_context.wkup_pm_wken, WKUP_MOD, PM_WKEN);
+	omap_writel(prcm_context.otg_sysconfig, OTG_SYSCONFIG);
 	return;
 }
 #endif

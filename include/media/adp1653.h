@@ -80,7 +80,6 @@ struct adp1653_flash {
 
 	struct adp1653_platform_data *platform_data;
 
-	bool dev_init_done;
 	enum v4l2_power power;		/* Requested power state */
 };
 

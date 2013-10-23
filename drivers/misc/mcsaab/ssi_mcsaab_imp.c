@@ -31,8 +31,8 @@
 #include <linux/if_arp.h>
 #include <linux/if_phonet.h>
 #include <linux/ssi_driver_if.h>
-
-#define __HANDSHAKE_FQ_CHANGE__	/* FIXME: HACK to be removed */
+#include <linux/gpio.h>
+#include <linux/irq.h>
 
 #define	MCSAAB_IMP_VERSION	"2.0-rc1"
 #define MCSAAB_IMP_DESC		"SSI McSAAB Improved protocol implementeation"
@@ -52,7 +52,6 @@
  * If this is not done clock management in the HW driver will fail.
  */
 #define WAKEDOWN_TEST	0x04
-#define READY_SENT	0x08
 
 /* end ssi_proto flags */
 
@@ -65,32 +64,16 @@
 #define SSI_MAX_MTU	65535
 #define SSI_DEFAULT_MTU	4000
 
-#define CMT_DEFAULT_TX_SPEED	110	/* 110 Mbits/s */
-
 #define WD_TIMEOUT	2000	/* 500 msecs */
+#define KA_TIMEOUT	15	/* 15 msecs */
 
 #define PN_MEDIA_SOS	21
-/*
- * McSAAB DEBUG
- */
-#ifdef SSI_DEBUG
-#define DBG(fmt, args...)	printk(KERN_DEBUG LOG_NAME "%s: " fmt "\n",\
-							__func__, ##args)
-#define DBG_DEV(dev, fmt, args...) dev_dbg(dev, LOG_NAME "%s: " fmt "\n",\
-							__func__, ##args)
-#define DBG_DUMP(buf, len)      print_hex_dump_bytes(LOG_NAME,\
-					DUMP_PREFIX_ADDRESS, buf, len)
-#else
-#define DBG(fmt, args...)		do {} while (0)
-#define DBG_DEV(dev, fmt, args...)	do {} while (0)
-#define DBG_DUMP(buf, len)		do {} while (0)
-#endif /* SSI_DEBUG */
 
 /*
  * McSAAB command definitions
  */
-#define COMMAND(data)	(data >> 28)
-#define PAYLOAD(data)	(data & 0x0fffffff)
+#define COMMAND(data)	((data) >> 28)
+#define PAYLOAD(data)	((data) & 0x0fffffff)
 
 /* Commands */
 #define SW_BREAK	0x0
@@ -99,45 +82,40 @@
 #define WAKE_TEST_RES	0x3
 #define START_TRANS	0x4
 #define READY		0x5
-#define FQ_CHANGE_REQ	0x8
-#define FQ_CHANGE_DONE	0x9
-#define ACK		0xa
 #define DUMMY		0xc
 
 /* Payloads */
 #define RESERVED		0X0000000
 #define DATA_VERSION_MASK	0xff
-#define DATA_VERSION(data)	(data & DATA_VERSION_MASK)
+#define DATA_VERSION(data)	((data) & DATA_VERSION_MASK)
 #define DATA_RESULT_MASK	0X0f
-#define DATA_RESULT(data)	(data & DATA_RESULT_MASK)
+#define DATA_RESULT(data)	((data) & DATA_RESULT_MASK)
 #define WAKE_TEST_OK		0x0
 #define WAKE_TEST_FAILED	0x1
 #define PDU_LENGTH_MASK		0xffff
-#define PDU_LENGTH(data)	((data >> 8) & PDU_LENGTH_MASK)
+#define PDU_LENGTH(data)	(((data) >> 8) & PDU_LENGTH_MASK)
 #define MSG_ID_MASK		0xff
-#define MSG_ID(data)		(data & MSG_ID_MASK)
+#define MSG_ID(data)		((data) & MSG_ID_MASK)
 #define ACK_TO_CMD_MASK		0x0f
-#define ACK_TO_CMD(data)	(data & ACK_TO_CMD_MASK)
+#define ACK_TO_CMD(data)	((data) & ACK_TO_CMD_MASK)
 
 #define DUMMY_PAYLOAD		0xaaccaaa
 
-#define CMD(command, payload) ((command<<28) | (payload & 0x0fffffff))
+#define CMD(command, payload) (((command) << 28) | ((payload) & 0x0fffffff))
 
 /* Commands for the control channel (channel number 0) */
 #define SWBREAK_CMD			CMD(SW_BREAK, 0x000000)
 #define BOOT_INFO_REQ_CMD(verid) \
-				CMD(BOOT_INFO_REQ, verid & DATA_VERSION_MASK)
+				CMD(BOOT_INFO_REQ, (verid) & DATA_VERSION_MASK)
 #define BOOT_INFO_RESP_CMD(verid) \
-				CMD(BOOT_INFO_RESP, verid & DATA_VERSION_MASK)
+				CMD(BOOT_INFO_RESP, (verid) & DATA_VERSION_MASK)
 #define START_TRANS_CMD(pdu_len, message_id) \
-				CMD(START_TRANS, ((pdu_len << 8) | message_id))
+			CMD(START_TRANS, (((pdu_len) << 8) | (message_id)))
 #define READY_CMD			CMD(READY, RESERVED)
 #define FQ_CHANGE_REQ_CMD(max_tx_speed)	CMD(FQ_CHANGE_REQ, max_tx_speed)
 #define FQ_CHANGE_DONE_CMD		CMD(FQ_CHANGE_DONE, RESERVED)
-#define ACK_CMD(ack_cmd)		CMD(ACK, cmd)
+#define ACK_CMD(ack_cmd)		CMD(ACK, ack_cmd)
 
-/* Special hardcoded message */
-#define SKIP	0xf0030006
 /*
  * End McSAAB command definitions
  */
@@ -152,6 +130,7 @@ enum {
 
 /* Send state machine states */
 enum {
+	SEND_IDLE,
 	WAIT4READY,
 	SEND_READY,
 	SENDING,
@@ -161,12 +140,39 @@ enum {
 
 /* Recevice state machine states */
 enum {
+	RECV_IDLE,
 	RECV_READY,
 	RECEIVING,
 	RECV_BUSY,
 	RECV_NUM_STATES,	/* NOTE: Must be always the last one */
 };
 
+
+/**
+ * struct mcsaab_imp - McSAAB improved protocol data
+ * @main_state: State of the general state machine
+ * @send_state: State of the TX state machine
+ * @recv_state: State of the RX state machine
+ * @flags: Keeps tracks of several events, mainly used for workarounds
+ * @rcv_c_msg: Control channel RX buffer
+ * @c_queue: Control channel TX queue.
+ * @head: First frame in control channel TX queue
+ * @tail: Last frame in the control channel TX queue
+ * @rcv_msg_id: Expeceted next RX message id
+ * @send_msg_id: Next TX messaged id
+ * @dev_d_ch: Data channel
+ * @dev_c_ch: Control channel
+ * @boot_wd: Boot handshake watchdog
+ * @tx_wd: TX path watchdog
+ * @rx_wd: RX path watchdog
+ * @keep_alive: Workaround timer to wakeup the MPU from inactive state
+ * @tx_queue: TX packets queue
+ * @rx_queue: RX packets queue
+ * @netdev: Phonet network interface
+ * @cmt_rst_gpio: CMT reset gpio line
+ * @cmt_rst_gpio_irq: IRQ associted to the CMT reset gpio line
+ * @cmt_rst_tasklet: Bottom half for CMT reset line events
+ */
 struct mcsaab_imp {
 	unsigned int main_state;
 	unsigned int send_state;
@@ -182,15 +188,13 @@ struct mcsaab_imp {
 	u8 rcv_msg_id;
 	u8 send_msg_id;
 
-	u16 cmt_default_tx_speed;
-	u16 cmt_tx_speed;
-
 	struct ssi_device *dev_d_ch;
 	struct ssi_device *dev_c_ch;
 
 	struct timer_list boot_wd;
 	struct timer_list tx_wd;
 	struct timer_list rx_wd;
+	struct timer_list keep_alive;
 
 	struct clk *ssi_clk;
 
@@ -201,6 +205,10 @@ struct mcsaab_imp {
 	struct sk_buff_head rx_queue;
 
 	struct net_device *netdev;
+
+	int cmt_rst_gpio;
+	int cmt_rst_gpio_irq;
+	struct tasklet_struct cmt_rst_tasklet;
 };
 
 static struct mcsaab_imp ssi_protocol;
@@ -227,14 +235,17 @@ static void reset_mcsaab(void)
 	del_timer(&ssi_protocol.boot_wd);
 	del_timer(&ssi_protocol.rx_wd);
 	del_timer(&ssi_protocol.tx_wd);
+	del_timer(&ssi_protocol.keep_alive);
 	ssi_protocol.main_state = INIT;
 	ssi_protocol.send_msg_id = 0;
 	ssi_protocol.rcv_msg_id = 0;
-	ssi_protocol.send_state = RECV_READY;
-	ssi_protocol.recv_state = SEND_READY;
+	ssi_protocol.send_state = SEND_IDLE;
+	ssi_protocol.recv_state = RECV_IDLE;
 	ssi_protocol.flags = 0;
 	ssi_protocol.head = 0;
 	ssi_protocol.tail = 0;
+	ssi_ioctl(ssi_protocol.dev_c_ch, SSI_IOCTL_FLUSH_TX, NULL);
+	ssi_ioctl(ssi_protocol.dev_c_ch, SSI_IOCTL_FLUSH_RX, NULL);
 	if (ssi_protocol.dev_d_ch) {
 		ssi_read_cancel(ssi_protocol.dev_d_ch);
 		ssi_write_cancel(ssi_protocol.dev_d_ch);
@@ -243,9 +254,36 @@ static void reset_mcsaab(void)
 		ssi_write_cancel(ssi_protocol.dev_c_ch);
 	skb_queue_purge(&ssi_protocol.tx_queue);
 	skb_queue_purge(&ssi_protocol.rx_queue);
-	DBG("CMT is OFFLINE");
+	pr_debug(LOG_NAME "CMT is OFFLINE\n");
 	netif_carrier_off(ssi_protocol.netdev);
+}
 
+static int mcsaab_need_keep_alive(void)
+{
+	if (ssi_protocol.recv_state == RECV_IDLE) {
+		switch (ssi_protocol.send_state) {
+		case SEND_IDLE:
+			return 0;
+		case SEND_READY: /* Check needed cause cmtspeech workaround */
+			if (!skb_queue_len(&ssi_protocol.tx_queue))
+				return 0;
+			break;
+		}
+	}
+	return 1;
+}
+
+static void mcsaab_stop_keep_alive(void)
+{
+	if (!mcsaab_need_keep_alive())
+		del_timer(&ssi_protocol.keep_alive);
+}
+
+static void mcsaab_restart_keep_alive(void)
+{
+	if (mcsaab_need_keep_alive())
+		mod_timer(&ssi_protocol.keep_alive,
+				jiffies + msecs_to_jiffies(KA_TIMEOUT));
 }
 
 static void send_c_msg(u32 c_msg)
@@ -255,10 +293,10 @@ static void send_c_msg(u32 c_msg)
 	size = (C_QUEUE_LEN + ssi_protocol.tail - ssi_protocol.head)
 							% C_QUEUE_LEN;
 	if (size >= (C_QUEUE_LEN - 1)) {
-		printk(KERN_DEBUG LOG_NAME "Control message queue OVERRUN !\n");
+		pr_debug(LOG_NAME "Control message queue OVERRUN !\n");
 		return;
 	}
-	DBG("Queue head %d tail %d size %d",
+	pr_debug(LOG_NAME "Queue head %d tail %d size %d\n",
 				ssi_protocol.head, ssi_protocol.tail, size);
 	ssi_protocol.c_queue[ssi_protocol.tail] = c_msg;
 	ssi_protocol.tail = (ssi_protocol.tail + 1) % C_QUEUE_LEN;
@@ -267,27 +305,6 @@ static void send_c_msg(u32 c_msg)
 		ssi_write(ssi_protocol.dev_c_ch,
 				&ssi_protocol.c_queue[ssi_protocol.head], 1);
 
-}
-
-static void mcsaab_start_rx(int len)
-{
-	struct sk_buff *skb;
-
-	skb = netdev_alloc_skb(ssi_protocol.netdev, len * 4);
-	if (unlikely(!skb)) {
-		printk(KERN_DEBUG LOG_NAME "Out of memory RX skb.\n");
-		reset_mcsaab();
-		return;
-	}
-
-	skb_put(skb, len * 4);
-	skb_queue_tail(&ssi_protocol.rx_queue, skb);
-	if (skb_queue_len(&ssi_protocol.rx_queue) == 1) {
-		mod_timer(&ssi_protocol.rx_wd,
-					jiffies + msecs_to_jiffies(WD_TIMEOUT));
-		ssi_protocol.recv_state = RECEIVING;
-		ssi_read(ssi_protocol.dev_d_ch, (u32 *)skb->data, len);
-	}
 }
 
 static void mcsaab_start_tx(void)
@@ -311,51 +328,45 @@ static void mcsaab_watchdog_dump(struct mcsaab_imp *prot)
 
 	ssi_ioctl(prot->dev_c_ch, SSI_IOCTL_WAKE, &acwake);
 	ssi_ioctl(prot->dev_c_ch, SSI_IOCTL_CAWAKE, &cawake);
-
 	last = (C_QUEUE_LEN - 1 + ssi_protocol.head) % C_QUEUE_LEN;
-	printk(KERN_DEBUG LOG_NAME "ACWake line %08X\n", acwake);
-	printk(KERN_DEBUG LOG_NAME "CAWake line %d\n", cawake);
-	printk(KERN_DEBUG LOG_NAME "Main state: %d\n", prot->main_state);
-	printk(KERN_DEBUG LOG_NAME "RX state:%02X\n", prot->recv_state);
-	printk(KERN_DEBUG LOG_NAME "TX state:%02X\n", prot->send_state);
-	printk(KERN_DEBUG LOG_NAME "CMT was %s\n",
+
+	pr_err(LOG_NAME "ACWake line %08X\n", acwake);
+	pr_err(LOG_NAME "CAWake line %d\n", cawake);
+	pr_err(LOG_NAME "Main state: %d\n", prot->main_state);
+	pr_err(LOG_NAME "RX state:%02X\n", prot->recv_state);
+	pr_err(LOG_NAME "TX state:%02X\n", prot->send_state);
+	pr_err(LOG_NAME "CMT was %s\n",
 			(prot->flags & CMT_ONLINE) ? "ONLINE" : "OFFLINE");
-	printk(KERN_DEBUG LOG_NAME "FLAGS: %04X\n", prot->flags);
-	printk(KERN_DEBUG LOG_NAME "Last RX control msg %08X\n",
-							prot->rcv_c_msg);
-	printk(KERN_DEBUG LOG_NAME "Last TX control msg %08X\n",
-							prot->c_queue[last]);
-	printk(KERN_DEBUG LOG_NAME "TX C queue head %d tail %d\n", prot->head,
-								prot->tail);
-	printk(KERN_DEBUG LOG_NAME "Data RX ID: %d\n", prot->rcv_msg_id);
-	printk(KERN_DEBUG LOG_NAME "Data TX ID: %d\n", prot->send_msg_id);
-	printk(KERN_DEBUG LOG_NAME "TX queue len: %d\n",
-						skb_queue_len(&prot->tx_queue));
+	pr_err(LOG_NAME "FLAGS: %04X\n", prot->flags);
+	pr_err(LOG_NAME "Last RX control msg %08X\n", prot->rcv_c_msg);
+	pr_err(LOG_NAME "Last TX control msg %08X\n", prot->c_queue[last]);
+	pr_err(LOG_NAME "TX C queue head %d tail %d\n", prot->head, prot->tail);
+	pr_err(LOG_NAME "Data RX ID: %d\n", prot->rcv_msg_id);
+	pr_err(LOG_NAME "Data TX ID: %d\n", prot->send_msg_id);
+	pr_err(LOG_NAME "TX queue len: %d\n", skb_queue_len(&prot->tx_queue));
 	if (skb_queue_len(&prot->tx_queue) > 0) {
 		skb = skb_peek(&prot->tx_queue);
-		printk(KERN_DEBUG LOG_NAME "TX HEAD packet:\n");
+		pr_err(LOG_NAME "TX HEAD packet:\n");
 		print_hex_dump_bytes(LOG_NAME, DUMP_PREFIX_ADDRESS, skb->data,
 					min(skb->len, (unsigned int)32));
-		printk(KERN_DEBUG LOG_NAME "END TX HEAD packet.\n");
+		pr_err(LOG_NAME "END TX HEAD packet.\n");
 	}
-	printk(KERN_DEBUG LOG_NAME "RX queue len: %d\n",
-						skb_queue_len(&prot->rx_queue));
+	pr_err(LOG_NAME "RX queue len: %d\n", skb_queue_len(&prot->rx_queue));
 	if (skb_queue_len(&prot->rx_queue) > 0) {
 		skb = skb_peek(&prot->rx_queue);
-		printk(KERN_DEBUG LOG_NAME "RX HEAD packet:\n");
+		pr_err(LOG_NAME "RX HEAD packet:\n");
 		print_hex_dump_bytes(LOG_NAME, DUMP_PREFIX_ADDRESS, skb->data,
 					min(skb->len, (unsigned int)32));
-		printk(KERN_DEBUG LOG_NAME "END RX HEAD packet.\n");
-
+		pr_err(LOG_NAME "END RX HEAD packet.\n");
 	}
 }
 
 static void mcsaab_watchdog(unsigned long data)
 {
 	struct mcsaab_imp *prot = (struct mcsaab_imp *)data;
-	DBG("------ WATCHDOG TIMER trigerred ------\n");
+	pr_debug(LOG_NAME "------ WATCHDOG TIMER trigerred ------\n");
 	mcsaab_watchdog_dump(prot);
-	DBG("--------------------------------------\n");
+	pr_debug(LOG_NAME "--------------------------------------\n");
 
 	reset_mcsaab();
 	ssi_ioctl(ssi_protocol.dev_c_ch, SSI_IOCTL_WAKE_DOWN, NULL);
@@ -363,19 +374,25 @@ static void mcsaab_watchdog(unsigned long data)
 
 static void mcsaab_watchdog_rx(unsigned long data)
 {
-	DBG("------- RX WATCHDOG TIMER trigerred -----\n");
-
-	ssi_ioctl(ssi_protocol.dev_c_ch, SSI_IOCTL_FLUSH_RX, NULL);
-	ssi_ioctl(ssi_protocol.dev_c_ch, SSI_IOCTL_FLUSH_TX, NULL);
+	pr_err(LOG_NAME "------- RX WATCHDOG TIMER trigerred -----\n");
 	mcsaab_watchdog(data);
 }
 
 static void mcsaab_watchdog_tx(unsigned long data)
 {
-	DBG("------- TX WATCHDOG TIMER trigerred -----\n");
-	ssi_ioctl(ssi_protocol.dev_c_ch, SSI_IOCTL_FLUSH_RX, NULL);
-	ssi_ioctl(ssi_protocol.dev_c_ch, SSI_IOCTL_FLUSH_TX, NULL);
+	pr_err(LOG_NAME "------- TX WATCHDOG TIMER trigerred -----\n");
 	mcsaab_watchdog(data);
+}
+
+static void keep_alive_timer(unsigned long data)
+{
+	spin_lock(&ssi_protocol.lock);
+
+	pr_debug("Keep alive states r(%d) s(%d)\n",
+			ssi_protocol.recv_state, ssi_protocol.send_state);
+
+	mcsaab_restart_keep_alive();
+	spin_unlock(&ssi_protocol.lock);
 }
 
 /* End watchdog functions */
@@ -421,11 +438,11 @@ static int ssi_pn_xmit(struct sk_buff *skb, struct net_device *dev)
 	qlen = skb_queue_len(&ssi_protocol.tx_queue);
 
 	if ((dev->tx_queue_len > 1) && (qlen >= dev->tx_queue_len)) {
-		DBG("TX queue full %d", qlen);
+		pr_debug(LOG_NAME "TX queue full %d\n", qlen);
 		netif_stop_queue(dev);
 		goto out;
 	} else if (qlen > 1) {
-		DBG("Pending frame on TX queue %d", qlen);
+		pr_debug(LOG_NAME "Pending frame on TX queue %d\n", qlen);
 		goto out;
 	}
 
@@ -435,7 +452,9 @@ static int ssi_pn_xmit(struct sk_buff *skb, struct net_device *dev)
 	 * READY command when McSAAB sets it up.
 	 */
 	ssi_ioctl(ssi_protocol.dev_c_ch, SSI_IOCTL_WAKE, &acwake);
-	DBG("ACWAKE %d", acwake);
+	mod_timer(&ssi_protocol.keep_alive,
+					jiffies + msecs_to_jiffies(KA_TIMEOUT));
+	pr_debug(LOG_NAME "ACWAKE %d\n", acwake);
 	if (!acwake)
 		ssi_protocol.send_state = WAIT4READY;
 
@@ -444,7 +463,7 @@ static int ssi_pn_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (ssi_protocol.send_state == SEND_READY)
 		mcsaab_start_tx();
 	else {
-		DBG("TX pending of READY cmd");
+		pr_debug(LOG_NAME "TX pending of READY cmd\n");
 		mod_timer(&ssi_protocol.tx_wd,
 					jiffies + msecs_to_jiffies(WD_TIMEOUT));
 	}
@@ -506,20 +525,20 @@ static int ssi_pn_rx(struct sk_buff *skb)
 #ifdef __LITTLE_ENDIAN
 	if (likely(skb->len >= 6))
 		((u16 *)skb->data)[2] = swab16(((u16 *)skb->data)[2]);
-	DBG("RX length fixed (%04x -> %u)", ((u16 *)skb->data)[2],
-		ntohs(((u16 *)skb->data)[2]));
+	pr_debug(LOG_NAME "RX length fixed (%04x -> %u)\n",
+			((u16 *)skb->data)[2], ntohs(((u16 *)skb->data)[2]));
 #endif
 
 	skb->protocol = htons(ETH_P_PHONET);
 	skb_reset_mac_header(skb);
 	__skb_pull(skb, 1);
 
-	DBG("RX done");
+	pr_debug(LOG_NAME "RX done\n");
 	netif_rx(skb);
 	return 0;
 
 drop:
-	DBG("Drop RX packet");
+	pr_debug(LOG_NAME "Drop RX packet\n");
 	dev_kfree_skb(skb);
 	return 0;
 }
@@ -533,14 +552,18 @@ static void boot_info_req_h(u32 msg)
 	switch (ssi_protocol.main_state) {
 	case INIT:
 		mcsaab_clk_enable();
+		ssi_ioctl(ssi_protocol.dev_c_ch, SSI_IOCTL_WAKE_UP, NULL);
 		send_c_msg(BOOT_INFO_RESP_CMD(LOCAL_D_VER_ID));
+		ssi_protocol.flags &= ~WAKEDOWN_TEST;
 		ssi_protocol.main_state = HANDSHAKE;
 		/* Start BOOT HANDSHAKE timer */
 		mod_timer(&ssi_protocol.boot_wd,
 					jiffies + msecs_to_jiffies(WD_TIMEOUT));
 		break;
 	case HANDSHAKE:
+		ssi_ioctl(ssi_protocol.dev_c_ch, SSI_IOCTL_WAKE_UP, NULL);
 		send_c_msg(BOOT_INFO_RESP_CMD(LOCAL_D_VER_ID));
+		ssi_protocol.flags &= ~WAKEDOWN_TEST;
 		/* Start BOOT HANDSHAKE timer */
 		mod_timer(&ssi_protocol.boot_wd,
 					jiffies + msecs_to_jiffies(WD_TIMEOUT));
@@ -558,7 +581,8 @@ static void boot_info_req_h(u32 msg)
 					jiffies + msecs_to_jiffies(WD_TIMEOUT));
 		break;
 	default:
-		DBG("UNKNOWN PROTOCOL STATE %d", ssi_protocol.main_state);
+		pr_debug(LOG_NAME "Wrong protocol state %d\n",
+						ssi_protocol.main_state);
 		break;
 	}
 }
@@ -566,8 +590,9 @@ static void boot_info_req_h(u32 msg)
 static void boot_info_resp_h(u32 msg)
 {
 	if (ssi_protocol.main_state != INIT) {
-		DBG("BOOT_INFO_RESP in bad state:");
-		DBG("	MAIN_STATE %d", ssi_protocol.main_state);
+		pr_debug(LOG_NAME "BOOT_INFO_RESP in wrong state:\n");
+		pr_debug(LOG_NAME "	MAIN_STATE %d\n",
+						ssi_protocol.main_state);
 		return;
 	}
 
@@ -578,8 +603,9 @@ static void boot_info_resp_h(u32 msg)
 static void wakelines_test_result_h(u32 msg)
 {
 	if (ssi_protocol.main_state != HANDSHAKE) {
-		DBG("WAKELINES_TEST in bad state:");
-		DBG("	MAIN_STATE %d", ssi_protocol.main_state);
+		pr_debug(LOG_NAME "WAKELINES_TEST in wrong state:\n");
+		pr_debug(LOG_NAME "	MAIN_STATE %d\n",
+						ssi_protocol.main_state);
 		return;
 	}
 
@@ -590,17 +616,12 @@ static void wakelines_test_result_h(u32 msg)
 		mcsaab_watchdog_dump(&ssi_protocol);
 		reset_mcsaab();
 	} else {
-#ifdef __HANDSHAKE_FQ_CHANGE__
-		send_c_msg(FQ_CHANGE_REQ_CMD(ssi_protocol.cmt_tx_speed));
-		return;
-#else
 		ssi_protocol.main_state = ACTIVE;
 		ssi_protocol.flags &= ~WAKEDOWN_TEST;
 		ssi_protocol.flags |= CMT_ONLINE;
-		DBG("CMT is ONLINE");
-		netif_carrier_on(ssi_protocol.netdev);
+		pr_debug(LOG_NAME "CMT is ONLINE\n");
 		netif_wake_queue(ssi_protocol.netdev);
-#endif
+		netif_carrier_on(ssi_protocol.netdev);
 	}
 	ssi_ioctl(ssi_protocol.dev_c_ch, SSI_IOCTL_WAKE_DOWN, NULL);
 	mcsaab_clk_disable(); /* Drop clk usecount */
@@ -608,61 +629,62 @@ static void wakelines_test_result_h(u32 msg)
 	del_timer(&ssi_protocol.boot_wd);
 }
 
-static void ack_to_cmd_h(u32 msg)
-{
-	u8 cmd_id;
-
-	cmd_id = ACK_TO_CMD(msg);
-	pr_debug(LOG_NAME "ACK to command %d\n", cmd_id);
-
-	switch (cmd_id) {
-	case FQ_CHANGE_REQ:
-#ifdef __HANDSHAKE_FQ_CHANGE__
-		if (ssi_protocol.main_state == HANDSHAKE)
-			send_c_msg(FQ_CHANGE_DONE_CMD);
-#endif
-		break;
-	default:
-		break;
-	}
-}
-
 static void start_trans_h(u32 msg)
 {
+	struct sk_buff *skb;
+	int len = PDU_LENGTH(msg);
 	u8 r_msg_id = 0;
 
 	r_msg_id = msg & MSG_ID_MASK;
-	DBG("Receiving START_TRANS len %d", PDU_LENGTH(msg));
-	DBG("START_TRANS msg id %d expected msg id %d",
+	pr_debug(LOG_NAME "Receiving START_TRANS len %d\n", PDU_LENGTH(msg));
+	pr_debug(LOG_NAME "START_TRANS msg id %d expected msg id %d\n",
 					r_msg_id, ssi_protocol.rcv_msg_id);
 
 	if (unlikely(ssi_protocol.main_state != ACTIVE)) {
-		DBG("START_TRANS in bad state:\n");
-		DBG("	SEND STATE %d", ssi_protocol.send_state);
-		DBG("	MAIN_STATE %d", ssi_protocol.main_state);
+		pr_debug(LOG_NAME "START_TRANS in wrong state:\n");
+		pr_debug(LOG_NAME "	SEND STATE %d\n",
+						ssi_protocol.send_state);
+		pr_debug(LOG_NAME "	MAIN_STATE %d\n",
+						ssi_protocol.main_state);
 		return;
 	}
 
 	if (unlikely(r_msg_id != ssi_protocol.rcv_msg_id)) {
-		printk(KERN_DEBUG LOG_NAME "RX msg id mismatch (MSG ID: %d "
+		pr_debug(LOG_NAME "RX msg id mismatch (MSG ID: %d "
 		"McSAAB RX ID: %d)\n", r_msg_id, ssi_protocol.rcv_msg_id);
 		mcsaab_watchdog_dump(&ssi_protocol);
 		reset_mcsaab();
 		return;
 	}
 	ssi_protocol.rcv_msg_id = (ssi_protocol.rcv_msg_id + 1) & 0xff;
-	ssi_protocol.flags &= ~READY_SENT;
-	mcsaab_start_rx(PDU_LENGTH(msg));
+
+	skb = netdev_alloc_skb(ssi_protocol.netdev, len * 4);
+	if (unlikely(!skb)) {
+		printk(KERN_DEBUG LOG_NAME "Out of memory RX skb.\n");
+		reset_mcsaab();
+		return;
+	}
+
+	skb_put(skb, len * 4);
+	skb_queue_tail(&ssi_protocol.rx_queue, skb);
+	if (skb_queue_len(&ssi_protocol.rx_queue) == 1) {
+		mod_timer(&ssi_protocol.rx_wd,
+					jiffies + msecs_to_jiffies(WD_TIMEOUT));
+		ssi_protocol.recv_state = RECEIVING;
+		ssi_read(ssi_protocol.dev_d_ch, (u32 *)skb->data, len);
+	}
 }
 
 static void ready_h(u32 msg)
 {
 	if (unlikely((ssi_protocol.main_state != ACTIVE) ||
 					(ssi_protocol.send_state >= SENDING))) {
-		DBG("READY CMD on bad state:");
-		DBG("	SEND STATE %d", ssi_protocol.send_state);
-		DBG("	MAIN_STATE %d", ssi_protocol.main_state);
-		DBG("	FLAGS %02X", ssi_protocol.flags);
+		pr_debug(LOG_NAME "READY CMD on wrong state:\n");
+		pr_debug(LOG_NAME "	SEND STATE %d\n",
+						ssi_protocol.send_state);
+		pr_debug(LOG_NAME "	MAIN_STATE %d\n",
+						ssi_protocol.main_state);
+		pr_debug(LOG_NAME "	FLAGS %02X\n", ssi_protocol.flags);
 		return;
 	}
 	if (skb_queue_len(&ssi_protocol.tx_queue) > 0)
@@ -674,12 +696,14 @@ static void ready_h(u32 msg)
 static void swbreak_h(void)
 {
 	if (ssi_protocol.main_state != ACTIVE) {
-		DBG("SW BREAK in bad state:\n");
-		DBG("	SEND STATE %d", ssi_protocol.send_state);
-		DBG("	MAIN_STATE %d", ssi_protocol.main_state);
+		pr_debug(LOG_NAME "SW BREAK in wrong state:\n");
+		pr_debug(LOG_NAME "	SEND STATE %d\n",
+					ssi_protocol.send_state);
+		pr_debug(LOG_NAME "	MAIN_STATE %d\n",
+					ssi_protocol.main_state);
 		return;
 	}
-	DBG("SWBREAK Ignored");
+	pr_debug(LOG_NAME "SWBREAK Ignored\n");
 	mcsaab_clk_disable();
 }
 /* End incoming commands */
@@ -694,8 +718,10 @@ static void c_send_done_cb(struct ssi_device *c_dev)
 
 	spin_lock(&ssi_protocol.lock);
 
+	mcsaab_restart_keep_alive();
+
 	cmd = ssi_protocol.c_queue[ssi_protocol.head];
-	DBG("Control message 0x%08X sent", cmd);
+	pr_debug(LOG_NAME "Control message 0x%08X sent\n", cmd);
 
 	if ((COMMAND(cmd) == START_TRANS) &&
 			(ssi_protocol.send_state == SENDING)) {
@@ -705,10 +731,11 @@ static void c_send_done_cb(struct ssi_device *c_dev)
 	} else if ((COMMAND(cmd) == SW_BREAK) &&
 			(ssi_protocol.send_state == SENDING_SWBREAK)) {
 		if (skb_queue_len(&ssi_protocol.tx_queue) > 0) {
-			DBG("We got SKB while sending SW_BREAK");
+			pr_debug(LOG_NAME "Got SKB while sending SW_BREAK\n");
 			mcsaab_start_tx();
 		} else {
-			DBG("SW BREAK: Trying to set ACWake line DOWN");
+			pr_debug(LOG_NAME "SW BREAK: Trying to set ACWake "
+								"line DOWN\n");
 			ssi_ioctl(ssi_protocol.dev_c_ch, SSI_IOCTL_WAKE_DOWN,
 									NULL);
 			/*
@@ -716,37 +743,24 @@ static void c_send_done_cb(struct ssi_device *c_dev)
 			 * still the wakeup line.
 			 */
 			ssi_ioctl(c_dev, SSI_IOCTL_WAKE, &acwake);
-			DBG("ACWAKE %d", acwake);
+			pr_debug(LOG_NAME "ACWAKE %d\n", acwake);
 			if (!acwake)
-				ssi_protocol.send_state = WAIT4READY;
+				ssi_protocol.send_state = SEND_IDLE;
 			else
 				ssi_protocol.send_state = SEND_READY;
+			mcsaab_stop_keep_alive();
 		}
 		netif_wake_queue(ssi_protocol.netdev);
-#ifdef __HANDSHAKE_FQ_CHANGE__
-	} else if ((COMMAND(cmd) == FQ_CHANGE_DONE) &&
-				(ssi_protocol.main_state == HANDSHAKE)) {
-		ssi_protocol.main_state = ACTIVE;
-		ssi_protocol.flags &= ~WAKEDOWN_TEST;
-		ssi_protocol.flags |= CMT_ONLINE;
-		DBG("CMT is ONLINE");
-		netif_carrier_on(ssi_protocol.netdev);
-		netif_wake_queue(ssi_protocol.netdev);
-		ssi_ioctl(ssi_protocol.dev_c_ch, SSI_IOCTL_WAKE_DOWN, NULL);
-		mcsaab_clk_disable(); /* Drop clk usecount */
-		/* Stop BOOT HANDSHAKE timer */
-		del_timer(&ssi_protocol.boot_wd);
 	}
-#else
-	}
-#endif
+
 	/* Check for pending TX commands */
 	++ssi_protocol.head;
 	ssi_protocol.head %= C_QUEUE_LEN;
 
 	if (ssi_protocol.tail != ssi_protocol.head) {
-		DBG("Dequeue message on pos %d", ssi_protocol.head);
-		DBG("Sending queued msg 0x%08x",
+		pr_debug(LOG_NAME "Dequeue message on pos %d\n",
+							ssi_protocol.head);
+		pr_debug(LOG_NAME "Sending queued msg 0x%08x\n",
 				ssi_protocol.c_queue[ssi_protocol.head]);
 		ssi_write(ssi_protocol.dev_c_ch,
 				&ssi_protocol.c_queue[ssi_protocol.head], 1);
@@ -755,11 +769,48 @@ static void c_send_done_cb(struct ssi_device *c_dev)
 	spin_unlock(&ssi_protocol.lock);
 }
 
+/* Forward declaration */
+static void d_send_done_cb(struct ssi_device *d_dev);
+
+/*
+ * d_tx_complete_cb - Callback called when a TX has completed in the wire.
+ * @d_dev - the channel were the TX has completed.
+ */
+static void d_tx_complete_cb(struct ssi_device *d_dev)
+{
+	unsigned int busy;
+
+	spin_lock(&ssi_protocol.lock);
+
+	ssi_ioctl(d_dev, SSI_IOCTL_TX_CH_FULL, &busy);
+	if (busy) {
+		ssi_ioctl(d_dev, SSI_IOCTL_CH_DATAACCEPT, NULL);
+		goto out;
+	}
+
+	ssi_set_write_cb(d_dev, d_send_done_cb);
+
+	if (skb_queue_len(&ssi_protocol.tx_queue) <= 0) {
+		pr_debug(LOG_NAME "Delayed Sending SWBREAK\n");
+		send_c_msg(SWBREAK_CMD);
+		ssi_protocol.send_state = SENDING_SWBREAK;
+	} else {
+		mcsaab_start_tx();
+	}
+
+out:
+	spin_unlock(&ssi_protocol.lock);
+}
+
 static void d_send_done_cb(struct ssi_device *d_dev)
 {
 	struct sk_buff *skb;
+	unsigned int busy;
 
 	spin_lock(&ssi_protocol.lock);
+
+	mcsaab_restart_keep_alive();
+
 	skb = skb_dequeue(&ssi_protocol.tx_queue);
 	if (!skb)
 		goto out;
@@ -768,7 +819,18 @@ static void d_send_done_cb(struct ssi_device *d_dev)
 	ssi_protocol.send_msg_id++;
 	ssi_protocol.send_msg_id &= 0xff;
 	if (skb_queue_len(&ssi_protocol.tx_queue) <= 0) {
-		DBG("Sending SWBREAK");
+		ssi_ioctl(d_dev, SSI_IOCTL_TX_CH_FULL, &busy);
+		if (busy) {
+			/*
+			 * Program DATAACCEPT interrupt to know when ch 3
+			 * has completed TX last frame.
+			 */
+			ssi_set_write_cb(d_dev, d_tx_complete_cb);
+			ssi_ioctl(d_dev, SSI_IOCTL_CH_DATAACCEPT, NULL);
+			pr_debug(LOG_NAME "Waiting for last frame\n");
+			goto out;
+		}
+		pr_debug(LOG_NAME "Sending SWBREAK\n");
 		send_c_msg(SWBREAK_CMD);
 		ssi_protocol.send_state = SENDING_SWBREAK;
 	} else {
@@ -785,10 +847,12 @@ static void c_rcv_done_cb(struct ssi_device *c_dev)
 
 	spin_lock(&ssi_protocol.lock);
 
+	mcsaab_restart_keep_alive();
+
 	ssi_read(c_dev, &ssi_protocol.rcv_c_msg, 1);
 
-	DBG("Protocol state %d", ssi_protocol.main_state);
-	DBG("CMT Message 0x%08X CMD %01X", message, COMMAND(message));
+	pr_debug(LOG_NAME "Protocol state %d\n", ssi_protocol.main_state);
+	pr_debug(LOG_NAME "CMT Message 0x%08x\n", message);
 
 	switch (command) {
 	case SW_BREAK:
@@ -809,9 +873,6 @@ static void c_rcv_done_cb(struct ssi_device *c_dev)
 	case READY:
 		ready_h(message);
 		break;
-	case ACK:
-		ack_to_cmd_h(message);
-		break;
 	case DUMMY:
 		pr_warning(LOG_NAME "Received dummy sync 0x%08x\n", message);
 		pr_warning(LOG_NAME "OLD McSAAB Protocol DETECTED\n");
@@ -831,12 +892,13 @@ static void d_rcv_done_cb(struct ssi_device *d_dev)
 
 	spin_lock(&ssi_protocol.lock);
 
+	mcsaab_restart_keep_alive();
+
 	skb = skb_dequeue(&ssi_protocol.rx_queue);
 	if (!skb)
 		goto out;
 	skb->dev = ssi_protocol.netdev;
 	del_timer(&ssi_protocol.rx_wd); /* Stop RX timer */
-	ssi_protocol.recv_state = RECV_READY;
 	ssi_pn_rx(skb);
 	if (skb_queue_len(&ssi_protocol.rx_queue) > 0) {
 		skb = skb_peek(&ssi_protocol.rx_queue);
@@ -852,6 +914,9 @@ out:
 
 static void wake_up_event(struct ssi_device *c_dev)
 {
+
+	spin_lock(&ssi_protocol.lock);
+
 	switch (ssi_protocol.main_state) {
 	case INIT:
 		ssi_ioctl(c_dev, SSI_IOCTL_WAKE_UP, NULL);
@@ -864,33 +929,37 @@ static void wake_up_event(struct ssi_device *c_dev)
 		}
 		break;
 	case ACTIVE:
-		if (ssi_protocol.flags & READY_SENT) {
-			/*
-			 * We can have two UP events in a row due to a short low
-			 * high transition. Therefore we need to ignore the
-			 * sencond UP event.
-			 */
-			DBG("IGNORE 2nd CAWAKE UP");
-			ssi_protocol.flags &= ~READY_SENT;
-		} else {
-			ssi_protocol.flags |= READY_SENT;
-			mcsaab_clk_enable();
-			send_c_msg(READY_CMD);
-			/* Start RX timer */
-			mod_timer(&ssi_protocol.rx_wd,
-					jiffies + msecs_to_jiffies(WD_TIMEOUT));
-		}
+		/*
+		 * We can have two UP events in a row due to a short low
+		 * high transition. Therefore we need to ignore the
+		 * sencond UP event.
+		 */
+		if (ssi_protocol.recv_state == RECV_READY)
+			break;
+
+		ssi_protocol.recv_state = RECV_READY;
+		mcsaab_clk_enable();
+		send_c_msg(READY_CMD);
+		/* Start RX timer */
+		mod_timer(&ssi_protocol.rx_wd,
+				jiffies + msecs_to_jiffies(WD_TIMEOUT));
+		/* Wake MPU workaround */
+		mod_timer(&ssi_protocol.keep_alive,
+				jiffies + msecs_to_jiffies(KA_TIMEOUT));
 		break;
 	default:
-		DBG(LOG_NAME "UNKNOWN PROTOCOL STATE %d\n",
+		pr_debug(LOG_NAME "Wrong protocol state %d\n",
 						ssi_protocol.main_state);
 		break;
 	}
+
+	spin_unlock(&ssi_protocol.lock);
 }
 
 static void wake_down_event(struct ssi_device *c_dev)
 {
-	DBG("WAKE DOWN in state %d", ssi_protocol.main_state);
+	spin_lock(&ssi_protocol.lock);
+	pr_debug(LOG_NAME "WAKE DOWN in state %d\n", ssi_protocol.main_state);
 
 	switch (ssi_protocol.main_state) {
 	case INIT:
@@ -904,31 +973,29 @@ static void wake_down_event(struct ssi_device *c_dev)
 		}
 		break;
 	case ACTIVE:
+		ssi_protocol.recv_state = RECV_IDLE;
+		mcsaab_stop_keep_alive();
 		break;
 	default:
-		DBG("UNKNOWN PROTOCOL STATE %d\n",
+		pr_debug(LOG_NAME "Wrong protocol state %d\n",
 						ssi_protocol.main_state);
 		break;
 	}
+
+	spin_unlock(&ssi_protocol.lock);
 }
 
 static void port_event_cb(struct ssi_device *ssi_dev, unsigned int event,
 								void *arg)
 {
-	DBG("Event %d: ", event);
-	DBG("	on controller %d on port %d", c_id, port);
-	DBG("	on protocol state %d", ssi_protocol.main_state);
-
 	switch (event) {
 	case SSI_EVENT_BREAK_DETECTED:
-		pr_notice(LOG_NAME "BREAK DETECTED.\n");
-		pr_warning(LOG_NAME "Rebooting sequence started...\n");
-		mcsaab_watchdog_dump(&ssi_protocol);
-		reset_mcsaab();
-		ssi_ioctl(ssi_protocol.dev_c_ch, SSI_IOCTL_WAKE_UP, NULL);
-		send_c_msg(SKIP);
+		pr_debug(LOG_NAME "HWBREAK detected.\n");
 		break;
-	/* FIXME: Handle ERRORs */
+	case SSI_EVENT_ERROR:
+		pr_err(LOG_NAME "HW ERROR detected\n");
+		reset_mcsaab();
+		break;
 	case SSI_EVENT_CAWAKE_UP:
 		wake_up_event(ssi_protocol.dev_c_ch);
 		break;
@@ -936,11 +1003,70 @@ static void port_event_cb(struct ssi_device *ssi_dev, unsigned int event,
 		wake_down_event(ssi_protocol.dev_c_ch);
 		break;
 	default:
-		DBG("Recevived an UNKNOWN  event");
+		pr_debug(LOG_NAME "Recevived an UNKNOWN  event\n");
 		break;
 	}
 }
 /* End OMAP SSI callabcks */
+
+/* CMT reset support */
+static void do_cmt_rst_tasklet(unsigned long ssi_proto)
+{
+	struct mcsaab_imp *ssi_protocol = (struct mcsaab_imp *)ssi_proto;
+	int v;
+
+	v = gpio_get_value(ssi_protocol->cmt_rst_gpio);
+	pr_warning("******\n* CMT rst line change detected (%d)\n*****\n", v);
+	spin_lock(&ssi_protocol->lock);
+	if (!v) {
+		mcsaab_watchdog_dump(ssi_protocol);
+		reset_mcsaab();
+	}
+	spin_unlock(&ssi_protocol->lock);
+}
+
+static irqreturn_t cmt_rst_isr(int irq, void *ssi_proto)
+{
+	struct mcsaab_imp *ssi_protocol = (struct mcsaab_imp *)ssi_proto;
+
+	tasklet_hi_schedule(&ssi_protocol->cmt_rst_tasklet);
+
+	return IRQ_HANDLED;
+}
+
+int __init cmt_rst_init(struct mcsaab_imp *p, const char *gpio_name)
+{
+
+	if (gpio_request(p->cmt_rst_gpio, gpio_name) < 0) {
+		pr_err(LOG_NAME "FAILED to request %s GPIO %d\n",
+						gpio_name, p->cmt_rst_gpio);
+			return -EBUSY;
+	}
+	gpio_direction_input(p->cmt_rst_gpio);
+	tasklet_init(&p->cmt_rst_tasklet, do_cmt_rst_tasklet, (unsigned long)p);
+	if (request_irq(p->cmt_rst_gpio_irq, cmt_rst_isr,
+			IRQF_SHARED | IRQF_TRIGGER_FALLING, gpio_name, p) < 0) {
+		gpio_free(p->cmt_rst_gpio);
+		pr_err(LOG_NAME "FAILED to request %s GPIO IRQ %d\n",
+						gpio_name, p->cmt_rst_gpio_irq);
+		return -EBUSY;
+	}
+	enable_irq_wake(p->cmt_rst_gpio_irq);
+
+	return 0;
+}
+
+void cmt_rst_exit(struct mcsaab_imp *p)
+{
+	if (p->cmt_rst_gpio < 0)
+		return;	/* Nothing to do */
+
+	disable_irq_wake(p->cmt_rst_gpio_irq);
+	tasklet_kill(&p->cmt_rst_tasklet);
+	free_irq(p->cmt_rst_gpio_irq, p);
+	gpio_free(p->cmt_rst_gpio);
+}
+/* End CMT reset support */
 
 static int __devinit open_ssi_hw_drv(struct mcsaab_imp *prot)
 {
@@ -958,7 +1084,7 @@ static int __devinit open_ssi_hw_drv(struct mcsaab_imp *prot)
 		goto rback2;
 	}
 
-	DBG("Submitting read on the control channel");
+	pr_debug(LOG_NAME "Submitting read on the control channel\n");
 	err = ssi_read(prot->dev_c_ch, &prot->rcv_c_msg, 1);
 	if (err < 0) {
 		pr_err(LOG_NAME "Error when submiting first control read\n");
@@ -1020,8 +1146,8 @@ static int __devexit mcsaab_remove(struct ssi_device *ssi_dev)
 
 	if (ssi_dev == ssi_protocol.dev_c_ch) {
 		ssi_protocol.main_state = INIT;
-		ssi_protocol.send_state = SEND_READY;
-		ssi_protocol.recv_state = RECV_READY;
+		ssi_protocol.send_state = SEND_IDLE;
+		ssi_protocol.recv_state = RECV_IDLE;
 		ssi_protocol.flags = 0;
 		ssi_protocol.head = 0;
 		ssi_protocol.tail = 0;
@@ -1059,14 +1185,13 @@ static int __init ssi_proto_init(void)
 	pr_info(MCSAAB_IMP_NAME " Version: " MCSAAB_IMP_VERSION "\n");
 
 	spin_lock_init(&ssi_protocol.lock);
-	init_timer(&ssi_protocol.boot_wd);
-	init_timer(&ssi_protocol.rx_wd);
-	init_timer(&ssi_protocol.tx_wd);
-	ssi_protocol.cmt_default_tx_speed = CMT_DEFAULT_TX_SPEED;
-	ssi_protocol.cmt_tx_speed = 55; /* FIXME */
+	init_timer_deferrable(&ssi_protocol.boot_wd);
+	init_timer_deferrable(&ssi_protocol.rx_wd);
+	init_timer_deferrable(&ssi_protocol.tx_wd);
+	init_timer(&ssi_protocol.keep_alive);
 	ssi_protocol.main_state = INIT;
-	ssi_protocol.send_state = SEND_READY;
-	ssi_protocol.recv_state = RECV_READY;
+	ssi_protocol.send_state = SEND_IDLE;
+	ssi_protocol.recv_state = RECV_IDLE;
 	ssi_protocol.flags = 0;
 	ssi_protocol.head = 0;
 	ssi_protocol.tail = 0;
@@ -1078,7 +1203,12 @@ static int __init ssi_proto_init(void)
 	ssi_protocol.rx_wd.function = mcsaab_watchdog_rx;
 	ssi_protocol.tx_wd.data = (unsigned long)&ssi_protocol;
 	ssi_protocol.tx_wd.function = mcsaab_watchdog_tx;
+	ssi_protocol.keep_alive.data = (unsigned long)&ssi_protocol;
+	ssi_protocol.keep_alive.function = keep_alive_timer;
 	ssi_protocol.ssi_clk = NULL;
+	ssi_protocol.cmt_rst_gpio = 72; /* FIXME */
+	ssi_protocol.cmt_rst_gpio_irq = gpio_to_irq(72); /* FIXME */
+
 	skb_queue_head_init(&ssi_protocol.tx_queue);
 	skb_queue_head_init(&ssi_protocol.rx_queue);
 
@@ -1097,7 +1227,7 @@ static int __init ssi_proto_init(void)
 
 	ssi_protocol.ssi_clk = clk_get(NULL, "ssi_clk");
 	if (IS_ERR(ssi_protocol.ssi_clk)) {
-		printk(KERN_DEBUG LOG_NAME "Could not claim SSI fck clock\n");
+		pr_err(LOG_NAME "Could not claim SSI fck clock\n");
 		err = PTR_ERR(ssi_protocol.ssi_clk);
 		goto rback1;
 	}
@@ -1108,7 +1238,15 @@ static int __init ssi_proto_init(void)
 		goto rback2;
 	}
 
+	err = cmt_rst_init(&ssi_protocol, "ape_rst_rq");
+	if (err < 0) {
+		pr_err(LOG_NAME "Error setting CMT reset support (%d)\n", err);
+		goto rback3;
+	}
+
 	return 0;
+rback3:
+	unregister_ssi_driver(&ssi_mcsaab_driver);
 rback2:
 	clk_put(ssi_protocol.ssi_clk);
 rback1:
@@ -1119,6 +1257,7 @@ rback1:
 static void __exit ssi_proto_exit(void)
 {
 	reset_mcsaab();
+	cmt_rst_exit(&ssi_protocol);
 	unregister_ssi_driver(&ssi_mcsaab_driver);
 	clk_put(ssi_protocol.ssi_clk);
 	unregister_netdev(ssi_protocol.netdev);

@@ -39,7 +39,7 @@
  *	port 2: 0x4805b000
  */
 #define SSI_SST_OFFSET			0x2000
-#define SSI_SST_BASE(port)		(SSI_SST_OFFSET + ((port - 1) *\
+#define SSI_SST_BASE(port)		(SSI_SST_OFFSET + (((port) - 1) *\
 							(SSI_PORT_OFFSET)))
 /*
  * SSR base addr:
@@ -47,7 +47,7 @@
  *	port 2: 0x4805b800
  */
 #define SSI_SSR_OFFSET			0x2800
-#define SSI_SSR_BASE(port)		(SSI_SSR_OFFSET + ((port - 1) *\
+#define SSI_SSR_BASE(port)		(SSI_SSR_OFFSET + (((port) - 1) *\
 							(SSI_PORT_OFFSET)))
 /*
  * SSI SYS registers
@@ -78,8 +78,8 @@
 
 #define SSI_SYS_MPU_STATUS_REG(port, irq) \
 			(SSI_SYS_MPU_STATUS_BASE +\
-			(((port - 1) * SSI_SYS_MPU_STATUS_PORT_OFFSET) +\
-			(irq * SSI_SYS_MPU_STATUS_IRQ_OFFSET)))
+			((((port) - 1) * SSI_SYS_MPU_STATUS_PORT_OFFSET) +\
+			((irq) * SSI_SYS_MPU_STATUS_IRQ_OFFSET)))
 
 #define SSI_SYS_MPU_ENABLE_BASE		0X080c
 #define SSI_SYS_MPU_ENABLE_PORT_OFFSET	0x10
@@ -87,30 +87,30 @@
 
 #define SSI_SYS_MPU_ENABLE_REG(port, irq) \
 			(SSI_SYS_MPU_ENABLE_BASE +\
-			(((port - 1) * SSI_SYS_MPU_ENABLE_PORT_OFFSET) +\
-			(irq * SSI_SYS_MPU_ENABLE_IRQ_OFFSET)))
+			((((port) - 1) * SSI_SYS_MPU_ENABLE_PORT_OFFSET) +\
+			((irq) * SSI_SYS_MPU_ENABLE_IRQ_OFFSET)))
 
-#	define SSI_SST_DATAACCEPT(channel)	(1 << channel)
-#	define SSI_SSR_DATAAVAILABLE(channel)	(1 << (channel + 8))
-#	define SSI_SSR_DATAOVERRUN(channel)	(1 << (channel + 16))
+#	define SSI_SST_DATAACCEPT(channel)	(1 << (channel))
+#	define SSI_SSR_DATAAVAILABLE(channel)	(1 << ((channel) + 8))
+#	define SSI_SSR_DATAOVERRUN(channel)	(1 << ((channel) + 16))
 #	define SSI_ERROROCCURED			(1 << 24)
 #	define SSI_BREAKDETECTED		(1 << 25)
 
 #define SSI_SYS_GDD_MPU_IRQ_STATUS_REG	0x0800
 #define SSI_SYS_GDD_MPU_IRQ_ENABLE_REG	0x0804
-#	define SSI_GDD_LCH(channel)	(1 << channel)
+#	define SSI_GDD_LCH(channel)	(1 << (channel))
 
 #define SSI_SYS_WAKE_OFFSET		0x10
 #define SSI_SYS_WAKE_BASE		0x0c00
 #define SSI_SYS_WAKE_REG(port)		(SSI_SYS_WAKE_BASE +\
-					((port - 1) * SSI_SYS_WAKE_OFFSET))
+					(((port) - 1) * SSI_SYS_WAKE_OFFSET))
 #define SSI_SYS_CLEAR_WAKE_BASE		0x0c04
 #define SSI_SYS_CLEAR_WAKE_REG(port)	(SSI_SYS_CLEAR_WAKE_BASE +\
-					((port - 1) * SSI_SYS_WAKE_OFFSET))
+					(((port) - 1) * SSI_SYS_WAKE_OFFSET))
 #define SSI_SYS_SET_WAKE_BASE		0x0c08
 #define SSI_SYS_SET_WAKE_REG(port)	(SSI_SYS_SET_WAKE_BASE +\
-					((port - 1) * SSI_SYS_WAKE_OFFSET))
-#	define SSI_WAKE(channel)	(1 << channel)
+					(((port) - 1) * SSI_SYS_WAKE_OFFSET))
+#	define SSI_WAKE(channel)	(1 << (channel))
 #	define SSI_WAKE_MASK		0xff
 
 /*
@@ -128,7 +128,7 @@
 #define SSI_SST_TXSTATE_REG(port)		(SSI_SST_BASE(port) + 0X000c)
 #	define	TXSTATE_IDLE			0
 #define SSI_SST_BUFSTATE_REG(port)		(SSI_SST_BASE(port) + 0x0010)
-#	define	NOTFULL(channel)		(1 << channel)
+#	define	NOTFULL(channel)		(1 << (channel))
 #define SSI_SST_DIVISOR_REG(port)		(SSI_SST_BASE(port) + 0x0018)
 #	define SSI_DIVISOR_DEFAULT		1
 
@@ -142,11 +142,11 @@
 
 #define SSI_SST_BUFFER_BASE(port)		(SSI_SST_BASE(port) + 0x0080)
 #define SSI_SST_BUFFER_CH_REG(port, channel)	(SSI_SST_BUFFER_BASE(port) +\
-						(channel * 4))
+						((channel) * 4))
 
 #define SSI_SST_SWAPBUF_BASE(port)		(SSI_SST_BASE(port) + 0X00c0)
 #define SSI_SST_SWAPBUF_CH_REG(port, channel)	(SSI_SST_SWAPBUF_BASE(port) +\
-						(channel * 4))
+						((channel) * 4))
 /*
  * SSI SSR registers
  */
@@ -155,7 +155,7 @@
 #define SSI_SSR_FRAMESIZE_REG(port)		(SSI_SSR_BASE(port) + 0x0008)
 #define SSI_SSR_RXSTATE_REG(port)		(SSI_SSR_BASE(port) + 0x000c)
 #define SSI_SSR_BUFSTATE_REG(port)		(SSI_SSR_BASE(port) + 0x0010)
-#	define NOTEMPTY(channel)		(1 << channel)
+#	define NOTEMPTY(channel)		(1 << (channel))
 #define SSI_SSR_BREAK_REG(port)			(SSI_SSR_BASE(port) + 0x001c)
 #define SSI_SSR_ERROR_REG(port)			(SSI_SSR_BASE(port) + 0x0020)
 #define SSI_SSR_ERRORACK_REG(port)		(SSI_SSR_BASE(port) + 0x0024)
@@ -167,11 +167,11 @@
 
 #define SSI_SSR_BUFFER_BASE(port)		(SSI_SSR_BASE(port) + 0x0080)
 #define SSI_SSR_BUFFER_CH_REG(port, channel)	(SSI_SSR_BUFFER_BASE(port) +\
-						(channel * 4))
+						((channel) * 4))
 
 #define SSI_SSR_SWAPBUF_BASE(port)		(SSI_SSR_BASE(port) + 0x00c0)
 #define SSI_SSR_SWAPBUF_CH_REG(port, channel)	(SSI_SSR_SWAPBUF_BASE +\
-						(channel * 4))
+						((channel) * 4))
 /*
  * SSI GDD registers
  */
@@ -199,7 +199,7 @@
 #define SSI_GDD_CSDP_BASE		(SSI_GDD_BASE + 0x0800)
 #define SSI_GDD_CSDP_OFFSET		0x40
 #define SSI_GDD_CSDP_REG(channel)	(SSI_GDD_CSDP_BASE +\
-					(channel * SSI_GDD_CSDP_OFFSET))
+					((channel) * SSI_GDD_CSDP_OFFSET))
 #	define SSI_DST_BURST_EN_MASK	0xC000
 #	define SSI_DST_SINGLE_ACCESS0	0
 #	define SSI_DST_SINGLE_ACCESS	(1 << 14)
@@ -226,7 +226,7 @@
 #define SSI_GDD_CCR_BASE		(SSI_GDD_BASE + 0x0802)
 #define SSI_GDD_CCR_OFFSET		0x40
 #define SSI_GDD_CCR_REG(channel)	(SSI_GDD_CCR_BASE +\
-					(channel * SSI_GDD_CCR_OFFSET))
+					((channel) * SSI_GDD_CCR_OFFSET))
 #	define SSI_DST_AMODE_MASK	(3 << 14)
 #	define SSI_DST_AMODE_CONST	0
 #	define SSI_DST_AMODE_POSTINC	(1 << 12)
@@ -242,7 +242,7 @@
 #define SSI_GDD_CICR_BASE		(SSI_GDD_BASE + 0x0804)
 #define SSI_GDD_CICR_OFFSET		0x40
 #define SSI_GDD_CICR_REG(channel)	(SSI_GDD_CICR_BASE +\
-					(channel * SSI_GDD_CICR_OFFSET))
+					((channel) * SSI_GDD_CICR_OFFSET))
 #	define SSI_BLOCK_IE		(1 << 5)
 #	define SSI_HALF_IE		(1 << 2)
 #	define SSI_TOUT_IE		(1 << 0)
@@ -250,7 +250,7 @@
 #define SSI_GDD_CSR_BASE		(SSI_GDD_BASE + 0x0806)
 #define SSI_GDD_CSR_OFFSET		0x40
 #define SSI_GDD_CSR_REG(channel)	(SSI_GDD_CSR_BASE +\
-					(channel * SSI_GDD_CSR_OFFSET))
+					((channel) * SSI_GDD_CSR_OFFSET))
 #	define SSI_CSR_SYNC		(1 << 6)
 #	define SSI_CSR_BLOCK		(1 << 5)
 #	define SSI_CSR_HALF		(1 << 2)
@@ -259,32 +259,32 @@
 #define SSI_GDD_CSSA_BASE		(SSI_GDD_BASE + 0x0808)
 #define SSI_GDD_CSSA_OFFSET		0x40
 #define SSI_GDD_CSSA_REG(channel)	(SSI_GDD_CSSA_BASE +\
-					(channel * SSI_GDD_CSSA_OFFSET))
+					((channel) * SSI_GDD_CSSA_OFFSET))
 
 #define SSI_GDD_CDSA_BASE		(SSI_GDD_BASE + 0x080c)
 #define SSI_GDD_CDSA_OFFSET		0x40
 #define SSI_GDD_CDSA_REG(channel)	(SSI_GDD_CDSA_BASE +\
-					(channel * SSI_GDD_CDSA_OFFSET))
+					((channel) * SSI_GDD_CDSA_OFFSET))
 
 #define SSI_GDD_CEN_BASE		(SSI_GDD_BASE + 0x0810)
 #define SSI_GDD_CEN_OFFSET		0x40
 #define SSI_GDD_CEN_REG(channel)	(SSI_GDD_CEN_BASE +\
-					(channel * SSI_GDD_CEN_OFFSET))
+					((channel) * SSI_GDD_CEN_OFFSET))
 
 #define SSI_GDD_CSAC_BASE		(SSI_GDD_BASE + 0x0818)
 #define SSI_GDD_CSAC_OFFSET		0x40
 #define SSI_GDD_CSAC_REG(channel)	(SSI_GDD_CSAC_BASE +\
-					(channel * SSI_GDD_CSAC_OFFSET))
+					((channel) * SSI_GDD_CSAC_OFFSET))
 
 #define SSI_GDD_CDAC_BASE		(SSI_GDD_BASE + 0x081a)
 #define SSI_GDD_CDAC_OFFSET		0x40
 #define SSI_GDD_CDAC_REG(channel)	(SSI_GDD_CDAC_BASE +\
-					(channel * SSI_GDD_CDAC_OFFSET))
+					((channel) * SSI_GDD_CDAC_OFFSET))
 
 #define SSI_GDD_CLNK_CTRL_BASE		(SSI_GDD_BASE + 0x0828)
 #define SSI_GDD_CLNK_CTRL_OFFSET	0x40
 #define SSI_GDD_CLNK_CTRL_REG(channel)	(SSI_GDD_CLNK_CTRL_BASE +\
-					(channel * SSI_GDD_CLNK_CTRL_OFFSET))
+					((channel) * SSI_GDD_CLNK_CTRL_OFFSET))
 #	define SSI_ENABLE_LNK		(1 << 15)
 #	define SSI_STOP_LNK		(1 << 14)
 #	define NEXT_CH_ID_MASK		0xf

@@ -163,8 +163,10 @@ static struct platform_device musb_device = {
 #endif
 
 
-void __init usb_musb_init(void)
+void __init usb_musb_init(struct musb_board_data *board)
 {
+	musb_plat.board = board;
+
 #ifdef CONFIG_USB_MUSB_SOC
 	if (platform_device_register(&musb_device) < 0) {
 		printk(KERN_ERR "Unable to register HS-USB (MUSB) device\n");

@@ -13,6 +13,7 @@
 #include <linux/i2c.h>
 #include <linux/gpio.h>
 #include <linux/delay.h>
+#include <linux/i2c/twl4030.h>
 #include <linux/i2c/tpa6130a2.h>
 #include <media/radio-bcm2048.h>
 #include "../drivers/media/radio/radio-si4713.h"
@@ -30,10 +31,19 @@
 
 static int si4713_set_power(int power)
 {
+	/* Make sure VAUX1 is enabled before we rise reset line */
+	if (power)
+		twl4030_enable_regulator(RES_VAUX1);
+
 	if (!power)
 		udelay(1);
 	gpio_set_value(RX51_FMTX_RESET_GPIO, power);
 	udelay(50);
+
+	/* As reset line is down, no need to keep VAUX1 */
+	if (!power)
+		twl4030_disable_regulator(RES_VAUX1);
+
 	return 0;
 }
 
@@ -52,8 +62,6 @@ static void __init rx51_init_si4713(void)
 	}
 
 	gpio_direction_output(RX51_FMTX_RESET_GPIO, 0);
-	udelay(50);
-	gpio_set_value(RX51_FMTX_RESET_GPIO, 0);
 }
 
 static void __init rx51_init_bcm2048(void)

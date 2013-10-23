@@ -49,6 +49,7 @@ struct omap_runtime_data {
 	struct omap_pcm_dma_data	*dma_data;
 	int				dma_ch;
 	int				period_index;
+	int				dma_op_mode;
 };
 
 static void omap_pcm_dma_irq(int ch, u16 stat, void *data)
@@ -97,7 +98,7 @@ static int omap_pcm_hw_params(struct snd_pcm_substream *substream,
 	prtd->dma_data = dma_data;
 	err = omap_request_dma(dma_data->dma_req, dma_data->name,
 			       omap_pcm_dma_irq, substream, &prtd->dma_ch);
-	if (!err & !cpu_is_omap1510()) {
+	if (!err && !cpu_is_omap1510()) {
 		/*
 		 * Link channel with itself so DMA doesn't need any
 		 * reprogramming while looping the buffer
@@ -136,7 +137,9 @@ static int omap_pcm_prepare(struct snd_pcm_substream *substream)
 
 	memset(&dma_params, 0, sizeof(dma_params));
 
-	if (cpu_is_omap34xx())
+	/* TODO: Currently, MODE_ELEMENT == MODE_FRAME */
+	if (cpu_is_omap34xx() &&
+			(prtd->dma_op_mode == MCBSP_DMA_MODE_THRESHOLD))
 		sync_mode = OMAP_DMA_SYNC_FRAME;
 	else
 		sync_mode = OMAP_DMA_SYNC_ELEMENT;
@@ -189,9 +192,16 @@ static int omap_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	unsigned long flags;
 	int ret = 0;
 	unsigned int bus_id = *(unsigned int *)rtd->dai->cpu_dai->private_data;
-	u16 samples = snd_pcm_lib_period_bytes(substream) >> 1;
+	u16 samples;
 
 	spin_lock_irqsave(&prtd->lock, flags);
+
+	/* TODO: Currently, MODE_ELEMENT == MODE_FRAME */
+	if (prtd->dma_op_mode == MCBSP_DMA_MODE_THRESHOLD)
+		samples = snd_pcm_lib_period_bytes(substream) >> 1;
+	else
+		samples = 1;
+
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
@@ -245,10 +255,12 @@ static int omap_pcm_open(struct snd_pcm_substream *substream)
 	struct omap_runtime_data *prtd;
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	unsigned int bus_id = *(unsigned int *)rtd->dai->cpu_dai->private_data;
+	int dma_op_mode = omap_mcbsp_get_dma_op_mode(bus_id);
 	int ret;
 	int max_period;
 
-	if (cpu_is_omap34xx()) {
+	/* TODO: Currently, MODE_ELEMENT == MODE_FRAME */
+	if (cpu_is_omap34xx() && (dma_op_mode == MCBSP_DMA_MODE_THRESHOLD)) {
 		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
 			max_period = omap_mcbsp_get_max_tx_threshold(bus_id);
 		else
@@ -256,7 +268,7 @@ static int omap_pcm_open(struct snd_pcm_substream *substream)
 		max_period++;
 		max_period <<= 1;
 	} else {
-		omap_pcm_hardware.period_bytes_max = 64 * 1024;
+		max_period = 64 * 1024;
 	}
 
 	omap_pcm_hardware.period_bytes_max = max_period;
@@ -274,6 +286,7 @@ static int omap_pcm_open(struct snd_pcm_substream *substream)
 		ret = -ENOMEM;
 		goto out;
 	}
+	prtd->dma_op_mode = dma_op_mode;
 	spin_lock_init(&prtd->lock);
 	runtime->private_data = prtd;
 

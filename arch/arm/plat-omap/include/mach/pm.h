@@ -136,14 +136,16 @@ void clk_allow_idle(struct clk *clk);
 extern void omap_pm_idle(void);
 extern void omap_pm_suspend(void);
 extern void omap_sram_idle(void);
+extern int pm_check_idle(void);
 #ifdef CONFIG_PM
 extern void omap2_block_sleep(void);
 extern void omap2_allow_sleep(void);
+int get_last_off_on_transaction_id(struct device *dev);
 #else
 static inline void omap2_block_sleep(void) { }
 static inline void omap2_allow_sleep(void) { }
+static inline int get_last_off_on_transaction_id(struct device *dev) { return 0; }
 #endif
-unsigned get_last_off_on_transaction_id(struct device *dev);
 extern int omap3_can_sleep(void);
 extern void omap730_cpu_suspend(unsigned short, unsigned short);
 extern void omap1510_cpu_suspend(unsigned short, unsigned short);

@@ -204,8 +204,9 @@ static int omap_mcbsp_dai_hw_params(struct snd_pcm_substream *substream,
 	struct omap_mcbsp_data *mcbsp_data = to_mcbsp(cpu_dai->private_data);
 	struct omap_mcbsp_reg_cfg *regs = &mcbsp_data->regs;
 	int dma, bus_id = mcbsp_data->bus_id, id = cpu_dai->id;
-	int wlen, channels;
+	int wlen, channels, wpf;
 	unsigned long port;
+	unsigned int format;
 
 	if (cpu_class_is_omap1()) {
 		dma = omap1_dma_reqs[bus_id][substream->stream];
@@ -233,26 +234,25 @@ static int omap_mcbsp_dai_hw_params(struct snd_pcm_substream *substream,
 		return 0;
 	}
 
-	channels = params_channels(params);
+	format = mcbsp_data->fmt & SND_SOC_DAIFMT_FORMAT_MASK;
+	wpf = channels = params_channels(params);
 	switch (channels) {
 	case 2:
-		/* Use dual-phase frames */
-		if ((mcbsp_data->fmt & SND_SOC_DAIFMT_FORMAT_MASK) == \
-			SND_SOC_DAIFMT_DSP) {
-			regs->rcr1	|= RFRLEN1(2 - 1);
-			regs->xcr1	|= XFRLEN1(2 - 1);
-			break;
-		} else {
+		if (format == SND_SOC_DAIFMT_I2S ||
+		    format == SND_SOC_DAIFMT_LEFT_J) {
 			/* Use dual-phase frames */
 			regs->rcr2	|= RPHASE;
 			regs->xcr2	|= XPHASE;
+			/* Set 1 word per (McBSP) frame for phase1 and phase2 */
+			wpf--;
+			regs->rcr2	|= RFRLEN2(wpf - 1);
+			regs->xcr2	|= XFRLEN2(wpf - 1);
 		}
 	case 1:
-		/* Set 1 word per (McBSP) frame */
-		regs->rcr2	|= RFRLEN2(1 - 1);
-		regs->rcr1	|= RFRLEN1(1 - 1);
-		regs->xcr2	|= XFRLEN2(1 - 1);
-		regs->xcr1	|= XFRLEN1(1 - 1);
+	case 4:
+		/* Set word per (McBSP) frame for phase1 */
+		regs->rcr1	|= RFRLEN1(wpf - 1);
+		regs->xcr1	|= XFRLEN1(wpf - 1);
 		break;
 	default:
 		/* Unsupported number of channels */
@@ -274,16 +274,14 @@ static int omap_mcbsp_dai_hw_params(struct snd_pcm_substream *substream,
 	}
 
 	/* Set FS period and length in terms of bit clock periods */
-	switch (mcbsp_data->fmt & SND_SOC_DAIFMT_FORMAT_MASK) {
+	switch (format) {
 	case SND_SOC_DAIFMT_I2S:
+	case SND_SOC_DAIFMT_LEFT_J:
 		regs->srgr2	|= FPER(wlen * 2 - 1);
 		regs->srgr1	|= FWID(wlen - 1);
 		break;
 	case SND_SOC_DAIFMT_DSP_A:
-		regs->srgr2	|= FPER(wlen * channels - 1);
-		regs->srgr1	|= FWID(wlen * channels - 2);
-		break;
-	case SND_SOC_DAIFMT_DSP:
+	case SND_SOC_DAIFMT_DSP_B:
 		regs->srgr2	|= FPER(wlen * channels - 1);
 		regs->srgr1	|= FWID(0);
 		break;
@@ -304,6 +302,7 @@ static int omap_mcbsp_dai_set_dai_fmt(struct snd_soc_dai *cpu_dai,
 {
 	struct omap_mcbsp_data *mcbsp_data = to_mcbsp(cpu_dai->private_data);
 	struct omap_mcbsp_reg_cfg *regs = &mcbsp_data->regs;
+	unsigned int temp_fmt = fmt;
 
 	if (mcbsp_data->configured)
 		return 0;
@@ -327,19 +326,28 @@ static int omap_mcbsp_dai_set_dai_fmt(struct snd_soc_dai *cpu_dai,
 		regs->rccr	|= RFULL_CYCLE | RDMAEN | RDISABLE;
 		regs->xccr	|= (DXENDLY(1) | XDMAEN | XDISABLE);
 		break;
+	case SND_SOC_DAIFMT_LEFT_J:
+		regs->rcr2	|= RDATDLY(0);
+		regs->xcr2	|= XDATDLY(0);
+		regs->spcr1	|= RJUST(2);
+		regs->rccr	|= RFULL_CYCLE | RDMAEN | RDISABLE;
+		regs->xccr	|= (DXENDLY(1) | XDMAEN | XDISABLE);
+		break;
 	case SND_SOC_DAIFMT_DSP_A:
+		/* 1-bit data delay */
+		regs->rcr2      |= RDATDLY(1);
+		regs->xcr2      |= XDATDLY(1);
+		regs->rccr	|= RFULL_CYCLE | RDMAEN | RDISABLE;
+		regs->xccr	|= (DXENDLY(1) | XDMAEN | XDISABLE);
+		temp_fmt ^= SND_SOC_DAIFMT_NB_IF;
+		break;
+	case SND_SOC_DAIFMT_DSP_B:
 		/* 0-bit data delay */
 		regs->rcr2      |= RDATDLY(0);
 		regs->xcr2      |= XDATDLY(0);
 		regs->rccr	|= RFULL_CYCLE | RDMAEN | RDISABLE;
 		regs->xccr	|= (DXENDLY(1) | XDMAEN | XDISABLE);
-		break;
-	case SND_SOC_DAIFMT_DSP:
-		regs->rcr2      |= RDATDLY(0);
-		regs->xcr2      |= XDATDLY(0);
-		regs->rccr	|= RDMAEN | RDISABLE;
-		regs->xccr	|= (DXENDLY(1) | XFULL_CYCLE | XDMAEN \
-					| XDISABLE);
+		temp_fmt ^= SND_SOC_DAIFMT_NB_IF;
 		break;
 	default:
 		/* Unsupported data format */
@@ -363,7 +371,7 @@ static int omap_mcbsp_dai_set_dai_fmt(struct snd_soc_dai *cpu_dai,
 	}
 
 	/* Set bit clock (CLKX/CLKR) and FS polarities */
-	switch (fmt & SND_SOC_DAIFMT_INV_MASK) {
+	switch (temp_fmt & SND_SOC_DAIFMT_INV_MASK) {
 	case SND_SOC_DAIFMT_NB_NF:
 		/*
 		 * Normal BCLK + FS.
@@ -491,13 +499,13 @@ static int omap_mcbsp_dai_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
 	.type = SND_SOC_DAI_I2S,				\
 	.playback = {						\
 		.channels_min = 1,				\
-		.channels_max = 2,				\
+		.channels_max = 4,				\
 		.rates = OMAP_MCBSP_RATES,			\
 		.formats = SNDRV_PCM_FMTBIT_S16_LE,		\
 	},							\
 	.capture = {						\
 		.channels_min = 1,				\
-		.channels_max = 2,				\
+		.channels_max = 4,				\
 		.rates = OMAP_MCBSP_RATES,			\
 		.formats = SNDRV_PCM_FMTBIT_S16_LE,		\
 	},							\

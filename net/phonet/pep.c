@@ -368,6 +368,14 @@ static int pipe_do_rcv(struct sock *sk, struct sk_buff *skb)
 			break;
 		}
 		pn->rx_credits--;
+		if (pn->rx_fc == PN_MULTI_CREDIT_FLOW_CONTROL) {
+			if (pn->rx_credits == 0)
+				printk(KERN_ERR"pn_pep: RX congestion\n");
+			else if (pn->rx_credits < (CREDITS_MAX - CREDITS_THR))
+				printk(KERN_WARNING
+					"pn_pep: %u RX credits left\n",
+					pn->rx_credits);
+		}
 		queue = &sk->sk_receive_queue;
 		goto queue;
 

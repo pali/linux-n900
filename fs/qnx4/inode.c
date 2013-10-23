@@ -74,7 +74,7 @@ static void qnx4_write_super(struct super_block *sb)
 {
 	lock_kernel();
 	QNX4DEBUG(("qnx4: write_super\n"));
-	sb->s_dirt = 0;
+	mark_sb_clean(sb);
 	unlock_kernel();
 }
 

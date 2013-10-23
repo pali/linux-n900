@@ -52,8 +52,6 @@ int ssi_port_event_handler(struct ssi_port *p, unsigned int event, void *arg)
 static int ssi_clk_event(struct notifier_block *nb, unsigned long event,
 								void *data)
 {
-	struct ssi_dev *ssi_ctrl = container_of(nb, struct ssi_dev, ssi_nb);
-
 	switch (event) {
 	case CLK_PRE_RATE_CHANGE:
 		break;
@@ -456,16 +454,21 @@ rollback1:
 	return err;
 }
 
-static void __exit close_all_ch(struct ssi_dev *ssi_ctrl)
+static void __exit unregister_ssi_devices(struct ssi_dev *ssi_ctrl)
 {
 	struct ssi_port *ssi_p;
+	struct ssi_device *device;
 	unsigned int port;
 	unsigned int ch;
 
 	for (port = 0; port < ssi_ctrl->max_p; port++) {
 		ssi_p = &ssi_ctrl->ssi_port[port];
-		for (ch = 0; ch < ssi_p->max_ch; ch++)
-			ssi_close(ssi_p->ssi_channel[ch].dev);
+		for (ch = 0; ch < ssi_p->max_ch; ch++) {
+			device = ssi_p->ssi_channel[ch].dev;
+			ssi_close(device);
+			device_unregister(&device->device);
+			kfree(device);
+		}
 	}
 }
 
@@ -476,7 +479,7 @@ static int __exit ssi_remove(struct platform_device *pd)
 	if (!ssi_ctrl)
 		return 0;
 
-	close_all_ch(ssi_ctrl);
+	unregister_ssi_devices(ssi_ctrl);
 	ssi_debug_remove_ctrl(ssi_ctrl);
 	ssi_controller_exit(ssi_ctrl);
 	kfree(ssi_ctrl);
@@ -521,9 +524,9 @@ rback1:
 
 static void __exit ssi_driver_exit(void)
 {
-	ssi_bus_exit();
-	ssi_debug_exit();
 	platform_driver_unregister(&ssi_pdriver);
+	ssi_debug_exit();
+	ssi_bus_exit();
 
 	pr_info("SSI DRIVER removed\n");
 }

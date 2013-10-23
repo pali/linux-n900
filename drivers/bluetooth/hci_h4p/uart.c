@@ -138,17 +138,44 @@ int hci_h4p_reset_uart(struct hci_h4p_info *info)
 	return 0;
 }
 
-int hci_h4p_init_uart(struct hci_h4p_info *info)
+
+void hci_h4p_store_regs(struct hci_h4p_info *info)
 {
-	int err;
+	u16 lcr = 0;
+
+	lcr = hci_h4p_inb(info, UART_LCR);
+	hci_h4p_outb(info, UART_LCR, 0xBF);
+	info->dll = hci_h4p_inb(info, UART_DLL);
+	info->dlh = hci_h4p_inb(info, UART_DLM);
+	info->efr = hci_h4p_inb(info, UART_EFR);
+	hci_h4p_outb(info, UART_LCR, lcr);
+	info->mdr1 = hci_h4p_inb(info, UART_OMAP_MDR1);
+	info->ier = hci_h4p_inb(info, UART_IER);
+}
+
+void hci_h4p_restore_regs(struct hci_h4p_info *info)
+{
+	u16 lcr = 0;
+
+	hci_h4p_init_uart(info);
+
+	hci_h4p_outb(info, UART_OMAP_MDR1, 7);
+	lcr = hci_h4p_inb(info, UART_LCR);
+	hci_h4p_outb(info, UART_LCR, 0xBF);
+	hci_h4p_outb(info, UART_DLL, info->dll);    /* Set speed */
+	hci_h4p_outb(info, UART_DLM, info->dlh);
+	hci_h4p_outb(info, UART_EFR, info->efr);
+	hci_h4p_outb(info, UART_LCR, lcr);
+	hci_h4p_outb(info, UART_OMAP_MDR1, info->mdr1);
+	hci_h4p_outb(info, UART_IER, info->ier);
+}
+
+void hci_h4p_init_uart(struct hci_h4p_info *info)
+{
 	u8 mcr, efr;
 
-	err = hci_h4p_reset_uart(info);
-	if (err < 0)
-		return err;
-
 	/* Enable and setup FIFO */
-	hci_h4p_outb(info, UART_OMAP_MDR1, 0x00); /* Make sure UART mode is enabled */
+	hci_h4p_outb(info, UART_OMAP_MDR1, 0x00);
 
 	hci_h4p_outb(info, UART_LCR, 0xbf);
 	efr = hci_h4p_inb(info, UART_EFR);
@@ -159,7 +186,7 @@ int hci_h4p_init_uart(struct hci_h4p_info *info)
 	hci_h4p_outb(info, UART_FCR, UART_FCR_ENABLE_FIFO | UART_FCR_CLEAR_RCVR |
 			UART_FCR_CLEAR_XMIT | (3 << 6) | (0 << 4));
 	hci_h4p_outb(info, UART_LCR, 0xbf);
-	hci_h4p_outb(info, UART_TI752_TLR, 0xe1);
+	hci_h4p_outb(info, UART_TI752_TLR, 0xed);
 	hci_h4p_outb(info, UART_TI752_TCR, 0xef);
 	hci_h4p_outb(info, UART_EFR, efr);
 	hci_h4p_outb(info, UART_LCR, UART_LCR_DLAB);
@@ -167,6 +194,4 @@ int hci_h4p_init_uart(struct hci_h4p_info *info)
 	hci_h4p_outb(info, UART_LCR, UART_LCR_WLEN8);
 	hci_h4p_outb(info, UART_IER, UART_IER_RDI);
 	hci_h4p_outb(info, UART_OMAP_SYSC, (1 << 0) | (1 << 2) | (2 << 3));
-
-	return 0;
 }

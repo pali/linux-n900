@@ -274,7 +274,8 @@ static struct
 	enum omap_dss_update_mode user_update_mode;
 	enum omap_dss_update_mode target_update_mode;
 	enum omap_dss_update_mode update_mode;
-	int use_te;
+	bool use_te;
+	bool use_ext_te;
 	int framedone_scheduled; /* helps to catch strange framedone bugs */
 
 	unsigned long cache_req_pck;
@@ -289,9 +290,12 @@ static struct
 
 	bool autoupdate_setup;
 
+	u32		errors;
+	spinlock_t	errors_lock;
 #ifdef DEBUG
 	ktime_t perf_setup_time;
 	ktime_t perf_start_time;
+	ktime_t perf_start_time_auto;
 	int perf_measure_frames;
 
 	struct {
@@ -358,13 +362,16 @@ static void perf_mark_start(void)
 	dsi.perf_start_time = ktime_get();
 }
 
+static void perf_mark_start_auto(void)
+{
+	dsi.perf_start_time_auto = ktime_get();
+}
+
 static void perf_show(const char *name)
 {
 	ktime_t t, setup_time, trans_time;
 	u32 total_bytes;
 	u32 setup_us, trans_us, total_us;
-	const int numframes = 100;
-	static u32 s_trans_us, s_min_us = 0xffffffff, s_max_us;
 
 	if (!dsi_perf)
 		return;
@@ -391,34 +398,57 @@ static void perf_show(const char *name)
 		dsi.update_region.bytespp;
 
 	if (dsi.update_mode == OMAP_DSS_UPDATE_AUTO) {
+		static u32 s_total_trans_us, s_total_setup_us;
+		static u32 s_min_trans_us = 0xffffffff, s_min_setup_us;
+		static u32 s_max_trans_us, s_max_setup_us;
+		const int numframes = 100;
+		ktime_t total_time_auto;
+		u32 total_time_auto_us;
+
 		dsi.perf_measure_frames++;
 
-		if (trans_us < s_min_us)
-			s_min_us = trans_us;
+		if (setup_us < s_min_setup_us)
+			s_min_setup_us = setup_us;
 
-		if (trans_us > s_max_us)
-			s_max_us = trans_us;
+		if (setup_us > s_max_setup_us)
+			s_max_setup_us = setup_us;
 
-		s_trans_us += trans_us;
+		s_total_setup_us += setup_us;
+
+		if (trans_us < s_min_trans_us)
+			s_min_trans_us = trans_us;
+
+		if (trans_us > s_max_trans_us)
+			s_max_trans_us = trans_us;
+
+		s_total_trans_us += trans_us;
 
 		if (dsi.perf_measure_frames < numframes)
 			return;
 
-		DSSINFO("%s update: %d frames in %u us "
-				"(min/max/avg %u/%u/%u), %u fps\n",
-				name, numframes,
-				s_trans_us,
-				s_min_us,
-				s_max_us,
-				s_trans_us / numframes,
-				1000*1000 / (s_trans_us / numframes));
+		total_time_auto = ktime_sub(t, dsi.perf_start_time_auto);
+		total_time_auto_us = (u32)ktime_to_us(total_time_auto);
+
+		printk("DSI(%s): %u fps, setup %u/%u/%u, trans %u/%u/%u\n",
+				name,
+				1000 * 1000 * numframes / total_time_auto_us,
+				s_min_setup_us,
+				s_max_setup_us,
+				s_total_setup_us / numframes,
+				s_min_trans_us,
+				s_max_trans_us,
+				s_total_trans_us / numframes);
 
 		dsi.perf_measure_frames = 0;
-		s_trans_us = 0;
-		s_min_us = 0xffffffff;
-		s_max_us = 0;
+		s_total_setup_us = 0;
+		s_min_setup_us = 0xffffffff;
+		s_max_setup_us = 0;
+		s_total_trans_us = 0;
+		s_min_trans_us = 0xffffffff;
+		s_max_trans_us = 0;
+		perf_mark_start_auto();
 	} else {
-		DSSINFO("%s update %u us + %u us = %u us (%uHz), %u bytes, "
+		printk("DSI(%s): %u us + %u us = %u us (%uHz), %u bytes, "
 				"%u kbytes/sec\n",
 				name,
 				setup_us,
@@ -541,6 +571,9 @@ void dsi_irq_handler(void)
 	if (irqstatus & DSI_IRQ_ERROR_MASK) {
 		DSSERR("DSI error, irqstatus %x\n", irqstatus);
 		print_irq_status(irqstatus);
+		spin_lock(&dsi.errors_lock);
+		dsi.errors |= irqstatus & DSI_IRQ_ERROR_MASK;
+		spin_unlock(&dsi.errors_lock);
 	} else if (debug_irq) {
 		print_irq_status(irqstatus);
 	}
@@ -614,6 +647,17 @@ static void _dsi_initialize_irq(void)
 	   data lines LP0 and LN0. */
 	dsi_write_reg(DSI_COMPLEXIO_IRQ_ENABLE,
 			-1 & (~DSI_CIO_IRQ_ERRCONTROL2));
+}
+
+static u32 dsi_get_errors(void)
+{
+	unsigned long flags;
+	u32 e;
+	spin_lock_irqsave(&dsi.errors_lock, flags);
+	e = dsi.errors;
+	dsi.errors = 0;
+	spin_unlock_irqrestore(&dsi.errors_lock, flags);
+	return e;
 }
 
 static void dsi_vc_enable_bta_irq(int channel)
@@ -719,19 +763,19 @@ static unsigned long dsi_fclk_rate(void)
 	return r;
 }
 
-static int dsi_set_lp_clk_divisor(void)
+static int dsi_set_lp_clk_divisor(struct omap_display *display)
 {
-	int n;
+	unsigned n;
 	unsigned long dsi_fclk;
-	unsigned long mhz;
-
-	/* LP_CLK_DIVISOR, DSI fclk/n, should be 20MHz - 32kHz */
+	unsigned long lp_clk, lp_clk_req;
 
 	dsi_fclk = dsi_fclk_rate();
 
+	lp_clk_req = display->hw_config.u.dsi.lp_clk_hz;
+
 	for (n = 1; n < (1 << 13) - 1; ++n) {
-		mhz = dsi_fclk / n;
-		if (mhz <= 20*1000*1000)
+		lp_clk = dsi_fclk / 2 / n;
+		if (lp_clk <= lp_clk_req)
 			break;
 	}
 
@@ -740,7 +784,7 @@ static int dsi_set_lp_clk_divisor(void)
 		return -EINVAL;
 	}
 
-	DSSDBG("LP_CLK_DIV %d, LP_CLK %ld\n", n, mhz);
+	DSSDBG("LP_CLK_DIV %u, LP_CLK %lu (req %lu)\n", n, lp_clk, lp_clk_req);
 
 	REG_FLD_MOD(DSI_CLK_CTRL, n, 12, 0);	/* LP_CLK_DIVISOR */
 	if (dsi_fclk > 30*1000*1000)
@@ -1380,28 +1424,28 @@ static void dsi_complexio_timings(void)
 	/* 1 * DDR_CLK = 2 * UI */
 
 	/* min 40ns + 4*UI	max 85ns + 6*UI */
-	ths_prepare = ns2ddr(59) + 2;
+	ths_prepare = ns2ddr(70) + 2;
 
 	/* min 145ns + 10*UI */
-	ths_prepare_ths_zero = ns2ddr(145) + 5;
+	ths_prepare_ths_zero = ns2ddr(175) + 2;
 
 	/* min max(8*UI, 60ns+4*UI) */
-	ths_trail = max((unsigned)4, ns2ddr(60) + 2);
+	ths_trail = ns2ddr(60) + 5;
 
 	/* min 100ns */
-	ths_exit = ns2ddr(100);
+	ths_exit = ns2ddr(145);
 
 	/* tlpx min 50n */
 	tlpx_half = ns2ddr(25);
 
 	/* min 60ns */
-	tclk_trail = ns2ddr(60);
+	tclk_trail = ns2ddr(60) + 2;
 
 	/* min 38ns, max 95ns */
-	tclk_prepare = ns2ddr(38);
+	tclk_prepare = ns2ddr(65);
 
 	/* min tclk-prepare + tclk-zero = 300ns */
-	tclk_zero = ns2ddr(300 - 38);
+	tclk_zero = ns2ddr(260);
 
 	DSSDBG("ths_prepare %u (%uns), ths_prepare_ths_zero %u (%uns)\n",
 		ths_prepare, ddr2ns(ths_prepare),
@@ -1807,6 +1851,7 @@ static int dsi_vc_send_bta(int channel)
 static int dsi_vc_send_bta_sync(int channel)
 {
 	int r = 0;
+	u32 err;
 
 	init_completion(&dsi.bta_completion);
 
@@ -1819,6 +1864,13 @@ static int dsi_vc_send_bta_sync(int channel)
 	if (wait_for_completion_timeout(&dsi.bta_completion,
 				msecs_to_jiffies(500)) == 0) {
 		DSSERR("Failed to receive BTA\n");
+		r = -EIO;
+		goto err;
+	}
+
+	err = dsi_get_errors();
+	if (err) {
+		DSSERR("Error while sending BTA: %x\n", err);
 		r = -EIO;
 		goto err;
 	}
@@ -2285,15 +2337,26 @@ static int dsi_proto_config(struct omap_display *display)
 	return 0;
 }
 
-static void dsi_proto_timings(void)
+static void dsi_proto_timings(struct omap_display *display)
 {
-	int tlpx_half, tclk_zero, tclk_prepare, tclk_trail;
-	int tclk_pre, tclk_post;
-	int ddr_clk_pre, ddr_clk_post;
+	unsigned tlpx, tclk_zero, tclk_prepare, tclk_trail;
+	unsigned tclk_pre, tclk_post;
+	unsigned ths_prepare, ths_prepare_ths_zero, ths_zero;
+	unsigned ths_trail, ths_exit;
+	unsigned ddr_clk_pre, ddr_clk_post;
+	unsigned enter_hs_mode_lat, exit_hs_mode_lat;
+	unsigned ths_eot;
 	u32 r;
 
+	r = dsi_read_reg(DSI_DSIPHY_CFG0);
+	ths_prepare = FLD_GET(r, 31, 24);
+	ths_prepare_ths_zero = FLD_GET(r, 23, 16);
+	ths_zero = ths_prepare_ths_zero - ths_prepare;
+	ths_trail = FLD_GET(r, 15, 8);
+	ths_exit = FLD_GET(r, 7, 0);
+
 	r = dsi_read_reg(DSI_DSIPHY_CFG1);
-	tlpx_half = FLD_GET(r, 22, 16);
+	tlpx = FLD_GET(r, 22, 16) * 2;
 	tclk_trail = FLD_GET(r, 15, 8);
 	tclk_zero = FLD_GET(r, 7, 0);
 
@@ -2305,17 +2368,40 @@ static void dsi_proto_timings(void)
 	/* min 60ns + 52*UI */
 	tclk_post = ns2ddr(60) + 26;
 
-	ddr_clk_pre = (tclk_pre + tlpx_half*2 + tclk_zero + tclk_prepare) / 4;
-	ddr_clk_post = (tclk_post + tclk_trail) / 4;
+	/* ths_eot is 2 for 2 datalanes and 4 for 1 datalane */
+	if (display->hw_config.u.dsi.data1_lane != 0 &&
+			display->hw_config.u.dsi.data2_lane != 0)
+		ths_eot = 2;
+	else
+		ths_eot = 4;
+
+	ddr_clk_pre = DIV_ROUND_UP(tclk_pre + tlpx + tclk_zero + tclk_prepare,
+			4);
+	ddr_clk_post = DIV_ROUND_UP(tclk_post + tclk_trail, 4) + ths_eot;
+
+	BUG_ON(ddr_clk_pre == 0 || ddr_clk_pre > 255);
+	BUG_ON(ddr_clk_post == 0 || ddr_clk_post > 255);
 
 	r = dsi_read_reg(DSI_CLK_TIMING);
 	r = FLD_MOD(r, ddr_clk_pre, 15, 8);
 	r = FLD_MOD(r, ddr_clk_post, 7, 0);
 	dsi_write_reg(DSI_CLK_TIMING, r);
 
-	DSSDBG("ddr_clk_pre %d, ddr_clk_post %d\n",
+	DSSDBG("ddr_clk_pre %u, ddr_clk_post %u\n",
 			ddr_clk_pre,
 			ddr_clk_post);
+
+	enter_hs_mode_lat = 1 + DIV_ROUND_UP(tlpx, 4) +
+		DIV_ROUND_UP(ths_prepare, 4) +
+		DIV_ROUND_UP(ths_zero + 3, 4);
+	exit_hs_mode_lat = DIV_ROUND_UP(ths_trail + ths_exit, 4) + 1 + ths_eot;
+
+	r = FLD_VAL(enter_hs_mode_lat, 31, 16) |
+		FLD_VAL(exit_hs_mode_lat, 15, 0);
+	dsi_write_reg(DSI_VM_TIMING7, r);
+
+	DSSDBG("enter_hs_mode_lat %u, exit_hs_mode_lat %u\n",
+			enter_hs_mode_lat, exit_hs_mode_lat);
 }
 
 
@@ -2649,6 +2735,9 @@ static void dsi_update_screen_dispc(struct omap_display *display,
 
 	display->ctrl->setup_update(display, x, y, w, h);
 
+	if (dsi.use_ext_te && display->ctrl->wait_for_te)
+		display->ctrl->wait_for_te(display);
+
 	if (0)
 		dsi_vc_print_status(1);
 
@@ -2665,6 +2754,8 @@ static void dsi_update_screen_dispc(struct omap_display *display,
 		l = FLD_MOD(l, 1, 31, 31); /* TE_START */
 	dsi_write_reg(DSI_VC_TE(1), l);
 
+	dispc_disable_sidle();
+
 	dispc_enable_lcd_out(1);
 
 	if (dsi.use_te)
@@ -2677,6 +2768,8 @@ static void framedone_callback(void *data, u32 mask)
 		DSSERR("Framedone already scheduled. Bogus FRAMEDONE IRQ?\n");
 		return;
 	}
+
+	dispc_enable_sidle();
 
 	dsi.framedone_scheduled = 1;
 
@@ -2752,6 +2845,8 @@ static void dsi_start_auto_update(struct omap_display *display)
 	dsi.autoupdate_setup = 1;
 
 	dsi_push_autoupdate(display);
+
+	perf_mark_start_auto();
 }
 
 
@@ -2910,19 +3005,24 @@ end:
 
 static void dsi_do_cmd_set_te(struct omap_display *display, bool enable)
 {
-	dsi.use_te = enable;
+	if (!display->hw_config.u.dsi.ext_te)
+		dsi.use_te = enable;
+	else
+		dsi.use_ext_te = enable;
 
 	if (display->state != OMAP_DSS_DISPLAY_ACTIVE)
 		return;
 
 	display->ctrl->enable_te(display, enable);
 
-	if (enable) {
-		/* disable LP_RX_TO, so that we can receive TE.
-		 * Time to wait for TE is longer than the timer allows */
-		REG_FLD_MOD(DSI_TIMING2, 0, 15, 15); /* LP_RX_TO */
-	} else {
-		REG_FLD_MOD(DSI_TIMING2, 1, 15, 15); /* LP_RX_TO */
+	if (!display->hw_config.u.dsi.ext_te) {
+		if (enable) {
+			/* disable LP_RX_TO, so that we can receive TE.
+			 * Time to wait for TE is longer than the timer allows */
+			REG_FLD_MOD(DSI_TIMING2, 0, 15, 15); /* LP_RX_TO */
+		} else {
+			REG_FLD_MOD(DSI_TIMING2, 1, 15, 15); /* LP_RX_TO */
+		}
 	}
 }
 
@@ -3212,7 +3312,7 @@ static void dsi_push_set_mirror(struct omap_display *display, int mirror)
 
 static int dsi_wait_sync(struct omap_display *display)
 {
-	long wait = msecs_to_jiffies(60000);
+	long wait = msecs_to_jiffies(2000);
 	struct completion compl;
 
 	DSSDBGF("");
@@ -3312,8 +3412,8 @@ static int dsi_display_init_dsi(struct omap_display *display)
 
 	_dsi_print_reset_status();
 
-	dsi_proto_timings();
-	dsi_set_lp_clk_divisor();
+	dsi_proto_timings(display);
+	dsi_set_lp_clk_divisor(display);
 
 	if (1)
 		_dsi_print_reset_status();
@@ -3417,7 +3517,7 @@ static int dsi_display_enable(struct omap_display *display)
 
 	display->state = OMAP_DSS_DISPLAY_ACTIVE;
 
-	if (dsi.use_te)
+	if (dsi.use_te || dsi.use_ext_te)
 		dsi_push_set_te(display, 1);
 
 	dsi_push_set_update_mode(display, dsi.user_update_mode);
@@ -3550,7 +3650,7 @@ static int dsi_display_enable_te(struct omap_display *display, bool enable)
 
 static int dsi_display_get_te(struct omap_display *display)
 {
-	return dsi.use_te;
+	return dsi.use_te | dsi.use_ext_te;
 }
 
 
@@ -3680,7 +3780,7 @@ static void dsi_configure_overlay(struct omap_overlay *ovl)
 	dispc_setup_plane_fifo(plane, low, high);
 }
 
-void dsi_init_display(struct omap_display *display)
+int dsi_init_display(struct omap_display *display)
 {
 	DSSDBG("DSI init\n");
 
@@ -3710,11 +3810,16 @@ void dsi_init_display(struct omap_display *display)
 
 	dsi.vc[0].display = display;
 	dsi.vc[1].display = display;
+
+	return 0;
 }
 
 int dsi_init(void)
 {
 	u32 rev;
+
+	spin_lock_init(&dsi.errors_lock);
+	dsi.errors = 0;
 
 	spin_lock_init(&dsi.cmd_lock);
 	dsi.cmd_fifo = kfifo_alloc(

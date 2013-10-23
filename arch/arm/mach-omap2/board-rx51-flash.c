@@ -13,6 +13,7 @@
 #include <linux/platform_device.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/partitions.h>
+#include <linux/mmc/host.h>
 
 #include <asm/mach/flash.h>
 #include <asm/mach-types.h>
@@ -24,7 +25,7 @@
 #define	RX51_FLASH_CS	0
 #define VAUX3_DEV_GRP		0x1F
 #define SYSTEM_REV_B_USES_VAUX3	0x1699
-#define SYSTEM_REV_S_USES_VAUX3	0x8
+#define SYSTEM_REV_S_USES_VAUX3	0x7
 
 extern struct mtd_partition n800_partitions[ONENAND_MAX_PARTITIONS];
 extern int n800_onenand_setup(void __iomem *onenand_base, int freq);
@@ -63,6 +64,8 @@ static struct twl4030_hsmmc_info mmc[] __initdata = {
 		.cover_only	= true,
 		.gpio_cd	= 160,
 		.gpio_wp	= -EINVAL,
+		.power_saving	= true,
+		.caps		= MMC_CAP_SD_ONLY,
 	},
 	{
 		.name		= "internal",
@@ -71,6 +74,8 @@ static struct twl4030_hsmmc_info mmc[] __initdata = {
 		.gpio_cd	= -EINVAL,
 		.gpio_wp	= -EINVAL,
 		.vsim_18v	= true,
+		.power_saving	= true,
+		.caps		= MMC_CAP_MMC_ONLY | MMC_CAP_NONREMOVABLE,
 	},
 	{}	/* Terminator */
 };
@@ -83,6 +88,8 @@ static int __init rx51_flash_init(void)
 	if ((system_rev >= SYSTEM_REV_S_USES_VAUX3 && system_rev < 0x100) ||
 	    system_rev >= SYSTEM_REV_B_USES_VAUX3)
 		mmc[1].vmmc_dev_grp = VAUX3_DEV_GRP;
+	else
+		mmc[1].power_saving = false;
 
 	platform_add_devices(rx51_flash_devices, ARRAY_SIZE(rx51_flash_devices));
 	n800_flash_init();

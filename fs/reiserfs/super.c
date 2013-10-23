@@ -69,11 +69,11 @@ static int reiserfs_sync_fs(struct super_block *s, int wait)
 		if (!journal_begin(&th, s, 1))
 			if (!journal_end_sync(&th, s, 1))
 				reiserfs_flush_old_commits(s);
-		s->s_dirt = 0;	/* Even if it's not true.
-				 * We'll loop forever in sync_supers otherwise */
+		mark_sb_clean(s); /* Even if it's not true.
+				   * We'll loop forever in sync_supers otherwise */
 		reiserfs_write_unlock(s);
 	} else {
-		s->s_dirt = 0;
+		mark_sb_clean(s);
 	}
 	return 0;
 }
@@ -99,7 +99,7 @@ static void reiserfs_write_super_lockfs(struct super_block *s)
 			journal_end_sync(&th, s, 1);
 		}
 	}
-	s->s_dirt = 0;
+	mark_sb_clean(s);
 	reiserfs_write_unlock(s);
 }
 
@@ -1287,7 +1287,7 @@ static int reiserfs_remount(struct super_block *s, int *mount_flags, char *arg)
 	err = journal_end(&th, s, 10);
 	if (err)
 		goto out_err;
-	s->s_dirt = 0;
+	mark_sb_clean(s);
 
 	if (!(*mount_flags & MS_RDONLY)) {
 		finish_unfinished(s);

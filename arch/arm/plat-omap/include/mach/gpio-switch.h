@@ -52,14 +52,8 @@ struct omap_gpio_switch {
 #ifdef CONFIG_OMAP_GPIO_SWITCH
 extern void omap_register_gpio_switches(const struct omap_gpio_switch *tbl,
 					int count);
-extern int omap_update_gpio_switch(const struct omap_gpio_switch *cfg);
 #else
 #define omap_register_gpio_switches(tbl, count)	do { } while (0)
-static inline int omap_update_gpio_switch(const struct omap_gpio_switch *cfg)
-{
-	return 0;
-}
-
 #endif
 
 #endif

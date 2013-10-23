@@ -109,7 +109,7 @@ CBUILD.release	= -DRELEASE
 _CFLAGS.debug	= -g -O0 -DDLL_METRIC=1
 _CFLAGS.timing	= $(OPTIM) -g -DDLL_METRIC=1 -DTIMING
 _CFLAGS.release	= $(OPTIM) -g
-_CFLAGS          = $(_CFLAGS.$(BUILD))
+_CFLAGS          = $(_CFLAGS.$(BUILD)) -DSGX_DYNAMIC_TIMING_INFO
 
 # Defaults for useful things.
 #

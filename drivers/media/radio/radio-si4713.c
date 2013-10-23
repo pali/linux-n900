@@ -303,6 +303,22 @@ DEFINE_SYSFS_PROPERTY(region_preemphasis, unsigned, int, "%u",
 					(value != PREEMPHASIS_DISABLED)))
 DEFINE_SYSFS_PROPERTY(region, unsigned, int, "%u", 0)
 
+/*
+ * Tone properties
+ */
+/* tone_frequency (rw) 0 - 19000 */
+DEFINE_SYSFS_PROPERTY(tone_frequency, unsigned, int, "%u",
+			value > MAX_TONE_FREQUENCY)
+/* tone_deviation (rw) 0 - 90000 */
+DEFINE_SYSFS_PROPERTY(tone_deviation, unsigned, long, "%lu",
+			value > MAX_TONE_DEVIATION)
+/* tone_on_time (rw) 0 - 65535 */
+DEFINE_SYSFS_PROPERTY(tone_on_time, unsigned, int, "%u",
+			value > MAX_TONE_ON_TIME)
+/* tone_off_time (rw) 0 - 65535 */
+DEFINE_SYSFS_PROPERTY(tone_off_time, unsigned, int, "%u",
+			value > MAX_TONE_OFF_TIME)
+
 static struct attribute *attrs[] = {
 	&dev_attr_power_level.attr,
 	&dev_attr_antenna_capacitor.attr,
@@ -329,6 +345,10 @@ static struct attribute *attrs[] = {
 	&dev_attr_region_channel_spacing.attr,
 	&dev_attr_region.attr,
 	&dev_attr_tune_measure.attr,
+	&dev_attr_tone_frequency.attr,
+	&dev_attr_tone_deviation.attr,
+	&dev_attr_tone_on_time.attr,
+	&dev_attr_tone_off_time.attr,
 	NULL,
 };
 

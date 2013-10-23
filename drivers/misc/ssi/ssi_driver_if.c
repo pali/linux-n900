@@ -241,6 +241,7 @@ int ssi_ioctl(struct ssi_device *dev, unsigned int command, void *arg)
 	void __iomem *base;
 	unsigned int port, channel;
 	u32 wake;
+	u32 v;
 	int err = 0;
 
 	if (unlikely((!dev) ||
@@ -303,6 +304,17 @@ int ssi_ioctl(struct ssi_device *dev, unsigned int command, void *arg)
 			goto out;
 		}
 		*(unsigned int *)arg = ssi_cawake(dev->ch->ssi_port);
+		break;
+	case SSI_IOCTL_TX_CH_FULL:
+		if (!arg) {
+			err = -EINVAL;
+			goto out;
+		}
+		v = ssi_inl(base, SSI_SST_BUFSTATE_REG(port));
+		*(unsigned int *)arg = v & (1 << channel);
+		break;
+	case SSI_IOCTL_CH_DATAACCEPT:
+		ssi_driver_write_interrupt(dev->ch, NULL);
 		break;
 	default:
 		err = -ENOIOCTLCMD;

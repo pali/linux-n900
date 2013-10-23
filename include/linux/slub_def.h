@@ -139,8 +139,10 @@ static __always_inline int kmalloc_index(size_t size)
 		return KMALLOC_SHIFT_LOW;
 
 #if KMALLOC_MIN_SIZE <= 64
+#if KMALLOC_MIN_SIZE <= 32
 	if (size > 64 && size <= 96)
 		return 1;
+#endif
 	if (size > 128 && size <= 192)
 		return 2;
 #endif

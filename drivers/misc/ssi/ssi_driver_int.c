@@ -169,38 +169,34 @@ static void do_ssi_tasklet(unsigned long ssi_port)
 	struct ssi_dev *ssi_ctrl = pport->ssi_controller;
 	void __iomem *base = ssi_ctrl->base;
 	unsigned int port = pport->port_number;
-	unsigned int channel = 0;
+	unsigned int channel;
 	unsigned int irq = pport->n_irq;
+	u32 channels_served = 0;
 	u32 status_reg;
-	u32 enable_reg;
 	u32 ssr_err_reg;
-	u32 channels_served;
 
 	clk_enable(ssi_ctrl->ssi_clk);
 
-	channels_served = 0;
 	status_reg = ssi_inl(base, SSI_SYS_MPU_STATUS_REG(port, irq));
-	enable_reg = ssi_inl(base, SSI_SYS_MPU_ENABLE_REG(port, irq));
+	status_reg &= ssi_inl(base, SSI_SYS_MPU_ENABLE_REG(port, irq));
 
 	for (channel = 0; channel < pport->max_ch; channel++) {
-		if ((status_reg & SSI_SST_DATAACCEPT(channel)) &&
-		    (enable_reg & SSI_SST_DATAACCEPT(channel))) {
+		if (status_reg & SSI_SST_DATAACCEPT(channel)) {
 			do_channel_tx(&pport->ssi_channel[channel]);
 			channels_served |= SSI_SST_DATAACCEPT(channel);
 		}
 
-		if ((status_reg & SSI_SSR_DATAAVAILABLE(channel)) &&
-		    (enable_reg & SSI_SSR_DATAAVAILABLE(channel))) {
+		if (status_reg & SSI_SSR_DATAAVAILABLE(channel)) {
 			do_channel_rx(&pport->ssi_channel[channel]);
 			channels_served |= SSI_SSR_DATAAVAILABLE(channel);
 		}
 	}
 
-	if ((status_reg & SSI_BREAKDETECTED) &&
-	    (enable_reg & SSI_BREAKDETECTED)) {
+	if (status_reg & SSI_BREAKDETECTED) {
 		dev_info(ssi_ctrl->dev, "Hardware BREAK on port %d\n", port);
 		ssi_outl(0, base, SSI_SSR_BREAK_REG(port));
 		ssi_port_event_handler(pport, SSI_EVENT_BREAK_DETECTED, NULL);
+		channels_served |= SSI_BREAKDETECTED;
 	}
 
 	if (status_reg & SSI_ERROROCCURED) {
@@ -208,17 +204,22 @@ static void do_ssi_tasklet(unsigned long ssi_port)
 		dev_err(ssi_ctrl->dev, "SSI ERROR Port %d: 0x%02x\n",
 							port, ssr_err_reg);
 		ssi_outl(ssr_err_reg, base, SSI_SSR_ERRORACK_REG(port));
-		ssi_port_event_handler(pport, SSI_EVENT_ERROR, NULL);
+		if (ssr_err_reg) /* Ignore spurios errors */
+			ssi_port_event_handler(pport, SSI_EVENT_ERROR, NULL);
+		else
+			dev_dbg(ssi_ctrl->dev, "spurious SSI error!\n");
+
+		channels_served |= SSI_ERROROCCURED;
 	}
 
-	ssi_outl((channels_served | SSI_ERROROCCURED | SSI_BREAKDETECTED), base,
-					SSI_SYS_MPU_STATUS_REG(port, irq));
+	ssi_outl(channels_served, base, SSI_SYS_MPU_STATUS_REG(port, irq));
 
 	status_reg = ssi_inl(base, SSI_SYS_MPU_STATUS_REG(port, irq));
-	enable_reg = ssi_inl(base, SSI_SYS_MPU_ENABLE_REG(port, irq));
+	status_reg &= ssi_inl(base, SSI_SYS_MPU_ENABLE_REG(port, irq));
+
 	clk_disable(ssi_ctrl->ssi_clk);
 
-	if (status_reg & enable_reg)
+	if (status_reg)
 		tasklet_hi_schedule(&pport->ssi_tasklet);
 	else
 		enable_irq(pport->irq);

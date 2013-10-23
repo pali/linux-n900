@@ -21,8 +21,6 @@
  * 02110-1301 USA
  */
 
-#define DEBUG
-
 #include <linux/module.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
@@ -32,7 +30,6 @@
 #include <linux/gpio.h>
 #include <linux/lis302dl.h>
 #include <mach/board.h>
-
 
 #define DRIVER_NAME  "lis302dl"
 
@@ -82,11 +79,15 @@
 /* Default values */
 #define LIS302_THS		810	/* mg    */
 #define LIS302_DURATION		500	/* ms    */
-#define LIS302_400HZ		0	/* 0 / 1 */
-#define LIS302_FS		0	/* 0 / 1 */
+#define LIS302_400HZ		1	/* sample rate 400Hz */
+#define LIS302_100HZ		0	/* sample rate 100Hz */
+#define LIS302_FS		0	/* full scale 0 / 1 */
 #define LIS302_SAMPLES		1
 #define LIS302_SMALL_UNIT	18	/* Typical value 18 mg/digit */
 #define LIS302_BIG_UNIT		72	/* Typical value 72 mg/digit */
+#define LIS302_TURN_ON_TIME	3000	/* Turn on time 3000ms / data rate */
+
+#define LIS302_POWEROFF_DELAY	(5 * HZ)
 
 /* A lis302dl chip will contain this value in LIS302_WHOAMI register */
 #define LIS302_WHOAMI_VALUE	0x3b
@@ -96,6 +97,7 @@ struct lis302dl_chip {
 	struct mutex		lock;
 	struct i2c_client	*client;
 	struct work_struct	work1, work2;
+	struct delayed_work	poweroff_work;
 	int			irq1, irq2;
 	uint8_t			power;
 	int			threshold;
@@ -153,7 +155,7 @@ static int lis302dl_configure(struct i2c_client *c)
 	/* REG 1*/
 	/* Controls power, scale, data rate, and enabled axis */
 	r |= lis->sample_rate ? LIS302_CTRL1_DR : 0;
-	r |= lis->fs ? LIS302_CTRL1_PD : 0;
+	r |= lis->fs ? LIS302_CTRL1_FS : 0;
 	r |= LIS302_CTRL1_PD | LIS302_CTRL1_X | LIS302_CTRL1_Y | LIS302_CTRL1_Z;
 	ret = lis302dl_write(c, LIS302_CTRL_1, r);
 	if (ret < 0)
@@ -285,29 +287,51 @@ static void set_ths(struct i2c_client *c, int full_scale, int ths)
 
 static int lis302dl_power(struct lis302dl_chip *chip, int on)
 {
-	u8 reg;
-	int result;
+	u8 reg, regwant;
+	int result, delay;
 
 	reg = lis302dl_read(chip->client, LIS302_CTRL_1);
 	if (on)
-		reg |= LIS302_CTRL1_PD;
+		regwant = reg | LIS302_CTRL1_PD;
 	else
-		reg &= ~LIS302_CTRL1_PD;
+		regwant = reg & ~LIS302_CTRL1_PD;
 
-	result = lis302dl_write(chip->client, LIS302_CTRL_1, reg);
+	/* Avoid unnecessary writes */
+	if (reg == regwant)
+		return 0;
 
+	result = lis302dl_write(chip->client, LIS302_CTRL_1, regwant);
+
+	/* turn on time delay depends on data rate */
+	if (on) {
+		delay = (chip->sample_rate ? (LIS302_TURN_ON_TIME / 400) :
+			 (LIS302_TURN_ON_TIME / 100)) + 1;
+		msleep(delay);
+	}
 	if (!result)
 		chip->power = !!on;
 
 	return !!result;
 }
 
+static void lis302dl_poweroff_work(struct work_struct *work)
+{
+	struct lis302dl_chip *chip =
+		container_of(work, struct lis302dl_chip, poweroff_work.work);
+	mutex_lock(&chip->lock);
+	lis302dl_power(chip, 0);
+	mutex_unlock(&chip->lock);
+}
+
 static int lis302dl_selftest(struct lis302dl_chip *chip)
 {
 	u8 reg;
 	s8 x, y, z;
+	s8 powerbit;
 
 	reg = lis302dl_read(chip->client, LIS302_CTRL_1);
+	powerbit = reg & LIS302_CTRL1_PD;
+	reg |= LIS302_CTRL1_PD;
 	lis302dl_write(chip->client, LIS302_CTRL_1, (reg | LIS302_CTRL1_STP));
 	msleep(30);
 	x = (s8)lis302dl_read(chip->client, LIS302_X);
@@ -320,12 +344,18 @@ static int lis302dl_selftest(struct lis302dl_chip *chip)
 	y -= (s8)lis302dl_read(chip->client, LIS302_Y);
 	z -= (s8)lis302dl_read(chip->client, LIS302_Z);
 
+	/* Return to passive state if we were in it. */
+	if (!powerbit)
+		lis302dl_write(chip->client,
+			       LIS302_CTRL_1,
+			       reg & ~LIS302_CTRL1_PD);
+
 	/* Now check that delta is within specified range for each axis */
-	if (x < -16 || x > -3)
+	if (x < -32 || x > -3)
 		return -1;
-	if (y < 3 || y > 16)
+	if (y < 3 || y > 32)
 		return -1;
-	if (z < 3 || y > 16)
+	if (z < 3 || z > 32)
 		return -1;
 
 	/* test passed */
@@ -581,13 +611,14 @@ static ssize_t lis302dl_show_coord(struct device *dev,
 
 	x = y = z = 0;
 
+	/* Cannot cancel synchronously within the mutex */
+	cancel_delayed_work_sync(&chip->poweroff_work);
+
 	mutex_lock(&chip->lock);
-	if (!chip->power) {
-		/* Chip is turned off */
-		ret = snprintf(buf, PAGE_SIZE, "\n");
-		mutex_unlock(&chip->lock);
-		return ret;
-	}
+
+	if (!chip->power)
+		ret = lis302dl_power(chip, 1);
+
 	for (i = 0; i < chip->samples; i++) {
 		x += (s8)lis302dl_read(chip->client, LIS302_X);
 		y += (s8)lis302dl_read(chip->client, LIS302_Y);
@@ -603,6 +634,8 @@ static ssize_t lis302dl_show_coord(struct device *dev,
 	z *= (chip->fs ?  LIS302_BIG_UNIT : LIS302_SMALL_UNIT);
 	ret = snprintf(buf, PAGE_SIZE, "%d %d %d\n", x, y, z);
 	mutex_unlock(&chip->lock);
+
+	schedule_delayed_work(&chip->poweroff_work, LIS302_POWEROFF_DELAY);
 
 	return ret;
 }
@@ -702,7 +735,7 @@ static int lis302dl_probe(struct i2c_client *client,
 	lis->threshold	= LIS302_THS;
 	lis->duration	= LIS302_DURATION;
 	lis->fs		= LIS302_FS;
-	lis->sample_rate = LIS302_400HZ;
+	lis->sample_rate = LIS302_100HZ;
 	lis->samples	= LIS302_SAMPLES;
 
 	mutex_init(&lis->lock);
@@ -731,6 +764,8 @@ static int lis302dl_probe(struct i2c_client *client,
 	}
 	gpio_direction_input(lis->irq1);
 	INIT_WORK(&lis->work1, lis302dl_work1);
+	INIT_DELAYED_WORK(&lis->poweroff_work, lis302dl_poweroff_work);
+
 	err = request_irq(gpio_to_irq(lis->irq1), lis302dl_irq1,
 			  LIS302_IRQ_FLAGS, DRIVER_NAME, lis);
 	if (err) {
@@ -738,6 +773,7 @@ static int lis302dl_probe(struct i2c_client *client,
 			gpio_to_irq(lis->irq1));
 		goto fail3;
 	}
+	schedule_delayed_work(&lis->poweroff_work, LIS302_POWEROFF_DELAY);
 
 	return 0;
 

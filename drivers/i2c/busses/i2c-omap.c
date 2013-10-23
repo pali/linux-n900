@@ -37,6 +37,7 @@
 #include <linux/platform_device.h>
 #include <linux/clk.h>
 #include <linux/io.h>
+#include <mach/omap-pm.h>
 
 /* I2C controller revisions */
 #define OMAP_I2C_REV_2			0x20
@@ -373,13 +374,17 @@ static int omap_i2c_init(struct omap_i2c_dev *dev)
 
 		/* If configured for High Speed */
 		if (dev->speed > 400) {
+			unsigned long scl;
+
 			/* For first phase of HS mode */
-			fsscll = internal_clk / (400 * 2) - 6;
-			fssclh = internal_clk / (400 * 2) - 6;
+			scl = internal_clk / 400;
+			fsscll = scl - (scl / 3) - 7;
+			fssclh = (scl / 3) - 5;
 
 			/* For second phase of HS mode */
-			hsscll = fclk_rate / (dev->speed * 2) - 6;
-			hssclh = fclk_rate / (dev->speed * 2) - 6;
+			scl = fclk_rate / dev->speed;
+			hsscll = scl - (scl / 3) - 7;
+			hssclh = (scl / 3) - 9;
 		} else {
 			/* To handle F/S modes */
 			fsscll = internal_clk / (dev->speed * 2) - 3;
@@ -528,8 +533,15 @@ static int omap_i2c_xfer_msg(struct i2c_adapter *adap,
 	 * REVISIT: We should abort the transfer on signals, but the bus goes
 	 * into arbitration and we're currently unable to recover from it.
 	 */
+	/*
+	 * REVISIT: Add a mpu wake-up latency constraint to let us wake
+	 * quickly enough for i2c transfers to work properly. Should change
+	 * the code to use a latency constraint function passed from pdata.
+	 */
+	omap_pm_set_max_mpu_wakeup_lat(dev->dev, 500);
 	r = wait_for_completion_timeout(&dev->cmd_complete,
 					OMAP_I2C_TIMEOUT);
+	omap_pm_set_max_mpu_wakeup_lat(dev->dev, -1);
 	dev->buf_len = 0;
 	if (r < 0)
 		return r;

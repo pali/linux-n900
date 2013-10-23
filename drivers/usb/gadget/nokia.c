@@ -31,7 +31,7 @@
 /* Defines */
 
 #define NOKIA_VERSION_NUM		0x0211
-#define NOKIA_LONG_NAME			"Nxxx (RX51) PC-Suite Mode"
+#define NOKIA_LONG_NAME			"N900 (PC-Suite Mode)"
 
 /*-------------------------------------------------------------------------*/
 
@@ -67,7 +67,7 @@
 #define STRING_DESCRIPTION_IDX		2
 
 static char manufacturer_nokia[] = "Nokia";
-static const char product_nokia[] = "Nxxx (RX51) PC-Suite Mode";
+static const char product_nokia[] = NOKIA_LONG_NAME;
 static const char description_nokia[] = "PC-Suite Configuration";
 
 static struct usb_string strings_dev[] = {
@@ -99,21 +99,10 @@ static struct usb_device_descriptor device_desc = {
 	.bNumConfigurations =	1,
 };
 
-static struct usb_otg_descriptor otg_descriptor = {
-	.bLength		= sizeof otg_descriptor,
-	.bDescriptorType	= USB_DT_OTG,
-	.bmAttributes		= USB_OTG_SRP | USB_OTG_HNP,
-};
-
-static const struct usb_descriptor_header *otg_desc[] = {
-	(struct usb_descriptor_header *) &otg_descriptor,
-	NULL,
-};
-
 /*-------------------------------------------------------------------------*/
 
 /* Module */
-MODULE_DESCRIPTION("Nokia composite gadget driver for Nxxx");
+MODULE_DESCRIPTION("Nokia composite gadget driver for N900");
 MODULE_AUTHOR("Felipe Balbi");
 MODULE_LICENSE("GPL");
 
@@ -123,21 +112,21 @@ static u8 hostaddr[ETH_ALEN];
 
 static int __init nokia_bind_config(struct usb_configuration *c)
 {
-	unsigned i = 0;
 	int status = 0;
 
 	status = phonet_bind_config(c);
 	if (status)
 		printk(KERN_DEBUG "could not bind phonet config\n");
 
-	for (i = 0; i < 3 && status == 0; i++) {
-		status = obex_bind_config(c, i);
-		if (status)
-			printk(KERN_DEBUG "could not bind obex config %d\n",
-					i);
-	}
+	status = obex_bind_config(c, 0);
+	if (status)
+		printk(KERN_DEBUG "could not bind obex config %d\n", 0);
 
-	status = acm_bind_config(c, 3);
+	status = obex_bind_config(c, 1);
+	if (status)
+		printk(KERN_DEBUG "could not bind obex config %d\n", 0);
+
+	status = acm_bind_config(c, 2);
 	if (status)
 		printk(KERN_DEBUG "could not bind acm config\n");
 
@@ -153,8 +142,8 @@ static struct usb_configuration nokia_config_500ma_driver = {
 	.bind		= nokia_bind_config,
 	.bConfigurationValue = 1,
 	/* .iConfiguration = DYNAMIC */
-	.bmAttributes	= USB_CONFIG_ATT_SELFPOWER,
-	.bMaxPower	= 250,
+	.bmAttributes	= USB_CONFIG_ATT_ONE,
+	.bMaxPower	= 250, /* 500mA */
 };
 
 static struct usb_configuration nokia_config_100ma_driver = {
@@ -162,8 +151,8 @@ static struct usb_configuration nokia_config_100ma_driver = {
 	.bind		= nokia_bind_config,
 	.bConfigurationValue = 2,
 	/* .iConfiguration = DYNAMIC */
-	.bmAttributes	= USB_CONFIG_ATT_SELFPOWER,
-	.bMaxPower	= 50,
+	.bmAttributes	= USB_CONFIG_ATT_ONE | USB_CONFIG_ATT_SELFPOWER,
+	.bMaxPower	= 50, /* 100 mA */
 };
 
 static int __init nokia_bind(struct usb_composite_dev *cdev)
@@ -176,7 +165,7 @@ static int __init nokia_bind(struct usb_composite_dev *cdev)
 	if (status < 0)
 		goto err_phonet;
 
-	status = gserial_setup(cdev->gadget, 4);
+	status = gserial_setup(cdev->gadget, 3);
 	if (status < 0)
 		goto err_serial;
 
@@ -220,13 +209,6 @@ static int __init nokia_bind(struct usb_composite_dev *cdev)
 		goto err_usb;
 	}
 
-	/* We know this device is always otg capable */
-	nokia_config_500ma_driver.descriptors = otg_desc;
-	nokia_config_500ma_driver.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
-
-	nokia_config_100ma_driver.descriptors = otg_desc;
-	nokia_config_100ma_driver.bmAttributes |= USB_CONFIG_ATT_WAKEUP;
-
 	/* finaly register the configuration */
 	status = usb_add_config(cdev, &nokia_config_500ma_driver);
 	if (status < 0)
@@ -250,11 +232,21 @@ err_phonet:
 	return status;
 }
 
+static int __exit nokia_unbind(struct usb_composite_dev *cdev)
+{
+	gphonet_cleanup();
+	gserial_cleanup();
+	gether_cleanup();
+
+	return 0;
+}
+
 static struct usb_composite_driver nokia_driver = {
 	.name		= "g_nokia",
 	.dev		= &device_desc,
 	.strings	= dev_strings,
 	.bind		= nokia_bind,
+	.unbind		= __exit_p(nokia_unbind),
 };
 
 static int __init nokia_init(void)
@@ -266,9 +258,6 @@ module_init(nokia_init);
 static void __exit nokia_cleanup(void)
 {
 	usb_composite_unregister(&nokia_driver);
-	gphonet_cleanup();
-	gserial_cleanup();
-	gether_cleanup();
 }
 module_exit(nokia_cleanup);
 

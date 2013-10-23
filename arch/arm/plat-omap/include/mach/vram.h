@@ -24,9 +24,12 @@
 
 #include <asm/types.h>
 
+extern int omap_vram_add_region(unsigned long paddr, size_t size);
 extern int omap_vram_free(unsigned long paddr, size_t size);
 extern int omap_vram_alloc(int mtype, size_t size, unsigned long *paddr);
 extern int omap_vram_reserve(unsigned long paddr, size_t size);
+extern void omap_vram_get_info(unsigned long *vram, unsigned long *free_vram,
+		unsigned long *largest_free_block);
 extern void omap2_set_sdram_vram(u32 size, u32 start);
 extern void omap2_set_sram_vram(u32 size, u32 start);
 

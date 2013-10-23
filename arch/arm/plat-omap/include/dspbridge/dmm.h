@@ -81,5 +81,4 @@
 
 	extern DSP_STATUS DMM_CreateTables(struct DMM_OBJECT *hDmmMgr,
 						u32 addr, u32 size);
-	extern u32 *DMM_GetPhysicalAddrTable(void);
 #endif				/* DMM_ */

@@ -198,77 +198,6 @@ DSP_STATUS DRV_GetProcCtxtList(struct PROCESS_CONTEXT **pPctxt,
 	return status;
 }
 
-
-
-/* Get a particular process context based on process handle (phProcess) */
-DSP_STATUS DRV_GetProcContext(u32 phProcess,
-				struct DRV_OBJECT *hDrvObject,
-				HANDLE hPCtxt, DSP_HNODE hNode,
-				u32 pMapAddr)
-{
-	struct PROCESS_CONTEXT **pCtxt = (struct PROCESS_CONTEXT **)hPCtxt;
-	DSP_STATUS status = DSP_SOK;
-	struct PROCESS_CONTEXT *pCtxtList = NULL;
-	struct DRV_OBJECT *pDrvObject = (struct DRV_OBJECT *)hDrvObject;
-	struct NODE_RES_OBJECT *pTempNode2 = NULL;
-	struct NODE_RES_OBJECT *pTempNode = NULL;
-	struct DMM_RES_OBJECT *pTempDMM2 = NULL;
-	struct DMM_RES_OBJECT *pTempDMM = NULL;
-	s32 pCtxtFound = 0;
-
-	DBC_Assert(pDrvObject != NULL);
-	pCtxtList = pDrvObject->procCtxtList;
-	GT_0trace(curTrace, GT_ENTER, "2DRV_GetProcContext: 2");
-	while ((pCtxtList != NULL) && (pCtxtList->pid != phProcess)) {
-		pCtxtList = pCtxtList->next;
-		GT_0trace(curTrace, GT_ENTER, "2DRV_GetProcContext: 3");
-	}
-	if (pCtxtList == NULL) {
-		if (hNode != NULL) {
-			pCtxtList = pDrvObject->procCtxtList;
-			while ((pCtxtList != NULL) && (pCtxtFound == 0)) {
-				pTempNode = pCtxtList->pNodeList;
-				while ((pTempNode != NULL) &&
-				      (pTempNode->hNode != hNode)) {
-					pTempNode2 = pTempNode;
-					pTempNode = pTempNode->next;
-				}
-				if (pTempNode != NULL) {
-					pCtxtFound = 1;
-					status = DSP_SOK;
-				} else {
-					pCtxtList = pCtxtList->next;
-				}
-			}
-		} else if ((pMapAddr != 0) && (pCtxtFound == 0)) {
-			pCtxtList = pDrvObject->procCtxtList;
-			while ((pCtxtList != NULL) && (pCtxtFound == 0)) {
-				pTempDMM = pCtxtList->pDMMList;
-				while ((pTempDMM != NULL) &&
-				     (pTempDMM->ulDSPAddr != pMapAddr)) {
-					pTempDMM2 = pTempDMM;
-					pTempDMM = pTempDMM->next;
-				}
-				if (pTempDMM != NULL) {
-					pCtxtFound = 1;
-					status = DSP_SOK;
-				} else {
-					pCtxtList = pCtxtList->next;
-				}
-			}
-			if (pCtxtList == NULL)
-				status = DSP_ENOTFOUND;
-
-		}
-	} else{
-		status = DSP_SOK;
-	}
-	GT_0trace(curTrace, GT_ENTER, "2DRV_GetProcContext: 4");
-	*pCtxt = pCtxtList;
-	return status;
-}
-
-
 /* Add a new process context to process context list */
 DSP_STATUS DRV_InsertProcContext(struct DRV_OBJECT *hDrVObject, HANDLE hPCtxt)
 {
@@ -278,9 +207,19 @@ DSP_STATUS DRV_InsertProcContext(struct DRV_OBJECT *hDrVObject, HANDLE hPCtxt)
 	struct DRV_OBJECT	     *hDRVObject;
 
 	GT_0trace(curTrace, GT_ENTER, "\n In DRV_InsertProcContext\n");
+
 	status = CFG_GetObject((u32 *)&hDRVObject, REG_DRV_OBJECT);
 	DBC_Assert(hDRVObject != NULL);
+
 	*pCtxt = MEM_Calloc(1 * sizeof(struct PROCESS_CONTEXT), MEM_PAGED);
+	if (!*pCtxt) {
+		pr_err("DSP: MEM_Calloc failed in DRV_InsertProcContext\n");
+		return DSP_EMEMORY;
+	}
+
+	spin_lock_init(&(*pCtxt)->proc_list_lock);
+	INIT_LIST_HEAD(&(*pCtxt)->processor_list);
+
 	GT_0trace(curTrace, GT_ENTER,
 		 "\n In DRV_InsertProcContext Calling "
 		 "DRV_GetProcCtxtList\n");
@@ -307,36 +246,40 @@ DSP_STATUS DRV_InsertProcContext(struct DRV_OBJECT *hDrVObject, HANDLE hPCtxt)
 
 /* Delete a process context from process resource context list */
 DSP_STATUS DRV_RemoveProcContext(struct DRV_OBJECT *hDRVObject,
-				     HANDLE hPCtxt, HANDLE hProcess)
+		HANDLE pr_ctxt)
 {
 	DSP_STATUS status = DSP_SOK;
-	struct PROCESS_CONTEXT    *pCtxt2 = NULL;
-	struct PROCESS_CONTEXT    *pTmp = NULL;
-	struct PROCESS_CONTEXT    *pCtxtList = NULL;
+	struct PROCESS_CONTEXT *pr_ctxt_list = NULL;
+	struct PROCESS_CONTEXT *uninitialized_var(ptr_prev);
 
 	DBC_Assert(hDRVObject != NULL);
-	DRV_GetProcContext((u32)hProcess, hDRVObject, &pCtxt2, NULL, 0);
 
 	GT_0trace(curTrace, GT_ENTER, "DRV_RemoveProcContext: 12");
-	DRV_GetProcCtxtList(&pCtxtList, hDRVObject);
+	DRV_GetProcCtxtList(&pr_ctxt_list, hDRVObject);
+
+	/* Special condition */
+	if (pr_ctxt_list == pr_ctxt) {
+		hDRVObject->procCtxtList = NULL;
+		goto func_cont;
+	}
+
 	GT_0trace(curTrace, GT_ENTER, "DRV_RemoveProcContext: 13");
-	pTmp = pCtxtList;
-	while ((pCtxtList != NULL) && (pCtxtList != pCtxt2)) {
-		pTmp = pCtxtList;
-		pCtxtList = pCtxtList->next;
+	while (pr_ctxt_list && (pr_ctxt_list != pr_ctxt)) {
+		ptr_prev = pr_ctxt_list;
+		pr_ctxt_list = pr_ctxt_list->next;
 		GT_0trace(curTrace, GT_ENTER,
 			 "DRV_RemoveProcContext: 2");
 	}
+
 	GT_0trace(curTrace, GT_ENTER, "DRV_RemoveProcContext: 3");
-	if (hDRVObject->procCtxtList == pCtxt2)
-		hDRVObject->procCtxtList = pCtxt2->next;
 
-	if (pCtxtList == NULL)
+	if (!pr_ctxt_list)
 		return DSP_ENOTFOUND;
-	else if (pTmp->next != NULL)
-		pTmp->next = pTmp->next->next;
+	else
+		ptr_prev->next = pr_ctxt_list->next;
 
-	MEM_Free(pCtxt2);
+func_cont:
+	MEM_Free(pr_ctxt);
 	GT_0trace(curTrace, GT_ENTER, "DRV_RemoveProcContext: 7");
 
 	return status;
@@ -453,16 +396,17 @@ static DSP_STATUS DRV_ProcFreeNodeRes(HANDLE hPCtxt)
 					GT_1trace(curTrace, GT_5CLASS,
 						 "Calling Node_Delete for Node:"
 						 " 0x%x\n", pNodeRes->hNode);
-					status = NODE_Delete(pNodeRes->hNode);
+					status = NODE_Delete(pNodeRes->hNode,
+							pCtxt);
 					GT_1trace(curTrace, GT_5CLASS,
 					"the status after the NodeDelete %x\n",
 					status);
 				} else if ((nState == NODE_ALLOCATED)
 					|| (nState == NODE_CREATED))
-					status = NODE_Delete(pNodeRes->hNode);
+					status = NODE_Delete(pNodeRes->hNode,
+							pCtxt);
 			}
 		}
-		pNodeRes->nodeAllocated = 0;
 	}
 	return status;
 }
@@ -572,7 +516,7 @@ DSP_STATUS  DRV_ProcFreeDMMRes(HANDLE hPCtxt)
 		pDMMList = pDMMList->next;
 		if (pDMMRes->dmmAllocated) {
 			status = PROC_UnMap(pDMMRes->hProcessor,
-				 (void *)pDMMRes->ulDSPResAddr);
+				 (void *)pDMMRes->ulDSPResAddr, pCtxt);
 			status = PROC_UnReserveMemory(pDMMRes->hProcessor,
 				 (void *)pDMMRes->ulDSPResAddr);
 			pDMMRes->dmmAllocated = 0;
@@ -787,17 +731,18 @@ static DSP_STATUS  DRV_ProcFreeSTRMRes(HANDLE hPCtxt)
 			apBuffer = MEM_Alloc((pSTRMRes->uNumBufs *
 					    sizeof(u8 *)), MEM_NONPAGED);
 			status = STRM_FreeBuffer(pSTRMRes->hStream, apBuffer,
-						pSTRMRes->uNumBufs);
+						pSTRMRes->uNumBufs, pCtxt);
 			MEM_Free(apBuffer);
 		}
-		status = STRM_Close(pSTRMRes->hStream);
+		status = STRM_Close(pSTRMRes->hStream, pCtxt);
 		if (DSP_FAILED(status)) {
 			if (status == DSP_EPENDING) {
 				status = STRM_Reclaim(pSTRMRes->hStream,
 						     &pBufPtr, &ulBytes,
 						     (u32 *)&ulBufSize, &dwArg);
 				if (DSP_SUCCEEDED(status))
-					status = STRM_Close(pSTRMRes->hStream);
+					status = STRM_Close(pSTRMRes->hStream,
+							pCtxt);
 
 			}
 		}
@@ -1004,6 +949,7 @@ static DSP_STATUS PrintProcessInformation(void)
 	struct DMM_RES_OBJECT *pDMMRes = NULL;
 	struct STRM_RES_OBJECT *pSTRMRes = NULL;
 	struct DSPHEAP_RES_OBJECT *pDSPHEAPRes = NULL;
+	struct PROC_OBJECT *proc_obj_ptr;
 	DSP_STATUS status = DSP_SOK;
 	u32 tempCount;
 	u32  procID;
@@ -1030,11 +976,11 @@ static DSP_STATUS PrintProcessInformation(void)
 			GT_0trace(curTrace, GT_4CLASS, "\nThe Process"
 					" is in DeAllocated state\n");
 		}
-		GT_1trace(curTrace, GT_4CLASS, "\nThe  hProcessor"
-				" handle is: 0X%x\n",
-				(u32)pCtxtList->hProcessor);
-		if (pCtxtList->hProcessor != NULL) {
-			PROC_GetProcessorId(pCtxtList->hProcessor, &procID);
+
+		spin_lock(&pCtxtList->proc_list_lock);
+		list_for_each_entry(proc_obj_ptr, &pCtxtList->processor_list,
+				proc_object) {
+			PROC_GetProcessorId(proc_obj_ptr, &procID);
 			if (procID == DSP_UNIT) {
 				GT_0trace(curTrace, GT_4CLASS,
 					"\nProcess connected to"
@@ -1048,6 +994,8 @@ static DSP_STATUS PrintProcessInformation(void)
 					"\n***ERROR:Invalid Processor Id***\n");
 			}
 		}
+		spin_unlock(&pCtxtList->proc_list_lock);
+
 		pNodeRes = pCtxtList->pNodeList;
 		tempCount = 1;
 		while (pNodeRes != NULL) {
@@ -1509,8 +1457,9 @@ DSP_STATUS DRV_RequestResources(u32 dwContext, u32 *pDevNodeString)
 		pszdevNode = MEM_Calloc(sizeof(struct DRV_EXT), MEM_NONPAGED);
 		if (pszdevNode) {
 			LST_InitElem(&pszdevNode->link);
-                       strncpy((char *) pszdevNode->szString,
-				 (char *)dwContext, MAXREGPATHLENGTH);
+			strncpy(pszdevNode->szString,
+				 (char *)dwContext, MAXREGPATHLENGTH - 1);
+			pszdevNode->szString[MAXREGPATHLENGTH - 1] = '\0';
 			/* Update the Driver Object List */
 			*pDevNodeString = (u32)pszdevNode->szString;
 			LST_PutTail(pDRVObject->devNodeString,
@@ -1653,11 +1602,11 @@ static DSP_STATUS RequestBridgeResources(u32 dwContext, s32 bRequest)
 			pResources->dwMemPhys[1] = 0;
 
 			if (pResources->dwPrmBase)
-				iounmap((void *)pResources->dwPrmBase);
+				iounmap(pResources->dwPrmBase);
 			if (pResources->dwCmBase)
-				iounmap((void *)pResources->dwCmBase);
+				iounmap(pResources->dwCmBase);
 			if (pResources->dwMboxBase)
-				iounmap((void *)pResources->dwMboxBase);
+				iounmap(pResources->dwMboxBase);
 			if (pResources->dwMemBase[0])
 				iounmap((void *)pResources->dwMemBase[0]);
 			if (pResources->dwMemBase[2])
@@ -1667,29 +1616,29 @@ static DSP_STATUS RequestBridgeResources(u32 dwContext, s32 bRequest)
 			if (pResources->dwMemBase[4])
 				iounmap((void *)pResources->dwMemBase[4]);
 			if (pResources->dwWdTimerDspBase)
-				iounmap((void *)pResources->dwWdTimerDspBase);
+				iounmap(pResources->dwWdTimerDspBase);
 			if (pResources->dwDmmuBase)
-				iounmap((void *)pResources->dwDmmuBase);
+				iounmap(pResources->dwDmmuBase);
 			if (pResources->dwPerBase)
-				iounmap((void *)pResources->dwPerBase);
+				iounmap(pResources->dwPerBase);
                        if (pResources->dwPerPmBase)
                                iounmap((void *)pResources->dwPerPmBase);
                        if (pResources->dwCorePmBase)
                                iounmap((void *)pResources->dwCorePmBase);
 			if (pResources->dwSysCtrlBase) {
-				iounmap((void *)pResources->dwSysCtrlBase);
+				iounmap(pResources->dwSysCtrlBase);
 				/* don't set pResources->dwSysCtrlBase to null
 				 * as it is used in BOARD_Stop */
 			}
-			pResources->dwPrmBase = (u32) NULL;
-			pResources->dwCmBase = (u32) NULL;
-			pResources->dwMboxBase = (u32) NULL;
+			pResources->dwPrmBase = NULL;
+			pResources->dwCmBase = NULL;
+			pResources->dwMboxBase = NULL;
 			pResources->dwMemBase[0] = (u32) NULL;
 			pResources->dwMemBase[2] = (u32) NULL;
 			pResources->dwMemBase[3] = (u32) NULL;
 			pResources->dwMemBase[4] = (u32) NULL;
-			pResources->dwWdTimerDspBase = (u32) NULL;
-			pResources->dwDmmuBase = (u32) NULL;
+			pResources->dwWdTimerDspBase = NULL;
+			pResources->dwDmmuBase = NULL;
 
 			dwBuffSize = sizeof(struct CFG_HOSTRES);
 			status = REG_SetValue(NULL, (char *)driverExt->szString,
@@ -1708,13 +1657,13 @@ static DSP_STATUS RequestBridgeResources(u32 dwContext, s32 bRequest)
 		pResources->wNumMemWindows = 2;
 		/* First window is for DSP internal memory */
 
-		pResources->dwPrmBase = (u32)ioremap(OMAP_IVA2_PRM_BASE,
+		pResources->dwPrmBase = ioremap(OMAP_IVA2_PRM_BASE,
 							OMAP_IVA2_PRM_SIZE);
-		pResources->dwCmBase = (u32)ioremap(OMAP_IVA2_CM_BASE,
+		pResources->dwCmBase = ioremap(OMAP_IVA2_CM_BASE,
 							OMAP_IVA2_CM_SIZE);
-		pResources->dwMboxBase = (u32)ioremap(OMAP_MBOX_BASE,
+		pResources->dwMboxBase = ioremap(OMAP_MBOX_BASE,
 							OMAP_MBOX_SIZE);
-		pResources->dwSysCtrlBase = (u32)ioremap(OMAP_SYSC_BASE,
+		pResources->dwSysCtrlBase = ioremap(OMAP_SYSC_BASE,
 							OMAP_SYSC_SIZE);
 		GT_1trace(curTrace, GT_2CLASS, "dwMemBase[0] 0x%x\n",
 			 pResources->dwMemBase[0]);
@@ -1736,7 +1685,6 @@ static DSP_STATUS RequestBridgeResources(u32 dwContext, s32 bRequest)
 		/* Second window is for DSP external memory shared with MPU */
 		if (DSP_SUCCEEDED(status)) {
 			/* for Linux, these are hard-coded values */
-			pResources->dwBusType = 0;
 			pResources->bIRQRegisters = 0;
 			pResources->bIRQAttrib = 0;
 			pResources->dwOffsetForMonitor = 0;
@@ -1807,15 +1755,15 @@ static DSP_STATUS RequestBridgeResourcesDSP(u32 dwContext, s32 bRequest)
 							OMAP_DSP_MEM2_SIZE);
 		pResources->dwMemBase[4] = (u32)ioremap(OMAP_DSP_MEM3_BASE,
 							OMAP_DSP_MEM3_SIZE);
-		pResources->dwPerBase = (u32)ioremap(OMAP_PER_CM_BASE,
+		pResources->dwPerBase = ioremap(OMAP_PER_CM_BASE,
 							OMAP_PER_CM_SIZE);
                pResources->dwPerPmBase = (u32)ioremap(OMAP_PER_PRM_BASE,
                                                        OMAP_PER_PRM_SIZE);
                pResources->dwCorePmBase = (u32)ioremap(OMAP_CORE_PRM_BASE,
                                                        OMAP_CORE_PRM_SIZE);
-		pResources->dwDmmuBase = (u32)ioremap(OMAP_DMMU_BASE,
+		pResources->dwDmmuBase = ioremap(OMAP_DMMU_BASE,
 							OMAP_DMMU_SIZE);
-		pResources->dwWdTimerDspBase = 0;
+		pResources->dwWdTimerDspBase = NULL;
 
 		GT_1trace(curTrace, GT_2CLASS, "dwMemBase[0] 0x%x\n",
 						pResources->dwMemBase[0]);
@@ -1863,7 +1811,6 @@ static DSP_STATUS RequestBridgeResourcesDSP(u32 dwContext, s32 bRequest)
 		}
 		if (DSP_SUCCEEDED(status)) {
 			/* for Linux, these are hard-coded values */
-			pResources->dwBusType = 0;
 			pResources->bIRQRegisters = 0;
 			pResources->bIRQAttrib = 0;
 			pResources->dwOffsetForMonitor = 0;

@@ -234,11 +234,13 @@ int resource_refresh(void)
 	struct shared_resource *resp = NULL;
 	int ret = 0;
 
+	down(&res_mutex);
 	list_for_each_entry(resp, &res_list, node) {
 		ret = update_resource_level(resp);
 		if (ret)
 			break;
 	}
+	up(&res_mutex);
 	return ret;
 }
 
@@ -319,26 +321,25 @@ EXPORT_SYMBOL(resource_unregister);
  * Else returns a non-zero error value returned by one of the failing
  * shared_resource_ops.
  */
-int resource_request(const char *name, struct device *dev,
+
+int resource_request_locked(const char *name, struct device *dev,
 					unsigned long level)
 {
 	struct shared_resource *resp;
 	struct  users_list *user;
 	int 	found = 0, ret = 0;
 
-	down(&res_mutex);
 	resp = _resource_lookup(name);
 	if (!resp) {
 		printk(KERN_ERR "resource_request: Invalid resource name\n");
-		ret = -EINVAL;
-		goto res_unlock;
+		return -EINVAL;
 	}
 
 	/* Call the resource specific validate function */
 	if (resp->ops->validate_level) {
 		ret = resp->ops->validate_level(resp, level);
 		if (ret)
-			goto res_unlock;
+			return ret;
 	}
 
 	list_for_each_entry(user, &resp->users_list, node) {
@@ -351,29 +352,36 @@ int resource_request(const char *name, struct device *dev,
 	if (!found) {
 		/* First time user */
 		user = get_user();
-		if (IS_ERR(user)) {
-			ret = -ENOMEM;
-			goto res_unlock;
-		}
+		if (IS_ERR(user))
+			return -ENOMEM;
 		user->dev = dev;
 		list_add(&user->node, &resp->users_list);
 		resp->no_of_users++;
 	}
 	user->level = level;
 
-res_unlock:
-	up(&res_mutex);
 	/*
 	 * Recompute and set the current level for the resource.
 	 * NOTE: update_resource level moved out of spin_lock, as it may call
 	 * pm_qos_add_requirement, which does a kzmalloc. This won't be allowed
 	 * in iterrupt context. The spin_lock still protects add/remove users.
 	 */
-	if (!ret)
-		ret = update_resource_level(resp);
+	return update_resource_level(resp);
+}
+
+int resource_request(const char *name, struct device *dev,
+						unsigned long level)
+{
+	int ret;
+	down(&res_mutex);
+	ret = resource_request_locked(name, dev, level);
+	up(&res_mutex);
 	return ret;
 }
+
 EXPORT_SYMBOL(resource_request);
+
+
 
 /**
  * resource_release - Release a previously requested level of a resource
@@ -387,18 +395,16 @@ EXPORT_SYMBOL(resource_request);
  * Returns 0 on success, -EINVAL if the resource name or dev structure
  * is invalid.
  */
-int resource_release(const char *name, struct device *dev)
+int resource_release_locked(const char *name, struct device *dev)
 {
 	struct shared_resource *resp;
 	struct users_list *user;
-	int found = 0, ret = 0;
+	int found = 0;
 
-	down(&res_mutex);
 	resp = _resource_lookup(name);
 	if (!resp) {
 		printk(KERN_ERR "resource_release: Invalid resource name\n");
-		ret = -EINVAL;
-		goto res_unlock;
+		return -EINVAL;
 	}
 
 	list_for_each_entry(user, &resp->users_list, node) {
@@ -410,8 +416,7 @@ int resource_release(const char *name, struct device *dev)
 
 	if (!found) {
 		/* No such user exists */
-		ret = -EINVAL;
-		goto res_unlock;
+		return -EINVAL;
 	}
 
 	resp->no_of_users--;
@@ -419,8 +424,14 @@ int resource_release(const char *name, struct device *dev)
 	free_user(user);
 
 	/* Recompute and set the current level for the resource */
-	ret = update_resource_level(resp);
-res_unlock:
+	return update_resource_level(resp);
+}
+
+int resource_release(const char *name, struct device *dev)
+{
+	int ret;
+	down(&res_mutex);
+	ret = resource_release_locked(name, dev);
 	up(&res_mutex);
 	return ret;
 }
@@ -450,3 +461,32 @@ int resource_get_level(const char *name)
 	return ret;
 }
 EXPORT_SYMBOL(resource_get_level);
+#if defined(CONFIG_DEBUG_FS) && defined(CONFIG_PM_DEBUG)
+#include <linux/seq_file.h>
+#include <linux/kallsyms.h>
+int resource_dump_reqs(struct seq_file *s, void *unused)
+{
+	struct shared_resource *resp;
+	struct users_list *user;
+	char *buf;
+
+	buf = kmalloc(KSYM_NAME_LEN, GFP_KERNEL);
+	if (buf == NULL)
+		return -ENOMEM;
+
+	down(&res_mutex);
+	list_for_each_entry(resp, &res_list, node) {
+		seq_printf(s, "%s:\n", resp->name);
+		list_for_each_entry(user, &resp->users_list, node) {
+			sprint_symbol(buf, (u32)user->dev);
+			seq_printf(s, "  %s [%s] : %d\n",
+					user->dev->init_name,
+					buf,
+					user->level);
+		}
+	}
+	up(&res_mutex);
+	kfree(buf);
+	return 0;
+}
+#endif

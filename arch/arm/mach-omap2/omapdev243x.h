@@ -237,7 +237,7 @@ static struct omapdev dap_243x_omapdev = {
 static struct omapdev dsi_243x_omapdev = {
 	.name		= "dsi_omapdev",
 	.pwrdm		= { .name = "core_pwrdm" },
-	.pdev_name	= "omap-dss",
+	.pdev_name	= "omapdss",
 	.pdev_id	= -1,
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP2430),
 };
@@ -245,7 +245,7 @@ static struct omapdev dsi_243x_omapdev = {
 static struct omapdev dsi_pll_243x_omapdev = {
 	.name		= "dsi_pll_omapdev",
 	.pwrdm		= { .name = "core_pwrdm" },
-	.pdev_name	= "omap-dss",
+	.pdev_name	= "omapdss",
 	.pdev_id	= -1,
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP2430),
 };
@@ -253,7 +253,7 @@ static struct omapdev dsi_pll_243x_omapdev = {
 static struct omapdev dss_243x_omapdev = {
 	.name		= "dss_omapdev",
 	.pwrdm		= { .name = "core_pwrdm" },
-	.pdev_name	= "omap-dss",
+	.pdev_name	= "omapdss",
 	.pdev_id	= -1,
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP2430),
 };
@@ -261,7 +261,7 @@ static struct omapdev dss_243x_omapdev = {
 static struct omapdev dispc_243x_omapdev = {
 	.name		= "dispc_omapdev",
 	.pwrdm		= { .name = "core_pwrdm" },
-	.pdev_name	= "omap-dss",
+	.pdev_name	= "omapdss",
 	.pdev_id	= -1,
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP2430),
 };
@@ -269,7 +269,7 @@ static struct omapdev dispc_243x_omapdev = {
 static struct omapdev rfbi_243x_omapdev = {
 	.name		= "rfbi_omapdev",
 	.pwrdm		= { .name = "core_pwrdm" },
-	.pdev_name	= "omap-dss",
+	.pdev_name	= "omapdss",
 	.pdev_id	= -1,
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP2430),
 };
@@ -277,7 +277,7 @@ static struct omapdev rfbi_243x_omapdev = {
 static struct omapdev venc_243x_omapdev = {
 	.name		= "venc_omapdev",
 	.pwrdm		= { .name = "core_pwrdm" },
-	.pdev_name	= "omap-dss",
+	.pdev_name	= "omapdss",
 	.pdev_id	= -1,
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP2430),
 };

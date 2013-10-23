@@ -33,41 +33,54 @@ static int report_trace(struct stackframe *frame, void *d)
 	return *depth == 0;
 }
 
-/*
- * The registers we're interested in are at the end of the variable
- * length saved register structure. The fp points at the end of this
- * structure so the address of this struct is:
- * (struct frame_tail *)(xxx->fp)-1
- */
-struct frame_tail {
-	struct frame_tail *fp;
-	unsigned long sp;
-	unsigned long lr;
-} __attribute__((packed));
-
-static struct frame_tail* user_backtrace(struct frame_tail *tail)
+static void **user_backtrace(struct pt_regs * const regs,
+				void **frame, int step)
 {
-	struct frame_tail buftail[2];
+	void *frame_data[4];
+	int   instr;
 
-	/* Also check accessibility of one struct frame_tail beyond */
-	if (!access_ok(VERIFY_READ, tail, sizeof(buftail)))
-		return NULL;
-	if (__copy_from_user_inatomic(buftail, tail, sizeof(buftail)))
-		return NULL;
+	void *ret_addr;
+	void **next_frame;
 
-	oprofile_add_trace(buftail[0].lr);
+	if (!access_ok(VERIFY_READ, frame - 3, sizeof(frame_data)))
+		return 0;
+	if (__copy_from_user_inatomic(frame_data, frame - 3,
+						sizeof(frame_data)))
+		return 0;
+
+	if (access_ok(VERIFY_READ, (int *)frame_data[3] - 2, sizeof(instr)) &&
+		__copy_from_user_inatomic(&instr, (int *)frame_data[3] - 2,
+						sizeof(instr)) == 0 &&
+					(instr & 0xFFFFD800) == 0xE92DD800) {
+		/* Standard APCS frame */
+		ret_addr = frame_data[2];
+		next_frame = frame_data[0];
+	} else if (step != 0 ||
+		(unsigned long)frame_data[2] - (unsigned long)regs->ARM_sp <
+		(unsigned long)frame_data[3] - (unsigned long)regs->ARM_sp) {
+		/* Heuristic detection: codesourcery optimized normal frame */
+		ret_addr = frame_data[3];
+		next_frame = frame_data[2];
+	} else {
+		/* Heuristic detection: codesourcery optimized leaf frame */
+		ret_addr = (void *)regs->ARM_lr;
+		next_frame = frame_data[3];
+	}
 
 	/* frame pointers should strictly progress back up the stack
 	 * (towards higher addresses) */
-	if (tail >= buftail[0].fp)
+	if (next_frame <= frame)
 		return NULL;
 
-	return buftail[0].fp-1;
+	oprofile_add_trace((unsigned long)ret_addr);
+
+	return next_frame;
 }
 
 void arm_backtrace(struct pt_regs * const regs, unsigned int depth)
 {
-	struct frame_tail *tail = ((struct frame_tail *) regs->ARM_fp) - 1;
+	int step = 0;
+	void **frame = (void **)regs->ARM_fp;
 
 	if (!user_mode(regs)) {
 		unsigned long base = ((unsigned long)regs) & ~(THREAD_SIZE - 1);
@@ -76,6 +89,6 @@ void arm_backtrace(struct pt_regs * const regs, unsigned int depth)
 		return;
 	}
 
-	while (depth-- && tail && !((unsigned long) tail & 3))
-		tail = user_backtrace(tail);
+	while (depth-- && frame && !((unsigned long) frame & 3))
+		frame = user_backtrace(regs, frame, step++);
 }

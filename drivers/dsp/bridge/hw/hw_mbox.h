@@ -92,7 +92,7 @@ struct MAILBOX_CONTEXT {
 *		 box Specified. if there are no messages in the mailbox
 *		 then and error is returned.
 */
-extern HW_STATUS HW_MBOX_MsgRead(const u32 baseAddress,
+extern HW_STATUS HW_MBOX_MsgRead(const void __iomem *baseAddress,
 				const HW_MBOX_Id_t mailBoxId,
 				u32 *const pReadValue);
 
@@ -124,7 +124,7 @@ extern HW_STATUS HW_MBOX_MsgRead(const u32 baseAddress,
 *		 box Specified.
 */
 extern HW_STATUS HW_MBOX_MsgWrite(
-		      const u32	 baseAddress,
+		      const void __iomem *baseAddress,
 		      const HW_MBOX_Id_t   mailBoxId,
 		      const u32	 writeValue
 		  );
@@ -158,7 +158,7 @@ extern HW_STATUS HW_MBOX_MsgWrite(
 * PURPOSE:      : this function gets number of messages in a specified mailbox.
 */
 extern HW_STATUS HW_MBOX_NumMsgGet(
-		      const u32	 baseAddress,
+		      const void	 __iomem *baseAddress,
 		      const HW_MBOX_Id_t   mailBoxId,
 		      u32 *const	pNumMsg
 		  );
@@ -194,7 +194,7 @@ extern HW_STATUS HW_MBOX_NumMsgGet(
 * PURPOSE:      : this function enables the specified IRQ.
 */
 extern HW_STATUS HW_MBOX_EventEnable(
-		      const u32	     baseAddress,
+		      const void __iomem *baseAddress,
 		      const HW_MBOX_Id_t       mailBoxId,
 		      const HW_MBOX_UserId_t   userId,
 		      const u32	     events
@@ -231,7 +231,7 @@ extern HW_STATUS HW_MBOX_EventEnable(
 * PURPOSE:      : this function disables the specified IRQ.
 */
 extern HW_STATUS HW_MBOX_EventDisable(
-		      const u32	     baseAddress,
+		      const void __iomem *baseAddress,
 		      const HW_MBOX_Id_t       mailBoxId,
 		      const HW_MBOX_UserId_t   userId,
 		      const u32	     events
@@ -270,7 +270,7 @@ extern HW_STATUS HW_MBOX_EventDisable(
 * PURPOSE:      : this function sets the status of the specified IRQ.
 */
 extern HW_STATUS HW_MBOX_EventAck(
-		      const u32	      baseAddress,
+		      const void	__iomem *baseAddress,
 		      const HW_MBOX_Id_t	mailBoxId,
 		      const HW_MBOX_UserId_t    userId,
 		      const u32	      event
@@ -296,7 +296,7 @@ extern HW_STATUS HW_MBOX_EventAck(
 *
 * PURPOSE:      : this function saves the context of mailbox
 */
-extern HW_STATUS HW_MBOX_saveSettings(u32    baseAddres);
+extern HW_STATUS HW_MBOX_saveSettings(void __iomem *baseAddres);
 
 /*
 * FUNCTION      : HW_MBOX_restoreSettings
@@ -318,6 +318,11 @@ extern HW_STATUS HW_MBOX_saveSettings(u32    baseAddres);
 *
 * PURPOSE:      : this function restores the context of mailbox
 */
-extern HW_STATUS HW_MBOX_restoreSettings(u32    baseAddres);
+extern HW_STATUS HW_MBOX_restoreSettings(void __iomem *baseAddres);
+
+static inline void HW_MBOX_initSettings(void __iomem *baseAddres)
+{
+	HW_MBOX_restoreSettings(baseAddres);
+}
 
 #endif  /* __MBOX_H */

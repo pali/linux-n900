@@ -30,6 +30,7 @@
  */
 
 #include <GlobalTypes.h>
+#include <linux/io.h>
 #include "MMURegAcM.h"
 #include <hw_defs.h>
 #include <hw_mmu.h>
@@ -79,7 +80,7 @@ enum HW_MMUPageSize_t {
 * METHOD:	       : Check the Input parameter and Flush a
 *			 single entry in the TLB.
 */
-static HW_STATUS MMU_FlushEntry(const u32 baseAddress);
+static HW_STATUS MMU_FlushEntry(const void __iomem *baseAddress);
 
 /*
 * FUNCTION	      : MMU_SetCAMEntry
@@ -121,7 +122,7 @@ static HW_STATUS MMU_FlushEntry(const u32 baseAddress);
 *
 * METHOD:	       	: Check the Input parameters and set the CAM entry.
 */
-static HW_STATUS MMU_SetCAMEntry(const u32    baseAddress,
+static HW_STATUS MMU_SetCAMEntry(const void __iomem *baseAddress,
 				   const u32    pageSize,
 				   const u32    preservedBit,
 				   const u32    validBit,
@@ -166,7 +167,7 @@ static HW_STATUS MMU_SetCAMEntry(const u32    baseAddress,
 *
 * METHOD:	       : Check the Input parameters and set the RAM entry.
 */
-static HW_STATUS MMU_SetRAMEntry(const u32	baseAddress,
+static HW_STATUS MMU_SetRAMEntry(const void __iomem *baseAddress,
 				   const u32	physicalAddr,
 				   enum HW_Endianism_t      endianism,
 				   enum HW_ElementSize_t    elementSize,
@@ -174,7 +175,7 @@ static HW_STATUS MMU_SetRAMEntry(const u32	baseAddress,
 
 /* HW FUNCTIONS */
 
-HW_STATUS HW_MMU_Enable(const u32 baseAddress)
+HW_STATUS HW_MMU_Enable(const void __iomem *baseAddress)
 {
     HW_STATUS status = RET_OK;
 
@@ -183,7 +184,7 @@ HW_STATUS HW_MMU_Enable(const u32 baseAddress)
     return status;
 }
 
-HW_STATUS HW_MMU_Disable(const u32 baseAddress)
+HW_STATUS HW_MMU_Disable(const void __iomem *baseAddress)
 {
     HW_STATUS status = RET_OK;
 
@@ -192,7 +193,7 @@ HW_STATUS HW_MMU_Disable(const u32 baseAddress)
     return status;
 }
 
-HW_STATUS HW_MMU_NumLockedSet(const u32 baseAddress,
+HW_STATUS HW_MMU_NumLockedSet(const void __iomem *baseAddress,
 				u32 numLockedEntries)
 {
     HW_STATUS status = RET_OK;
@@ -202,7 +203,7 @@ HW_STATUS HW_MMU_NumLockedSet(const u32 baseAddress,
     return status;
 }
 
-HW_STATUS HW_MMU_VictimNumSet(const u32 baseAddress,
+HW_STATUS HW_MMU_VictimNumSet(const void __iomem *baseAddress,
 				u32 victimEntryNum)
 {
     HW_STATUS status = RET_OK;
@@ -212,7 +213,7 @@ HW_STATUS HW_MMU_VictimNumSet(const u32 baseAddress,
     return status;
 }
 
-HW_STATUS HW_MMU_EventAck(const u32 baseAddress, u32 irqMask)
+HW_STATUS HW_MMU_EventAck(const void __iomem *baseAddress, u32 irqMask)
 {
     HW_STATUS status = RET_OK;
 
@@ -221,7 +222,7 @@ HW_STATUS HW_MMU_EventAck(const u32 baseAddress, u32 irqMask)
     return status;
 }
 
-HW_STATUS HW_MMU_EventDisable(const u32 baseAddress,
+HW_STATUS HW_MMU_EventDisable(const void __iomem *baseAddress,
 				u32 irqMask)
 {
     HW_STATUS status = RET_OK;
@@ -234,7 +235,7 @@ HW_STATUS HW_MMU_EventDisable(const u32 baseAddress,
     return status;
 }
 
-HW_STATUS HW_MMU_EventEnable(const u32 baseAddress, u32 irqMask)
+HW_STATUS HW_MMU_EventEnable(const void __iomem *baseAddress, u32 irqMask)
 {
     HW_STATUS status = RET_OK;
     u32 irqReg;
@@ -247,7 +248,7 @@ HW_STATUS HW_MMU_EventEnable(const u32 baseAddress, u32 irqMask)
 }
 
 
-HW_STATUS HW_MMU_EventStatus(const u32 baseAddress, u32 *irqMask)
+HW_STATUS HW_MMU_EventStatus(const void __iomem *baseAddress, u32 *irqMask)
 {
     HW_STATUS status = RET_OK;
 
@@ -257,7 +258,7 @@ HW_STATUS HW_MMU_EventStatus(const u32 baseAddress, u32 *irqMask)
 }
 
 
-HW_STATUS HW_MMU_FaultAddrRead(const u32 baseAddress, u32 *addr)
+HW_STATUS HW_MMU_FaultAddrRead(const void __iomem *baseAddress, u32 *addr)
 {
     HW_STATUS status = RET_OK;
 
@@ -271,7 +272,7 @@ HW_STATUS HW_MMU_FaultAddrRead(const u32 baseAddress, u32 *addr)
     return status;
 }
 
-HW_STATUS HW_MMU_TTBSet(const u32 baseAddress, u32 TTBPhysAddr)
+HW_STATUS HW_MMU_TTBSet(const void __iomem *baseAddress, u32 TTBPhysAddr)
 {
     HW_STATUS status = RET_OK;
     u32 loadTTB;
@@ -287,7 +288,7 @@ HW_STATUS HW_MMU_TTBSet(const u32 baseAddress, u32 TTBPhysAddr)
    return status;
 }
 
-HW_STATUS HW_MMU_TWLEnable(const u32 baseAddress)
+HW_STATUS HW_MMU_TWLEnable(const void __iomem *baseAddress)
 {
     HW_STATUS status = RET_OK;
 
@@ -296,7 +297,7 @@ HW_STATUS HW_MMU_TWLEnable(const u32 baseAddress)
     return status;
 }
 
-HW_STATUS HW_MMU_TWLDisable(const u32 baseAddress)
+HW_STATUS HW_MMU_TWLDisable(const void __iomem *baseAddress)
 {
     HW_STATUS status = RET_OK;
 
@@ -305,7 +306,7 @@ HW_STATUS HW_MMU_TWLDisable(const u32 baseAddress)
     return status;
 }
 
-HW_STATUS HW_MMU_TLBFlush(const u32 baseAddress, u32 virtualAddr,
+HW_STATUS HW_MMU_TLBFlush(const void __iomem *baseAddress, u32 virtualAddr,
 			     u32 pageSize)
 {
     HW_STATUS status = RET_OK;
@@ -343,7 +344,7 @@ HW_STATUS HW_MMU_TLBFlush(const u32 baseAddress, u32 virtualAddr,
     return status;
 }
 
-HW_STATUS HW_MMU_TLBAdd(const u32	baseAddress,
+HW_STATUS HW_MMU_TLBAdd(const void __iomem *baseAddress,
 			   u32	      physicalAddr,
 			   u32	      virtualAddr,
 			   u32	      pageSize,
@@ -529,7 +530,7 @@ HW_STATUS HW_MMU_PteClear(const u32  pgTblVa,
 }
 
 /* MMU_FlushEntry */
-static HW_STATUS MMU_FlushEntry(const u32 baseAddress)
+static HW_STATUS MMU_FlushEntry(const void __iomem *baseAddress)
 {
    HW_STATUS status = RET_OK;
    u32 flushEntryData = 0x1;
@@ -545,7 +546,7 @@ static HW_STATUS MMU_FlushEntry(const u32 baseAddress)
 }
 
 /* MMU_SetCAMEntry */
-static HW_STATUS MMU_SetCAMEntry(const u32    baseAddress,
+static HW_STATUS MMU_SetCAMEntry(const void __iomem *baseAddress,
 				   const u32    pageSize,
 				   const u32    preservedBit,
 				   const u32    validBit,
@@ -569,7 +570,7 @@ static HW_STATUS MMU_SetCAMEntry(const u32    baseAddress,
 }
 
 /* MMU_SetRAMEntry */
-static HW_STATUS MMU_SetRAMEntry(const u32       baseAddress,
+static HW_STATUS MMU_SetRAMEntry(const void __iomem *baseAddress,
 				   const u32       physicalAddr,
 				   enum HW_Endianism_t     endianism,
 				   enum HW_ElementSize_t   elementSize,

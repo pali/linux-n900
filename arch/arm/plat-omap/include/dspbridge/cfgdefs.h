@@ -77,15 +77,6 @@
 		u8 bIRQAttrib;	/* IRQ Attribute */
 		u32 dwOffsetForMonitor;	/* The Shared memory starts from
 					 * dwMemBase + this offset */
-		u32 dwBusType;	/* Bus type for this device */
-		u32 dwProgBase;	/* DSP ProgBase */
-		u32 dwProgLength;	/* DSP ProgBase Length */
-		u32 dwRegBase;	/* DSP memory mapped register base */
-		u32 dwRegLength;	/* DSP Register Base Length */
-		u32 ClientHandle;	/* Client Handle */
-		u32 SocketHandle;	/* Socket and Function Pair */
-		u32 CardInfo;	/* This will be used as a context data in
-				 * in the CardRequestIRQ */
 	/*
 	 *  Info needed by NODE for allocating channels to communicate with RMS:
 	 *      dwChnlOffset:       Offset of RMS channels. Lower channels are
@@ -96,16 +87,15 @@
 		u32 dwChnlOffset;
 		u32 dwChnlBufSize;
 		u32 dwNumChnls;
-		u32 dwPrmBase;
-		u32 dwCmBase;
-		u32 dwPerBase;
-               u32 dwPerPmBase;
-               u32 dwCorePmBase;
-		u32 dwWdTimerDspBase;
-		u32 dwMboxBase;
-		u32 dwDmmuBase;
-		u32 dwDipiBase;
-		u32 dwSysCtrlBase;
+		void __iomem *dwPrmBase;
+		void __iomem *dwCmBase;
+		void __iomem *dwPerBase;
+		u32 dwPerPmBase;
+		u32 dwCorePmBase;
+		void __iomem *dwWdTimerDspBase;
+		void __iomem *dwMboxBase;
+		void __iomem *dwDmmuBase;
+		void __iomem *dwSysCtrlBase;
 	} ;
 
 	struct CFG_DSPMEMDESC {
