@@ -332,7 +332,7 @@ static void mtdoops_console_sync(void)
 	cxt->ready = 0;
 	spin_unlock_irqrestore(&cxt->writecount_lock, flags);
 
-	if (mtd->panic_write && in_interrupt())
+	if (mtd->panic_write && (in_interrupt() || panic_on_oops))
 		/* Interrupt context, we're going to panic so try and log */
 		mtdoops_write(cxt, 1);
 	else

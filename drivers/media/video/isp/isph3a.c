@@ -192,6 +192,7 @@ void isph3a_aewb_config_registers(struct isp_h3a_device *isp_h3a)
 	isp_reg_and_or(dev, OMAP3_ISP_IOMEM_H3A, ISPH3A_PCR,
 		       ~ISPH3A_PCR_AEW_MASK, isp_h3a->regs.pcr);
 
+	ispstat_bufs_set_size(&isp_h3a->stat, isp_h3a->buf_size);
 	isp_h3a->update = 0;
 
 	spin_unlock_irqrestore(isp_h3a->lock, irqflags);
@@ -444,6 +445,7 @@ int omap34xx_isph3a_aewb_config(struct isp_h3a_device *isp_h3a,
 	spin_lock_irqsave(isp_h3a->lock, irqflags);
 
 	isp_h3a->win_count = win_count;
+	isp_h3a->buf_size = buf_size;
 	isph3a_aewb_set_params(isp_h3a, aewbcfg);
 
 	spin_unlock_irqrestore(isp_h3a->lock, irqflags);

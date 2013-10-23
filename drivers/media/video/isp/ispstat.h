@@ -33,6 +33,7 @@ struct ispstat_buffer {
 	struct timeval ts;
 	u32 config_counter;
 	u32 frame_number;
+	unsigned int buf_size;
 };
 
 struct ispstat {
@@ -60,6 +61,7 @@ struct ispstat_buffer *ispstat_buf_get(struct ispstat *stat,
 				       unsigned int frame_number);
 void ispstat_buf_release(struct ispstat *stat);
 void ispstat_bufs_free(struct ispstat *stat);
+void ispstat_bufs_set_size(struct ispstat *stat, unsigned int size);
 int ispstat_bufs_alloc(struct ispstat *stat,
 		       unsigned int size, int dma_buf);
 int ispstat_init(struct device *dev, char *tag, struct ispstat *stat,

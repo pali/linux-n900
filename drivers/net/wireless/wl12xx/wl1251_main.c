@@ -228,6 +228,9 @@ static ssize_t wl1251_sysfs_store_bt_coex_mode(struct device *dev,
 
 	mutex_lock(&wl->mutex);
 
+	if (res == wl->bt_coex_mode)
+		goto out;
+
 	switch (res) {
 	case WL1251_BT_COEX_OFF:
 	case WL1251_BT_COEX_ENABLE:
@@ -432,6 +435,7 @@ out:
 	return ret;
 }
 
+#define WL1251_EVENT_TIMEOUT  10000
 #define WL1251_IRQ_LOOP_COUNT 10
 static void wl1251_irq_work(struct work_struct *work)
 {
@@ -522,6 +526,9 @@ static void wl1251_irq_work(struct work_struct *work)
 				wl1251_event_handle(wl, 0);
 			else
 				wl1251_event_handle(wl, 1);
+
+			wl->last_event = jiffies +
+				msecs_to_jiffies(WL1251_EVENT_TIMEOUT);
 		}
 
 		if (intr & WL1251_ACX_INTR_INIT_COMPLETE)
@@ -535,6 +542,21 @@ static void wl1251_irq_work(struct work_struct *work)
 	} while (intr);
 
 out_sleep:
+	/* FIXME:
+	 * Occasionally the firmware puts mailbox events into the mailbox
+	 * for the host to read, but fails to flag the appropriate mailbox
+	 * interrupt. This causes the event mailbox to get jammed. This
+	 * work-a-round wakes the event queue periodically to avoid the jam.
+	 *
+	 * The real fix involves a firmware-side and host-side counter
+	 * mechanism, similar to the one above for the RX path.
+	 */
+	if (time_after(jiffies, wl->last_event) && ctr) {
+		wl1251_reg_write32(wl, ACX_REG_INTERRUPT_TRIG,
+				   INTR_TRIG_EVENT_ACK);
+		wl->last_event = jiffies +
+			msecs_to_jiffies(WL1251_EVENT_TIMEOUT);
+	}
 	wl1251_reg_write32(wl, ACX_REG_INTERRUPT_MASK, ~(wl->intr_mask));
 	wl1251_ps_elp_sleep(wl);
 
@@ -920,6 +942,7 @@ static void wl1251_op_stop(struct ieee80211_hw *hw)
 	wl->tx_queue_stopped = false;
 	wl->power_level = WL1251_DEFAULT_POWER_LEVEL;
 	wl->channel = WL1251_DEFAULT_CHANNEL;
+	wl->last_event = 0;
 
 	wl1251_debugfs_reset(wl);
 
@@ -994,7 +1017,8 @@ static int wl1251_build_null_data(struct wl1251 *wl)
 
 	memcpy(template.header.sa, wl->mac_addr, ETH_ALEN);
 	template.header.frame_ctl = cpu_to_le16(IEEE80211_FTYPE_DATA |
-						IEEE80211_STYPE_NULLFUNC);
+						IEEE80211_STYPE_NULLFUNC |
+						IEEE80211_FCTL_TODS);
 
 	return wl1251_cmd_template_set(wl, CMD_NULL_DATA, &template,
 				       sizeof(template));
@@ -1921,6 +1945,7 @@ static int __devinit wl1251_probe(struct spi_device *spi)
 	wl->dtim_period = WL1251_DEFAULT_DTIM_PERIOD;
 	wl->vif = NULL;
 	wl->bt_coex_mode = WL1251_BT_COEX_OFF;
+	wl->last_event = 0;
 
 	for (i = 0; i < FW_TX_CMPLT_BLOCK_SIZE; i++)
 		wl->tx_frames[i] = NULL;

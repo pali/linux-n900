@@ -73,7 +73,6 @@ NORET_TYPE void panic(const char * fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	printk(KERN_EMERG "Kernel panic - not syncing: %s\n",buf);
-	bust_spinlocks(0);
 
 	/*
 	 * If we have crashed and we have a crash kernel loaded let it handle
@@ -92,6 +91,8 @@ NORET_TYPE void panic(const char * fmt, ...)
 #endif
 
 	atomic_notifier_call_chain(&panic_notifier_list, 0, buf);
+
+	bust_spinlocks(0);
 
 	if (!panic_blink)
 		panic_blink = no_blink;

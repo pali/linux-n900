@@ -464,10 +464,7 @@ void omap3_save_neon_context(void)
 
 void omap3_restore_neon_context(void)
 {
-#ifdef CONFIG_VFP
-	vfp_enable();
-	vfp_pm_restore_context();
-#endif
+	return;
 }
 
 /* Function to restore the table entry that was modified for enabling MMU */
@@ -1393,7 +1390,7 @@ static void __init configure_vc(void)
 				OMAP3430_GR_MOD,
 				OMAP3_PRM_VC_CH_CONF_OFFSET);
 
-	prm_write_mod_reg(OMAP3430_MCODE_SHIFT | OMAP3430_HSEN | OMAP3430_SREN,
+	prm_write_mod_reg(OMAP3430_MCODE_SHIFT | OMAP3430_HSEN,
 				OMAP3430_GR_MOD,
 				OMAP3_PRM_VC_I2C_CFG_OFFSET);
 

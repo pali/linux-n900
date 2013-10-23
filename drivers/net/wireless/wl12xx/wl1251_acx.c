@@ -677,7 +677,7 @@ int wl1251_acx_sg_configure(struct wl1251 *wl, bool force)
 		ret = wl1251_acx_sg_enable(wl, SG_DISABLE);
 		if (ret)
 			break;
-		ret = wl1251_acx_sg_cfg(wl, PTA_TIME_BEFORE_BEACON_DEF);
+		ret = wl1251_acx_sg_cfg(wl, 0);
 		break;
 	case WL1251_BT_COEX_ENABLE:
 		ret = wl1251_acx_sg_enable(wl, SG_ENABLE);

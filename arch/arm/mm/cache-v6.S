@@ -12,6 +12,7 @@
 #include <linux/linkage.h>
 #include <linux/init.h>
 #include <asm/assembler.h>
+#include <asm/page.h>
 
 #include "proc-macros.S"
 
@@ -95,9 +96,10 @@ ENTRY(v6_coherent_user_range)
 
 #ifdef HARVARD_CACHE
 	bic	r0, r0, #CACHE_LINE_SIZE - 1
-1:	mcr	p15, 0, r0, c7, c10, 1		@ clean D line
+1:
+USER(	mcr	p15, 0, r0, c7, c10, 1)		@ clean D line
 	add	r0, r0, #CACHE_LINE_SIZE
-	cmp	r0, r1
+2:	cmp	r0, r1
 	blo	1b
 #endif
 	mov	r0, #0
@@ -108,6 +110,11 @@ ENTRY(v6_coherent_user_range)
 	mcr	p15, 0, r0, c7, c5, 6		@ invalidate BTB
 #endif
 	mov	pc, lr
+
+#ifdef HARVARD_CACHE
+9001:	add	r0, r0, #PAGE_SIZE
+	b	2b
+#endif
 
 /*
  *	v6_flush_kern_dcache_page(kaddr)

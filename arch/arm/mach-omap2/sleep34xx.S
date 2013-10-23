@@ -260,11 +260,28 @@ restore:
 	mcr	p15, 0, r0, c7, c10, 5	@ data memory barrier
 	.word	0xE1600071		@ call SMI monitor (smi #1)
 
+	/* Restore L2 aux control register */
+	mov	r0, #43		@ set service ID for PPA
+	mov	r12, r0		@ copy service ID in r12
+	mov	r1, #0		@ set task ID for ROM code in r1
+	mov	r2, #4		@ set some flags in r2, r6
+	mov	r6, #0xff
+	ldr	r3, write_l2_aux_control_params	@ r3 points to parameters
+	ldr	r4, phys_offset
+	adds	r3, r3, r4
+	ldr	r4, page_offset
+	subs	r3, r3, r4
+	mcr	p15, 0, r0, c7, c10, 4	@ data write barrier
+	mcr	p15, 0, r0, c7, c10, 5	@ data memory barrier
+	.word	0xE1600071		@ call SMI monitor (smi #1)
+
 	b	logic_l1_restore
 l2_inv_api_params:
 	.word   0x1, 0x00
 write_aux_control_params:
 	.word	omap3_aux_ctrl
+write_l2_aux_control_params:
+	.word	omap3_l2_aux_ctrl
 l2_inv_gp:
 	/* Execute smi to invalidate L2 cache */
 	mov r12, #0x1                         @ set up to invalide L2
@@ -277,6 +294,15 @@ smi:    .word 0xE1600070		@ Call SMI monitor (smieq)
 	subs	r1, r1, r0
 	ldr	r0, [r1, #4]
 	mov	r12, #0x3
+	.word 0xE1600070	@ Call SMI monitor (smieq)
+	/* Restore L2 AUX control register */
+	ldr	r1, write_l2_aux_control_params
+	ldr	r0, phys_offset
+	adds	r1, r1, r0
+	ldr	r0, page_offset
+	subs	r1, r1, r0
+	ldr	r0, [r1, #4]
+	mov	r12, #0x2
 	.word 0xE1600070	@ Call SMI monitor (smieq)
 logic_l1_restore:
 	mov	r1, #0
@@ -456,6 +482,9 @@ save_context_wfi:
 	mov	r8, r0 /* Store SDRAM address in r8 */
 	mrc	p15, 0, r4, c1, c0, 1	@ Read Auxiliary Control Register
 	ldr	r5, write_aux_control_params
+	str	r4, [r5, #4]
+	mrc	p15, 1, r4, c9, c0, 2	@ Read L2 AUX ctrl register
+	ldr	r5, write_l2_aux_control_params
 	str	r4, [r5, #4]
         /* Check what that target sleep state is:stored in r1*/
         /* 1 - Only L1 and logic lost */

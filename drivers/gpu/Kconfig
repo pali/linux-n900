@@ -1,20 +1,3 @@
 source drivers/gpu/pvr/Kconfig
-
-choice DRM_VERSION
-	prompt "Direct Rendering Manager"
-	optional
-
-menuconfig DRM_VER_ORIG
-	bool "Original version"
-	select DRM
-
-menuconfig DRM_VER_TUNGSTEN
-	bool "Tungsten version"
-	select DRM_TUNGSTEN
-
-endchoice
-
 source drivers/gpu/drm/Kconfig
-
-source drivers/gpu/drm-tungsten/Kconfig
 

@@ -58,7 +58,7 @@ static struct tty_buffer *tty_buffer_alloc(struct tty_struct *tty, size_t size)
 {
 	struct tty_buffer *p;
 
-	if (tty->buf.memory_used + size > 65536)
+	if (tty->buf.memory_used + size > 96 * 1024)
 		return NULL;
 	p = kmalloc(sizeof(struct tty_buffer) + 2 * size, GFP_ATOMIC);
 	if (p == NULL)
@@ -417,6 +417,7 @@ static void flush_to_ldisc(struct work_struct *work)
 	if (head != NULL) {
 		tty->buf.head = NULL;
 		for (;;) {
+			int copied;
 			int count = head->commit - head->read;
 			if (!count) {
 				if (head->next == NULL)
@@ -439,11 +440,11 @@ static void flush_to_ldisc(struct work_struct *work)
 				count = tty->receive_room;
 			char_buf = head->char_buf_ptr + head->read;
 			flag_buf = head->flag_buf_ptr + head->read;
-			head->read += count;
 			spin_unlock_irqrestore(&tty->buf.lock, flags);
-			disc->ops->receive_buf(tty, char_buf,
+			copied = disc->ops->receive_buf(tty, char_buf,
 							flag_buf, count);
 			spin_lock_irqsave(&tty->buf.lock, flags);
+			head->read += copied;
 		}
 		/* Restore the queue head */
 		tty->buf.head = head;

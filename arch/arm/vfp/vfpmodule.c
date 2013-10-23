@@ -329,57 +329,39 @@ void vfp_enable(void *unused)
 
 void vfp_pm_save_context(void)
 {
-	struct thread_info *ti = current_thread_info();
+	struct thread_info *thread = current_thread_info();
 	u32 fpexc = fmrx(FPEXC);
+	__u32 cpu = thread->cpu;
+	int vfp_enabled;
 
-	/* if vfp is on, then save state for resumption */
-	if (fpexc & FPEXC_EN) {
-		printk(KERN_DEBUG "%s: saving vfp state\n", __func__);
-		vfp_save_state(&(ti->vfpstate.hard.fpexc), fpexc);
-		vfp_save_regs((u32 *)(ti->vfpstate.hard.fpregs));
-	} else {
-		vfp_enable(NULL); /* enable VFP for now to save context. */
-		vfp_save_regs((u32 *)(ti->vfpstate.hard.fpregs));
+	vfp_enabled = fpexc & FPEXC_EN;
+
+	if (last_VFP_context[cpu]) {
+		if (!vfp_enabled) {
+			/* enable vfp now to save context */
+			vfp_enable(NULL);
+			fmxr(FPEXC, fmrx(FPEXC) | FPEXC_EN);
+		}
+		vfp_save_state(last_VFP_context[cpu], fpexc);
+
+		/* Disable vfp. The next inst traps an exception and restores*/
 		fmxr(FPEXC, fmrx(FPEXC) & ~FPEXC_EN);
+
+		/*
+		 * This is needed else the restore might fail if it sees
+		 * last_VFP_context if same as the current threads vfp_state.
+		 */
+		last_VFP_context[cpu] = NULL;
 	}
 }
 
 static int vfp_pm_suspend(struct sys_device *dev, pm_message_t state)
 {
-	u32 fpexc = fmrx(FPEXC);
-	vfp_pm_save_context();
-
-	/* disable, just in case */
-	if (fpexc & FPEXC_EN)
-		fmxr(FPEXC, fmrx(FPEXC) & ~FPEXC_EN);
-
-	/* clear any information we had about last context state */
-	memset(last_VFP_context, 0, sizeof(last_VFP_context));
-
 	return 0;
-}
-
-void vfp_pm_restore_context(void)
-{
-	struct thread_info *ti = current_thread_info();
-	u32 fpexc = fmrx(FPEXC);
-	/* if vfp is on, then save state for resumption */
-	if (fpexc & FPEXC_EN) {
-		printk(KERN_DEBUG "%s: restoring vfp state\n", __func__);
-		vfp_restore_state(&(ti->vfpstate.hard.fpexc));
-		vfp_restore_regs((u32 *)(ti->vfpstate.hard.fpregs));
-	}
 }
 
 static int vfp_pm_resume(struct sys_device *dev)
 {
-	/* ensure we have access to the vfp */
-	vfp_enable(NULL);
-
-	vfp_pm_restore_context();
-	/* and disable it to ensure the next usage restores the state */
-	fmxr(FPEXC, fmrx(FPEXC) & ~FPEXC_EN);
-
 	return 0;
 }
 

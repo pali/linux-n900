@@ -202,42 +202,6 @@ ENTRY(vfp_save_state)
 	mov	pc, lr
 ENDPROC(vfp_save_state)
 
-#if defined(CONFIG_SMP) || defined(CONFIG_PM)
-ENTRY(vfp_restore_state)
-	@ Restore the current VFP state
-	@ r0 - saved location
-	DBGSTR1	"Restore VFP state %p", r0
-	ldmia	r0, {r1, r2, r3, r12}	@ save FPEXC, FPSCR, FPINST, FPINST2
-	VFPFMXR	FPSCR, r2		@ current status
-	tst	r1, #FPEXC_EX		@ is there additional state to save?
-	beq	1f
-	VFPFMXR	FPINST, r3		@ FPINST (only if FPEXC.EX is set)
-	tst	r1, #FPEXC_FP2V		@ is there an FPINST2 to read?
-	beq	1f
-	VFPFMXR	FPINST2, r12		@ FPINST2 if needed (and present)
-1:
-	mov	pc, lr
-ENDPROC(vfp_restore_state)
-#endif
-
-#if defined(CONFIG_SMP) || defined(CONFIG_PM)
-ENTRY(vfp_save_regs)
-	@ Save the current VFP state
-	@ r0 - save location
-	VFPFSTMIA r0, r1
-	mov	pc, lr
-ENDPROC(vfp_save_regs)
-#endif
-
-#if defined(CONFIG_SMP) || defined(CONFIG_PM)
-ENTRY(vfp_restore_regs)
-	@ Save the current VFP state
-	@ r0 - save location
-	VFPFLDMIA r0, r1
-	mov	pc, lr
-ENDPROC(vfp_restore_regs)
-#endif
-
 last_VFP_context_address:
 	.word	last_VFP_context
 

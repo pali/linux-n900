@@ -1031,12 +1031,16 @@ static ssize_t omap_sr_opp1_efuse_show(struct kobject *kobj,
 					struct kobj_attribute *attr,
 					char *buf)
 {
-	return sprintf(buf, "%08x\n", sr1.opp1_nvalue);
+	return sprintf(buf, "%08x\n%08x\n%08x\n%08x\n%08x\n", sr1.opp1_nvalue,
+							sr1.opp2_nvalue,
+							sr1.opp3_nvalue,
+							sr1.opp4_nvalue,
+							sr1.opp5_nvalue);
 }
 
-static struct kobj_attribute sr_opp1_efuse = {
+static struct kobj_attribute sr_efuse = {
 	.attr = {
-	.name = "OPP1Efuse",
+	.name = "Efuse",
 	.mode = 0444,
 	},
 	.show = omap_sr_opp1_efuse_show,
@@ -1079,7 +1083,7 @@ static int __init omap3_sr_init(void)
 	if (ret)
 		printk(KERN_ERR "sysfs_create_file failed: %d\n", ret);
 
-	ret = sysfs_create_file(power_kobj, &sr_opp1_efuse.attr);
+	ret = sysfs_create_file(power_kobj, &sr_efuse.attr);
 	if (ret)
 		printk(KERN_ERR "sysfs_create_file failed for OPP data: %d\n", ret);
 

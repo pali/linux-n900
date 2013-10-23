@@ -117,6 +117,7 @@ struct isp_af_device {
 	u8 update;
 	u8 buf_err;
 	int enabled;
+	unsigned int buf_size;
 	struct ispstat stat;
 	struct af_configuration config; /*Device configuration structure */
 	struct ispstat_buffer *buf_next;

@@ -20,27 +20,6 @@ The full GNU General Public License version 2 is included in this
 distribution in the file called "COPYING".
 
 
-Build and Install Instructions
--------------------------------------------
-
-For details see the "INSTALL" file.
-
-To build for, change to the appropriate target directory, e.g.:
-$ cd eurasiacon/build/linux/platform/kbuild
-
-Issue the make command:
-$ make BUILD=debug all
-
-The DDK software must be installed by the root user.  Become the root user:
-$ su
-
-Install the DDK software:
-$ make install
-
-Become an ordinary user again:
-$ exit
-
-
 Contact information:
 -------------------------------------------
 

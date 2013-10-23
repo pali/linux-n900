@@ -188,7 +188,7 @@ static int set_sdrc_timing_regval_ps(u32 *regval, int st_bit, int end_bit,
 
 static int sdrc_timings(int id, long rate)
 {
-	u32 ticks_per_us;
+	u32 ticks_per_ms;
 	u32 rfr, l;
 	u32 actim_ctrla = 0, actim_ctrlb = 0;
 	u32 rfr_ctrl;
@@ -214,8 +214,8 @@ static int sdrc_timings(int id, long rate)
 	SDRC_SET_ONE(&actim_ctrlb,  12,  14, tCKE, l3_rate);
 	SDRC_SET_ONE(&actim_ctrlb,  16,  17, tWTR, l3_rate);
 
-	ticks_per_us = sdrc_ps_to_ticks(1000000, l3_rate);
-	rfr = rx51_timings[0].tREF * ticks_per_us / 1000;
+	ticks_per_ms = l3_rate;
+	rfr = rx51_timings[0].tREF * ticks_per_ms / 1000000;
 	if (rfr > 65535 + 50)
 		rfr = 65535;
 	else

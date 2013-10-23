@@ -356,6 +356,8 @@ struct wl1251 {
 	/* Are we currently scanning */
 	bool scanning;
 
+	u32 last_event;
+
 	/* Our association ID */
 	u16 aid;
 

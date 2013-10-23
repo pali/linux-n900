@@ -48,6 +48,7 @@ int ispstat_buf_queue(struct ispstat *stat)
 
 	stat->active_buf->config_counter = stat->config_counter;
 	stat->active_buf->frame_number = stat->frame_number;
+	stat->active_buf->buf_size = stat->buf_size;
 
 	stat->frame_number++;
 	if (stat->frame_number == stat->max_frame)
@@ -69,9 +70,11 @@ struct ispstat_buffer *ispstat_buf_next(struct ispstat *stat)
 
 	spin_lock_irqsave(&stat->lock, flags);
 
-	if (stat->active_buf)
+	if (stat->active_buf) {
 		dev_dbg(stat->dev, "%s: new buffer requested without queuing "
 				   "active one.\n", stat->tag);
+		return stat->active_buf;
+	}
 
 	for (i = 0; i < stat->nbufs; i++) {
 		struct ispstat_buffer *curr = &stat->buf[i];
@@ -157,7 +160,7 @@ struct ispstat_buffer *ispstat_buf_get(struct ispstat *stat,
 
 	rval = copy_to_user((void *)ptr,
 			    buf->virt_addr,
-			    stat->buf_size);
+			    buf->buf_size);
 
 	if (rval) {
 		dev_info(stat->dev,
@@ -264,13 +267,21 @@ static int ispstat_bufs_alloc_dma(struct ispstat *stat, unsigned int size)
 	return 0;
 }
 
+void ispstat_bufs_set_size(struct ispstat *stat, unsigned int size)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&stat->lock, flags);
+	stat->buf_size = size;
+	spin_unlock_irqrestore(&stat->lock, flags);
+}
+
 int ispstat_bufs_alloc(struct ispstat *stat,
 		       unsigned int size, int dma_buf)
 {
 	struct isp_device *isp = dev_get_drvdata(stat->dev);
 	unsigned long flags;
 	int ret = 0;
-	int i;
 
 	spin_lock_irqsave(&stat->lock, flags);
 
@@ -280,8 +291,6 @@ int ispstat_bufs_alloc(struct ispstat *stat,
 
 	/* Are the old buffers big enough? */
 	if ((stat->buf_alloc_size >= size) && (stat->dma_buf == dma_buf)) {
-		for (i = 0; i < stat->nbufs; i++)
-			stat->buf[i].frame_number = stat->max_frame;
 		spin_unlock_irqrestore(&stat->lock, flags);
 		goto out;
 	}
@@ -306,7 +315,6 @@ int ispstat_bufs_alloc(struct ispstat *stat,
 		size = 0;
 
 out:
-	stat->buf_size = size;
 	stat->active_buf = NULL;
 
 	return ret;

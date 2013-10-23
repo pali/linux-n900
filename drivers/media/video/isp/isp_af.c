@@ -194,6 +194,7 @@ void isp_af_config_registers(struct isp_af_device *isp_af)
 		       ~AF_PCR_MASK, pcr);
 
 	isp_af->update = 0;
+	ispstat_bufs_set_size(&isp_af->stat, isp_af->buf_size);
 
 	spin_unlock_irqrestore(isp_af->lock, irqflags);
 }
@@ -329,6 +330,7 @@ int omap34xx_isp_af_config(struct isp_af_device *isp_af,
 		return result;
 
 	spin_lock_irqsave(isp_af->lock, irqflags);
+	isp_af->buf_size = buf_size;
 	isp_af_update_params(isp_af, afconfig);
 	spin_unlock_irqrestore(isp_af->lock, irqflags);
 

@@ -95,6 +95,7 @@ void *omap3_secure_ram_storage;
  */
 u32 omap3_arm_context[128];
 u32 omap3_aux_ctrl[2] = { 0x1, 0x0 };
+u32 omap3_l2_aux_ctrl[2] = { 0x1, 0x0 };
 
 struct omap3_control_regs {
 	u32 sysconfig;

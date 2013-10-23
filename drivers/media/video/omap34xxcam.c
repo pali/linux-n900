@@ -1442,7 +1442,7 @@ static int vidioc_enum_frameintervals(struct file *file, void *fh,
 		 */
 		dist = min(frms.discrete.width, frmi->width)
 		     * min(frms.discrete.height, frmi->height);
-		dist = frms.discrete.width * frms.discrete.width
+		dist = frms.discrete.width * frms.discrete.height
 		     + frmi->width * frmi->height
 		     - 2*dist;
 

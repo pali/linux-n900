@@ -161,8 +161,14 @@ static int omap2_onenand_wait(struct mtd_info *mtd, int state)
 		if (result == 0) {
 			int retry_cnt = 0;
 retry:
+			/*
+			 * Block sleep while OneNAND is writing, to prevent PM
+			 * from putting OneNAND's power regulator to sleep.
+			 */
+			omap2_block_sleep();
 			result = wait_for_completion_timeout(&c->irq_done,
 						    msecs_to_jiffies(20));
+			omap2_allow_sleep();
 			if (result == 0) {
 				/* Timeout after 20ms */
 				ctrl = read_reg(c, ONENAND_REG_CTRL_STATUS);
@@ -295,7 +301,7 @@ static int omap3_onenand_read_bufferram(struct mtd_info *mtd, int area,
 		goto out_copy;
 
 	/* panic_write() may be in an interrupt context */
-	if (in_interrupt())
+	if (in_interrupt() || oops_in_progress)
 		goto out_copy;
 
 	if (buf >= high_memory) {
@@ -372,7 +378,7 @@ static int omap3_onenand_write_bufferram(struct mtd_info *mtd, int area,
 		goto out_copy;
 
 	/* panic_write() may be in an interrupt context */
-	if (in_interrupt())
+	if (in_interrupt() || oops_in_progress)
 		goto out_copy;
 
 	if (buf >= high_memory) {
