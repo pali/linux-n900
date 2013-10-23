@@ -28,7 +28,6 @@
 #define OMAP3_ISP_RESIZER_H
 
 #include <linux/types.h>
-#include <media/v4l2-ctrls.h>
 
 /*
  * Constants for filter coefficents count
@@ -104,8 +103,6 @@ struct isp_res_device {
 	struct v4l2_subdev subdev;
 	struct media_pad pads[RESZ_PADS_NUM];
 	struct v4l2_mbus_framefmt formats[RESZ_PADS_NUM];
-
-	struct v4l2_ctrl_handler ctrls;
 
 	enum resizer_input_entity input;
 	struct isp_video video_in;

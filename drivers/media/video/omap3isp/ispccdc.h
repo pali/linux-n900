@@ -29,7 +29,6 @@
 
 #include <linux/omap3isp.h>
 #include <linux/workqueue.h>
-#include <media/v4l2-ctrls.h>
 
 #include "ispvideo.h"
 
@@ -148,11 +147,10 @@ struct ispccdc_lsc {
  * @subdev: V4L2 subdevice
  * @pads: Sink and source media entity pads
  * @formats: Active video formats
- * @ctrls: V4L2 controls handler
  * @input: Active input
  * @output: Active outputs
  * @video_out: Output video node
- * @error: A hardware error occured during capture
+ * @error: A hardware error occurred during capture
  * @alaw: A-law compression enabled (1) or disabled (0)
  * @lpf: Low pass filter enabled (1) or disabled (0)
  * @obclamp: Optical-black clamp enabled (1) or disabled (0)
@@ -165,7 +163,7 @@ struct ispccdc_lsc {
  * @shadow_update: Controls update in progress by userspace
  * @syncif: Interface synchronization configuration
  * @vpcfg: Video port configuration
- * @underrun: A buffer underrun occured and a new buffer has been queued
+ * @underrun: A buffer underrun occurred and a new buffer has been queued
  * @state: Streaming state
  * @lock: Serializes shadow_update with interrupt handler
  * @wait: Wait queue used to stop the module
@@ -176,8 +174,6 @@ struct isp_ccdc_device {
 	struct v4l2_subdev subdev;
 	struct media_pad pads[CCDC_PADS_NUM];
 	struct v4l2_mbus_framefmt formats[CCDC_PADS_NUM];
-
-	struct v4l2_ctrl_handler ctrls;
 
 	enum ccdc_input_entity input;
 	unsigned int output;

@@ -296,8 +296,6 @@ static int rfcomm_dev_add(struct rfcomm_dev_req *req, struct rfcomm_dlc *dlc)
 	__module_get(THIS_MODULE);
 
 out:
-	write_unlock_bh(&rfcomm_dev_lock);
-
 	if (err < 0)
 		goto free;
 
@@ -317,9 +315,11 @@ out:
 	if (device_create_file(dev->tty_dev, &dev_attr_channel) < 0)
 		BT_ERR("Failed to create channel attribute");
 
+	write_unlock_bh(&rfcomm_dev_lock);
 	return dev->id;
 
 free:
+	write_unlock_bh(&rfcomm_dev_lock);
 	kfree(dev);
 	return err;
 }

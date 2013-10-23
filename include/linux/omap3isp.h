@@ -29,7 +29,17 @@
 
 #include <linux/types.h>
 
-/* Private IOCTLs */
+/*
+ * Private IOCTLs
+ *
+ * VIDIOC_OMAP3ISP_CCDC_CFG: Set CCDC configuration
+ * VIDIOC_OMAP3ISP_PRV_CFG: Set preview engine configuration
+ * VIDIOC_OMAP3ISP_AEWB_CFG: Set AEWB module configuration
+ * VIDIOC_OMAP3ISP_HIST_CFG: Set histogram module configuration
+ * VIDIOC_OMAP3ISP_AF_CFG: Set auto-focus module configuration
+ * VIDIOC_OMAP3ISP_STAT_REQ: Read statistics (AEWB/AF/histogram) data
+ * VIDIOC_OMAP3ISP_STAT_EN: Enable/disable a statistics module
+ */
 
 #define VIDIOC_OMAP3ISP_CCDC_CFG \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 1, struct omap3isp_ccdc_update_config)
@@ -46,7 +56,14 @@
 #define VIDIOC_OMAP3ISP_STAT_EN \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 7, unsigned long)
 
-/* Events */
+/*
+ * Events
+ *
+ * V4L2_EVENT_OMAP3ISP_AEWB: AEWB statistics data ready
+ * V4L2_EVENT_OMAP3ISP_AF: AF statistics data ready
+ * V4L2_EVENT_OMAP3ISP_HIST: Histogram statistics data ready
+ * V4L2_EVENT_OMAP3ISP_HS_VS: Horizontal/vertical synchronization detected
+ */
 
 #define V4L2_EVENT_OMAP3ISP_CLASS	(V4L2_EVENT_PRIVATE_START | 0x100)
 #define V4L2_EVENT_OMAP3ISP_AEWB	(V4L2_EVENT_OMAP3ISP_CLASS | 0x1)
@@ -114,7 +131,6 @@ struct omap3isp_stat_event_status {
  * @subsample_hor_inc: Subsample Horizontal points increment Range 2 - 32, even
  *                     values only.
  * @alaw_enable: AEW ALAW EN flag.
- * @aewb_enable: AE AWB stats generation EN flag.
  */
 struct omap3isp_h3a_aewb_config {
 	/*
@@ -142,11 +158,11 @@ struct omap3isp_h3a_aewb_config {
 
 /**
  * struct omap3isp_stat_data - Statistic data sent to or received from user
+ * @ts: Timestamp of returned framestats.
  * @buf: Pointer to pass to user.
  * @frame_number: Frame number of requested stats.
  * @cur_frame: Current frame number being processed.
- * @buf_size: Buffer size requested and returned.
- * @ts: Timestamp of returned framestats.
+ * @config_counter: Number of the configuration associated with the data.
  */
 struct omap3isp_stat_data {
 	struct timeval ts;
@@ -155,7 +171,6 @@ struct omap3isp_stat_data {
 	__u16 frame_number;
 	__u16 cur_frame;
 	__u16 config_counter;
-	__u16 new_bufs;		/* Deprecated */
 };
 
 
@@ -235,7 +250,7 @@ enum omap3isp_h3a_af_rgbpos {
 /* Contains the information regarding the Horizontal Median Filter */
 struct omap3isp_h3a_af_hmf {
 	__u8 enable;	/* Status of Horizontal Median Filter */
-	__u8 threshold;	/* Threshhold Value for Horizontal Median Filter */
+	__u8 threshold;	/* Threshold Value for Horizontal Median Filter */
 };
 
 /* Contains the information regarding the IIR Filters */

@@ -137,21 +137,24 @@ static const char *task_state_array[] = {
 	"S (sleeping)",		/*  1 */
 	"D (disk sleep)",	/*  2 */
 	"T (stopped)",		/*  4 */
-	"T (tracing stop)",	/*  8 */
+	"t (tracing stop)",	/*  8 */
 	"Z (zombie)",		/* 16 */
-	"X (dead)"		/* 32 */
+	"X (dead)",		/* 32 */
+	"x (dead)",		/* 64 */
+	"K (wakekill)",		/* 128 */
+	"W (waking)",		/* 256 */
 };
 
 static inline const char *get_task_state(struct task_struct *tsk)
 {
 	unsigned int state = (tsk->state & TASK_REPORT) | tsk->exit_state;
-	const char **p = &task_state_array[0];
+	unsigned int topbit = fls(state);
 
-	while (state) {
-		p++;
-		state >>= 1;
-	}
-	return *p;
+	WARN(topbit >= ARRAY_SIZE(task_state_array),
+	     "get_task_state(), state=%u and exit_state=%u has top bit %u\n",
+	     tsk->state, tsk->exit_state, topbit);
+
+	return task_state_array[topbit];
 }
 
 static inline void task_state(struct seq_file *m, struct pid_namespace *ns,

@@ -773,7 +773,7 @@ static const struct v4l2_ctrl_ops ad58xx_ctrl_ops = {
 	.s_ctrl = ad58xx_set_ctrl,
 };
 
-static const char *ad58xx_fc_mode_menu[] = {
+static const char * const ad58xx_fc_mode_menu[] = {
 	"Immediate Move",
 	"Single Frame Single Strobe",
 	"Single Frame Multi Strobe P1",
@@ -782,14 +782,14 @@ static const char *ad58xx_fc_mode_menu[] = {
 	"Multiple Frame Multi Strobe P1,2",
 };
 
-static const char *ad58xx_vcm_arc_menu[] = {
+static const char * const ad58xx_vcm_arc_menu[] = {
 	"ARC Trademark RES1",
 	"ARC Trademark ESRC",
 	"ARC Trademark RES0.5",
 	"ARC Trademark RES2",
 };
 
-static const char *ad5817_lin_mode_menu[] = {
+static const char * const ad5817_lin_mode_menu[] = {
 	"Full PWM Mode",
 	"Full linear Mode",
 	"Auto Mode 0 PWM during each strobe, linear at the end of strobe",
@@ -797,7 +797,7 @@ static const char *ad5817_lin_mode_menu[] = {
 };
 
 
-static const char *bu8051gwz_gainsel_menu[] = {
+static const char * const bu8051gwz_gainsel_menu[] = {
 	"Output voltage 2.70V",
 	"Output voltage 2.75V",
 	"Output voltage 2.80V",
@@ -1332,18 +1332,14 @@ static const struct v4l2_subdev_core_ops ad58xx_core_ops = {
 	.s_power	= ad58xx_set_power,
 };
 
-static const struct v4l2_subdev_file_ops ad58xx_file_ops = {
-	.open = ad58xx_open,
-	.close = ad58xx_close,
-};
-
 static const struct v4l2_subdev_ops ad58xx_ops = {
 	.core = &ad58xx_core_ops,
-	.file = &ad58xx_file_ops,
 };
 
 static const struct v4l2_subdev_internal_ops ad58xx_internal_ops = {
 	.registered = ad58xx_registered,
+	.open = ad58xx_open,
+	.close = ad58xx_close,
 };
 
 /*

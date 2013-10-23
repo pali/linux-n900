@@ -28,7 +28,6 @@
 #define OMAP3_ISP_CCP2_H
 
 #include <linux/videodev2.h>
-#include <media/v4l2-ctrls.h>
 
 struct isp_device;
 struct isp_csiphy;
@@ -76,14 +75,13 @@ struct isp_ccp2_device {
 	struct v4l2_mbus_framefmt formats[CCP2_PADS_NUM];
 	struct media_pad pads[CCP2_PADS_NUM];
 
-	struct v4l2_ctrl_handler ctrls;
-
 	enum ccp2_input_entity input;
 	enum ccp2_output_entity output;
 	struct isp_interface_lcx_config if_cfg;
 	struct isp_interface_mem_config mem_cfg;
 	struct isp_video video_in;
 	struct isp_csiphy *phy;
+	struct regulator *vdds_csib;
 	unsigned int error;
 	enum isp_pipeline_stream_state state;
 	wait_queue_head_t wait;

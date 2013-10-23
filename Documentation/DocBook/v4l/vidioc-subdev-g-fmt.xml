@@ -50,6 +50,12 @@
   <refsect1>
     <title>Description</title>
 
+    <note>
+      <title>Experimental</title>
+      <para>This is an <link linkend="experimental">experimental</link>
+      interface and may change in the future.</para>
+    </note>
+
     <para>These ioctls are used to negotiate the frame format at specific
     subdev pads in the image pipeline.</para>
 
@@ -116,6 +122,12 @@
 	    <entry><structfield>format</structfield></entry>
 	    <entry>Definition of an image format, see <xref
 	    linkend="v4l2-mbus-framefmt" /> for details.</entry>
+	  </row>
+	  <row>
+	    <entry>__u32</entry>
+	    <entry><structfield>reserved</structfield>[8]</entry>
+	    <entry>Reserved for future extensions. Applications and drivers must
+	    set the array to zero.</entry>
 	  </row>
 	</tbody>
       </tgroup>

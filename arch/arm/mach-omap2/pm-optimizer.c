@@ -41,6 +41,8 @@ static void pm_opt_userspace_event(void);
 
 static void pm_opt_userspace_callback(struct work_struct *unused)
 {
+	if (!pm_opt_saved_policy || !pm_opt_userspace_data)
+			return;
 	__cpufreq_driver_target(pm_opt_saved_policy,
 		pm_opt_userspace_data->cpufreq.min, CPUFREQ_RELATION_L);
 }
@@ -66,6 +68,8 @@ static void pm_opt_userspace_timeout(unsigned long data)
 
 static void pm_opt_input_callback(struct work_struct *unused)
 {
+	if (!pm_opt_saved_policy || !pm_opt_input_data)
+			return;
 	__cpufreq_driver_target(pm_opt_saved_policy,
 		pm_opt_input_data->cpufreq.min, CPUFREQ_RELATION_L);
 }

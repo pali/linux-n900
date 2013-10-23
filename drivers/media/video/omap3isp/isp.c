@@ -276,7 +276,8 @@ static void isp_power_settings(struct isp_device *isp, int idle)
  */
 void omap3isp_configure_bridge(struct isp_device *isp,
 			       enum ccdc_input_entity input,
-			       const struct isp_parallel_platform_data *pdata)
+			       const struct isp_parallel_platform_data *pdata,
+			       unsigned int shift)
 {
 	u32 ispctrl_val;
 
@@ -289,9 +290,9 @@ void omap3isp_configure_bridge(struct isp_device *isp,
 	switch (input) {
 	case CCDC_INPUT_PARALLEL:
 		ispctrl_val |= ISPCTRL_PAR_SER_CLK_SEL_PARALLEL;
-		ispctrl_val |= pdata->data_lane_shift << ISPCTRL_SHIFT_SHIFT;
 		ispctrl_val |= pdata->clk_pol << ISPCTRL_PAR_CLK_POL_SHIFT;
 		ispctrl_val |= pdata->bridge << ISPCTRL_PAR_BRIDGE_SHIFT;
+		shift += pdata->data_lane_shift * 2;
 		break;
 
 	case CCDC_INPUT_CSI2A:
@@ -309,6 +310,8 @@ void omap3isp_configure_bridge(struct isp_device *isp,
 	default:
 		return;
 	}
+
+	ispctrl_val |= ((shift/2) << ISPCTRL_SHIFT_SHIFT) & ISPCTRL_SHIFT_MASK;
 
 	ispctrl_val &= ~ISPCTRL_SYNC_DETECT_MASK;
 	ispctrl_val |= ISPCTRL_SYNC_DETECT_VSRISE;
@@ -378,7 +381,7 @@ static inline void isp_isr_dbg(struct isp_device *isp, u32 irqstatus)
 	};
 	int i;
 
-	dev_dbg(isp->dev, "");
+	dev_dbg(isp->dev, "ISP IRQ: ");
 
 	for (i = 0; i < ARRAY_SIZE(name); i++) {
 		if ((1 << i) & irqstatus)
@@ -545,7 +548,7 @@ static int isp_pipeline_pm_use_count(struct media_entity *entity)
 	media_entity_graph_walk_start(&graph, entity);
 
 	while ((entity = media_entity_graph_walk_next(&graph))) {
-		if (media_entity_type(entity) == MEDIA_ENTITY_TYPE_NODE)
+		if (media_entity_type(entity) == MEDIA_ENT_T_DEVNODE)
 			use += entity->use_count;
 	}
 
@@ -568,7 +571,7 @@ static int isp_pipeline_pm_power_one(struct media_entity *entity, int change)
 	struct v4l2_subdev *subdev;
 	int ret;
 
-	subdev = media_entity_type(entity) == MEDIA_ENTITY_TYPE_SUBDEV
+	subdev = media_entity_type(entity) == MEDIA_ENT_T_V4L2_SUBDEV
 	       ? media_entity_to_v4l2_subdev(entity) : NULL;
 
 	if (entity->use_count == 0 && change > 0 && subdev != NULL) {
@@ -608,7 +611,7 @@ static int isp_pipeline_pm_power(struct media_entity *entity, int change)
 	media_entity_graph_walk_start(&graph, entity);
 
 	while (!ret && (entity = media_entity_graph_walk_next(&graph)))
-		if (media_entity_type(entity) != MEDIA_ENTITY_TYPE_NODE)
+		if (media_entity_type(entity) != MEDIA_ENT_T_DEVNODE)
 			ret = isp_pipeline_pm_power_one(entity, change);
 
 	if (!ret)
@@ -618,7 +621,7 @@ static int isp_pipeline_pm_power(struct media_entity *entity, int change)
 
 	while ((first = media_entity_graph_walk_next(&graph))
 	       && first != entity)
-		if (media_entity_type(first) != MEDIA_ENTITY_TYPE_NODE)
+		if (media_entity_type(first) != MEDIA_ENT_T_DEVNODE)
 			isp_pipeline_pm_power_one(first, -change);
 
 	return ret;
@@ -678,7 +681,7 @@ static int isp_pipeline_link_notify(struct media_pad *source,
 	int sink_use = isp_pipeline_pm_use_count(sink->entity);
 	int ret;
 
-	if (!(flags & MEDIA_LINK_FLAG_ACTIVE)) {
+	if (!(flags & MEDIA_LNK_FL_ENABLED)) {
 		/* Powering off entities is assumed to never fail. */
 		isp_pipeline_pm_power(source->entity, -sink_use);
 		isp_pipeline_pm_power(sink->entity, -source_use);
@@ -730,12 +733,12 @@ static int isp_pipeline_enable(struct isp_pipeline *pipe,
 	entity = &pipe->output->video.entity;
 	while (1) {
 		pad = &entity->pads[0];
-		if (!(pad->flags & MEDIA_PAD_FLAG_INPUT))
+		if (!(pad->flags & MEDIA_PAD_FL_SINK))
 			break;
 
 		pad = media_entity_remote_source(pad);
 		if (pad == NULL ||
-		    media_entity_type(pad->entity) != MEDIA_ENTITY_TYPE_SUBDEV)
+		    media_entity_type(pad->entity) != MEDIA_ENT_T_V4L2_SUBDEV)
 			break;
 
 		entity = pad->entity;
@@ -828,12 +831,12 @@ static int isp_pipeline_disable(struct isp_pipeline *pipe)
 	entity = &pipe->output->video.entity;
 	while (1) {
 		pad = &entity->pads[0];
-		if (!(pad->flags & MEDIA_PAD_FLAG_INPUT))
+		if (!(pad->flags & MEDIA_PAD_FL_SINK))
 			break;
 
 		pad = media_entity_remote_source(pad);
 		if (pad == NULL ||
-		    media_entity_type(pad->entity) != MEDIA_ENTITY_TYPE_SUBDEV)
+		    media_entity_type(pad->entity) != MEDIA_ENT_T_V4L2_SUBDEV)
 			break;
 
 		entity = pad->entity;
@@ -850,21 +853,23 @@ static int isp_pipeline_disable(struct isp_pipeline *pipe)
 
 		v4l2_subdev_call(subdev, video, s_stream, 0);
 
-		if (subdev == &isp->isp_res.subdev) {
+		if (subdev == &isp->isp_res.subdev)
 			ret = isp_pipeline_wait(isp, isp_pipeline_wait_resizer);
-		} else if (subdev == &isp->isp_prev.subdev) {
+		else if (subdev == &isp->isp_prev.subdev)
 			ret = isp_pipeline_wait(isp, isp_pipeline_wait_preview);
-		} else if (subdev == &isp->isp_ccdc.subdev) {
+		else if (subdev == &isp->isp_ccdc.subdev)
 			ret = isp_pipeline_wait(isp, isp_pipeline_wait_ccdc);
-		} else {
+		else
 			ret = 0;
-		}
 
 		if (ret) {
 			dev_info(isp->dev, "Unable to stop %s\n", subdev->name);
 			failure = -ETIMEDOUT;
 		}
 	}
+
+	if (failure < 0)
+		isp->needs_reset = true;
 
 	return failure;
 }
@@ -878,7 +883,8 @@ static int isp_pipeline_disable(struct isp_pipeline *pipe)
  * single-shot or continuous mode.
  *
  * Return 0 if successful, or the return value of the failed video::s_stream
- * operation otherwise.
+ * operation otherwise. The pipeline state is not updated when the operation
+ * fails, except when stopping the pipeline.
  */
 int omap3isp_pipeline_set_stream(struct isp_pipeline *pipe,
 				 enum isp_pipeline_stream_state state)
@@ -889,7 +895,9 @@ int omap3isp_pipeline_set_stream(struct isp_pipeline *pipe,
 		ret = isp_pipeline_disable(pipe);
 	else
 		ret = isp_pipeline_enable(pipe, state);
-	pipe->stream_state = state;
+
+	if (ret == 0 || state == ISP_PIPELINE_STREAM_STOPPED)
+		pipe->stream_state = state;
 
 	return ret;
 }
@@ -922,11 +930,11 @@ static void isp_pipeline_suspend(struct isp_pipeline *pipe)
 }
 
 /*
- * isp_pipeline_is_last - Verify if entity has an active link to the output
+ * isp_pipeline_is_last - Verify if entity has an enabled link to the output
  * 			  video node
  * @me: ISP module's media entity
  *
- * Returns 1 if the entity has an active link to the output video node or 0
+ * Returns 1 if the entity has an enabled link to the output video node or 0
  * otherwise. It's true only while pipeline can have no more than one output
  * node.
  */
@@ -948,7 +956,7 @@ static int isp_pipeline_is_last(struct media_entity *me)
  * isp_suspend_module_pipeline - Suspend pipeline to which belongs the module
  * @me: ISP module's media entity
  *
- * Suspend the whole pipeline if module's entity has an active link to the
+ * Suspend the whole pipeline if module's entity has an enabled link to the
  * output video node. It works only while pipeline can have no more than one
  * output node.
  */
@@ -962,7 +970,7 @@ static void isp_suspend_module_pipeline(struct media_entity *me)
  * isp_resume_module_pipeline - Resume pipeline to which belongs the module
  * @me: ISP module's media entity
  *
- * Resume the whole pipeline if module's entity has an active link to the
+ * Resume the whole pipeline if module's entity has an enabled link to the
  * output video node. It works only while pipeline can have no more than one
  * output node.
  */
@@ -1277,7 +1285,7 @@ static void __isp_subclk_update(struct isp_device *isp)
 		clk |= ISPCTRL_RSZ_CLK_EN;
 
 	/* NOTE: For CCDC & Preview submodules, we need to affect internal
-	 *       RAM aswell.
+	 *       RAM as well.
 	 */
 	if (isp->subclk_resources & OMAP3_ISP_SUBCLK_CCDC)
 		clk |= ISPCTRL_CCDC_CLK_EN | ISPCTRL_CCDC_RAM_EN;
@@ -1425,7 +1433,7 @@ static int isp_get_clocks(struct isp_device *isp)
  * Increment the reference count on the ISP. If the first reference is taken,
  * enable clocks and power-up all submodules.
  *
- * Return a pointer to the ISP device structure, or NULL if an error occured.
+ * Return a pointer to the ISP device structure, or NULL if an error occurred.
  */
 struct isp_device *omap3isp_get(struct isp_device *isp)
 {
@@ -1475,6 +1483,10 @@ void omap3isp_put(struct isp_device *isp)
 	if (--isp->ref_count == 0) {
 		isp_disable_interrupts(isp);
 		isp_save_ctx(isp);
+		if (isp->needs_reset) {
+			isp_reset(isp);
+			isp->needs_reset = false;
+		}
 		isp_disable_clocks(isp);
 	}
 	mutex_unlock(&isp->isp_mutex);
@@ -1726,7 +1738,7 @@ static int isp_register_entities(struct isp_device *isp)
 		goto done;
 
 	/* Register external entities */
-	for (subdevs = pdata->subdevs; subdevs->subdevs; ++subdevs) {
+	for (subdevs = pdata->subdevs; subdevs && subdevs->subdevs; ++subdevs) {
 		struct v4l2_subdev *sensor;
 		struct media_entity *input;
 		unsigned int flags;
@@ -1753,8 +1765,8 @@ static int isp_register_entities(struct isp_device *isp)
 		case ISP_INTERFACE_CSI2A_PHY2:
 			input = &isp->isp_csi2a.subdev.entity;
 			pad = CSI2_PAD_SINK;
-			flags = MEDIA_LINK_FLAG_IMMUTABLE
-			      | MEDIA_LINK_FLAG_ACTIVE;
+			flags = MEDIA_LNK_FL_IMMUTABLE
+			      | MEDIA_LNK_FL_ENABLED;
 			break;
 
 		case ISP_INTERFACE_CCP2B_PHY1:
@@ -1767,8 +1779,8 @@ static int isp_register_entities(struct isp_device *isp)
 		case ISP_INTERFACE_CSI2C_PHY1:
 			input = &isp->isp_csi2c.subdev.entity;
 			pad = CSI2_PAD_SINK;
-			flags = MEDIA_LINK_FLAG_IMMUTABLE
-			      | MEDIA_LINK_FLAG_ACTIVE;
+			flags = MEDIA_LNK_FL_IMMUTABLE
+			      | MEDIA_LNK_FL_ENABLED;
 			break;
 
 		default:
@@ -1897,21 +1909,21 @@ static int isp_initialize_modules(struct isp_device *isp)
 	ret = media_entity_create_link(
 			&isp->isp_ccdc.subdev.entity, CCDC_PAD_SOURCE_VP,
 			&isp->isp_aewb.subdev.entity, 0,
-			MEDIA_LINK_FLAG_ACTIVE | MEDIA_LINK_FLAG_IMMUTABLE);
+			MEDIA_LNK_FL_ENABLED | MEDIA_LNK_FL_IMMUTABLE);
 	if (ret < 0)
 		goto error_link;
 
 	ret = media_entity_create_link(
 			&isp->isp_ccdc.subdev.entity, CCDC_PAD_SOURCE_VP,
 			&isp->isp_af.subdev.entity, 0,
-			MEDIA_LINK_FLAG_ACTIVE | MEDIA_LINK_FLAG_IMMUTABLE);
+			MEDIA_LNK_FL_ENABLED | MEDIA_LNK_FL_IMMUTABLE);
 	if (ret < 0)
 		goto error_link;
 
 	ret = media_entity_create_link(
 			&isp->isp_ccdc.subdev.entity, CCDC_PAD_SOURCE_VP,
 			&isp->isp_hist.subdev.entity, 0,
-			MEDIA_LINK_FLAG_ACTIVE | MEDIA_LINK_FLAG_IMMUTABLE);
+			MEDIA_LNK_FL_ENABLED | MEDIA_LNK_FL_IMMUTABLE);
 	if (ret < 0)
 		goto error_link;
 

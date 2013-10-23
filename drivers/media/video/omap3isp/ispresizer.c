@@ -788,7 +788,7 @@ static void resizer_print_status(struct isp_res_device *res)
  * ratio will thus result in a resizing factor slightly larger than the
  * requested value.
  *
- * To accomodate that, and make sure the TRM equations are satisfied exactly, we
+ * To accommodate that, and make sure the TRM equations are satisfied exactly, we
  * compute the input crop rectangle as the last step.
  *
  * As if the situation wasn't complex enough, the maximum output width depends
@@ -1441,7 +1441,7 @@ static int resizer_enum_frame_size(struct v4l2_subdev *sd,
  * @sd    : pointer to v4l2 subdev structure
  * @fh    : V4L2 subdev file handle
  * @fmt   : pointer to v4l2 subdev format structure
- * return -EINVAL or zero on sucess
+ * return -EINVAL or zero on success
  */
 static int resizer_get_format(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh,
 			      struct v4l2_subdev_format *fmt)
@@ -1532,22 +1532,6 @@ static int resizer_init_formats(struct v4l2_subdev *sd,
 	return 0;
 }
 
-/* subdev core operations */
-static const struct v4l2_subdev_core_ops resizer_v4l2_core_ops = {
-	.queryctrl = v4l2_subdev_queryctrl,
-	.querymenu = v4l2_subdev_querymenu,
-	.g_ctrl = v4l2_subdev_g_ctrl,
-	.s_ctrl = v4l2_subdev_s_ctrl,
-	.g_ext_ctrls = v4l2_subdev_g_ext_ctrls,
-	.try_ext_ctrls = v4l2_subdev_try_ext_ctrls,
-	.s_ext_ctrls = v4l2_subdev_s_ext_ctrls,
-};
-
-/* subdev file operations */
-static const struct v4l2_subdev_file_ops resizer_v4l2_file_ops = {
-	.open = resizer_init_formats,
-};
-
 /* subdev video operations */
 static const struct v4l2_subdev_video_ops resizer_v4l2_video_ops = {
 	.s_stream = resizer_set_stream,
@@ -1565,12 +1549,14 @@ static const struct v4l2_subdev_pad_ops resizer_v4l2_pad_ops = {
 
 /* subdev operations */
 static const struct v4l2_subdev_ops resizer_v4l2_ops = {
-	.core = &resizer_v4l2_core_ops,
-	.file = &resizer_v4l2_file_ops,
 	.video = &resizer_v4l2_video_ops,
 	.pad = &resizer_v4l2_pad_ops,
 };
 
+/* subdev internal operations */
+static const struct v4l2_subdev_internal_ops resizer_v4l2_internal_ops = {
+	.open = resizer_init_formats,
+};
 
 /* -----------------------------------------------------------------------------
  * Media entity operations
@@ -1592,9 +1578,9 @@ static int resizer_link_setup(struct media_entity *entity,
 	struct isp_res_device *res = v4l2_get_subdevdata(sd);
 
 	switch (local->index | media_entity_type(remote->entity)) {
-	case RESZ_PAD_SINK | MEDIA_ENTITY_TYPE_NODE:
+	case RESZ_PAD_SINK | MEDIA_ENT_T_DEVNODE:
 		/* read from memory */
-		if (flags & MEDIA_LINK_FLAG_ACTIVE) {
+		if (flags & MEDIA_LNK_FL_ENABLED) {
 			if (res->input == RESIZER_INPUT_VP)
 				return -EBUSY;
 			res->input = RESIZER_INPUT_MEMORY;
@@ -1604,9 +1590,9 @@ static int resizer_link_setup(struct media_entity *entity,
 		}
 		break;
 
-	case RESZ_PAD_SINK | MEDIA_ENTITY_TYPE_SUBDEV:
+	case RESZ_PAD_SINK | MEDIA_ENT_T_V4L2_SUBDEV:
 		/* read from ccdc or previewer */
-		if (flags & MEDIA_LINK_FLAG_ACTIVE) {
+		if (flags & MEDIA_LNK_FL_ENABLED) {
 			if (res->input == RESIZER_INPUT_MEMORY)
 				return -EBUSY;
 			res->input = RESIZER_INPUT_VP;
@@ -1616,7 +1602,7 @@ static int resizer_link_setup(struct media_entity *entity,
 		}
 		break;
 
-	case RESZ_PAD_SOURCE | MEDIA_ENTITY_TYPE_NODE:
+	case RESZ_PAD_SOURCE | MEDIA_ENT_T_DEVNODE:
 		/* resizer always write to memory */
 		break;
 
@@ -1647,16 +1633,14 @@ static int resizer_init_entities(struct isp_res_device *res)
 	res->input = RESIZER_INPUT_NONE;
 
 	v4l2_subdev_init(sd, &resizer_v4l2_ops);
+	sd->internal_ops = &resizer_v4l2_internal_ops;
 	strlcpy(sd->name, "OMAP3 ISP resizer", sizeof(sd->name));
 	sd->grp_id = 1 << 16;	/* group ID for isp subdevs */
 	v4l2_set_subdevdata(sd, res);
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
-	v4l2_ctrl_handler_init(&res->ctrls, 1);
-	sd->ctrl_handler = &res->ctrls;
-
-	pads[RESZ_PAD_SINK].flags = MEDIA_PAD_FLAG_INPUT;
-	pads[RESZ_PAD_SOURCE].flags = MEDIA_PAD_FLAG_OUTPUT;
+	pads[RESZ_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
+	pads[RESZ_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 
 	me->ops = &resizer_media_ops;
 	ret = media_entity_init(me, RESZ_PADS_NUM, pads, 0);
@@ -1703,7 +1687,6 @@ void omap3isp_resizer_unregister_entities(struct isp_res_device *res)
 	media_entity_cleanup(&res->subdev.entity);
 
 	v4l2_device_unregister_subdev(&res->subdev);
-	v4l2_ctrl_handler_free(&res->ctrls);
 	omap3isp_video_unregister(&res->video_in);
 	omap3isp_video_unregister(&res->video_out);
 }

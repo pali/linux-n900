@@ -539,14 +539,6 @@ int omap3isp_stat_request_statistics(struct ispstat *stat,
 	data->frame_number = buf->frame_number;
 	data->buf_size = buf->buf_size;
 
-	/*
-	 * Deprecated. Number of new buffers is always equal to number of
-	 * queued events without error flag. By setting it to 0, userspace
-	 * won't try to request new buffer without receiving new event.
-	 * This field must go away in future.
-	 */
-	data->new_bufs = 0;
-
 	buf->empty = 1;
 	isp_stat_buf_release(stat);
 	mutex_unlock(&stat->ioctl_lock);
@@ -1042,7 +1034,7 @@ static int isp_stat_init_entities(struct ispstat *stat, const char *name,
 	subdev->nevents = STAT_NEVENTS;
 	v4l2_set_subdevdata(subdev, stat);
 
-	stat->pad.flags = MEDIA_PAD_FLAG_INPUT;
+	stat->pad.flags = MEDIA_PAD_FL_SINK;
 	me->ops = NULL;
 
 	return media_entity_init(me, 1, &stat->pad, 0);

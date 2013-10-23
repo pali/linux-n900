@@ -284,7 +284,8 @@ static int v4l2_open(struct inode *inode, struct file *filp)
 	/* and increase the device refcount */
 	video_get(vdev);
 	mutex_unlock(&videodev_lock);
-	if (vdev->v4l2_dev && vdev->v4l2_dev->mdev) {
+	if (vdev->v4l2_dev && vdev->v4l2_dev->mdev &&
+	    vdev->vfl_type != VFL_TYPE_SUBDEV) {
 		entity = media_entity_get(&vdev->entity);
 		if (!entity) {
 			ret = -EBUSY;
@@ -297,7 +298,8 @@ static int v4l2_open(struct inode *inode, struct file *filp)
 
 	/* decrease the refcount in case of an error */
 	if (ret) {
-		if (vdev->v4l2_dev && vdev->v4l2_dev->mdev)
+		if (vdev->v4l2_dev && vdev->v4l2_dev->mdev &&
+		    vdev->vfl_type != VFL_TYPE_SUBDEV)
 			media_entity_put(entity);
 		video_put(vdev);
 	}
@@ -313,7 +315,8 @@ static int v4l2_release(struct inode *inode, struct file *filp)
 	if (vdev->fops->release)
 		vdev->fops->release(filp);
 
-	if (vdev->v4l2_dev && vdev->v4l2_dev->mdev)
+	if (vdev->v4l2_dev && vdev->v4l2_dev->mdev &&
+	    vdev->vfl_type != VFL_TYPE_SUBDEV)
 		media_entity_put(&vdev->entity);
 
 	/* decrease the refcount unconditionally since the release()
@@ -467,8 +470,12 @@ int __video_register_device(struct video_device *vdev, int type, int nr,
 
 	vdev->vfl_type = type;
 	vdev->cdev = NULL;
-	if (vdev->v4l2_dev && vdev->v4l2_dev->dev)
-		vdev->parent = vdev->v4l2_dev->dev;
+	if (vdev->v4l2_dev) {
+		if (vdev->v4l2_dev->dev)
+			vdev->parent = vdev->v4l2_dev->dev;
+		if (vdev->ctrl_handler == NULL)
+			vdev->ctrl_handler = vdev->v4l2_dev->ctrl_handler;
+	}
 
 	/* Part 2: find a free minor, device node number and device index. */
 #ifdef CONFIG_VIDEO_FIXED_MINOR_RANGES
@@ -574,15 +581,18 @@ int __video_register_device(struct video_device *vdev, int type, int nr,
 			name_base, nr, video_device_node_name(vdev));
 
 	/* Part 5: Register the entity. */
-	if (vdev->v4l2_dev && vdev->v4l2_dev->mdev) {
-		vdev->entity.type = MEDIA_ENTITY_TYPE_NODE_V4L;
+	if (vdev->v4l2_dev && vdev->v4l2_dev->mdev &&
+	    vdev->vfl_type != VFL_TYPE_SUBDEV) {
+		vdev->entity.type = MEDIA_ENT_T_DEVNODE_V4L;
 		vdev->entity.name = vdev->name;
 		vdev->entity.v4l.major = VIDEO_MAJOR;
 		vdev->entity.v4l.minor = vdev->minor;
 		ret = media_device_register_entity(vdev->v4l2_dev->mdev,
 			&vdev->entity);
 		if (ret < 0)
-			printk(KERN_ERR "error\n"); /* TODO */
+			printk(KERN_WARNING
+			       "%s: media_device_register_entity failed\n",
+			       __func__);
 	}
 
 	/* Part 6: Activate this minor. The char device can now be used. */
@@ -618,7 +628,8 @@ void video_unregister_device(struct video_device *vdev)
 	if (!vdev || !video_is_registered(vdev))
 		return;
 
-	if (vdev->v4l2_dev && vdev->v4l2_dev->mdev)
+	if (vdev->v4l2_dev && vdev->v4l2_dev->mdev &&
+	    vdev->vfl_type != VFL_TYPE_SUBDEV)
 		media_device_unregister_entity(&vdev->entity);
 
 	mutex_lock(&videodev_lock);

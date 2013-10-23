@@ -31,7 +31,6 @@
 #include <linux/dma-mapping.h>
 #include <linux/mm.h>
 #include <linux/sched.h>
-#include <media/v4l2-ctrls.h>
 #include <media/v4l2-event.h>
 
 #include "isp.h"
@@ -44,6 +43,12 @@ __ccdc_get_format(struct isp_ccdc_device *ccdc, struct v4l2_subdev_fh *fh,
 
 static const unsigned int ccdc_fmts[] = {
 	V4L2_MBUS_FMT_Y8_1X8,
+	V4L2_MBUS_FMT_Y10_1X10,
+	V4L2_MBUS_FMT_Y12_1X12,
+	V4L2_MBUS_FMT_SGRBG8_1X8,
+	V4L2_MBUS_FMT_SRGGB8_1X8,
+	V4L2_MBUS_FMT_SBGGR8_1X8,
+	V4L2_MBUS_FMT_SGBRG8_1X8,
 	V4L2_MBUS_FMT_SGRBG10_1X10,
 	V4L2_MBUS_FMT_SRGGB10_1X10,
 	V4L2_MBUS_FMT_SBGGR10_1X10,
@@ -1111,21 +1116,40 @@ static void ccdc_configure(struct isp_ccdc_device *ccdc)
 	struct isp_parallel_platform_data *pdata = NULL;
 	struct v4l2_subdev *sensor;
 	struct v4l2_mbus_framefmt *format;
+	const struct isp_format_info *fmt_info;
+	struct v4l2_subdev_format fmt_src;
+	unsigned int depth_out;
+	unsigned int depth_in = 0;
 	struct media_pad *pad;
 	unsigned long flags;
+	unsigned int shift;
 	u32 syn_mode;
 	u32 ccdc_pattern;
 
-	if (ccdc->input == CCDC_INPUT_PARALLEL) {
-		pad = media_entity_remote_source(&ccdc->pads[CCDC_PAD_SINK]);
-		sensor = media_entity_to_v4l2_subdev(pad->entity);
+	pad = media_entity_remote_source(&ccdc->pads[CCDC_PAD_SINK]);
+	sensor = media_entity_to_v4l2_subdev(pad->entity);
+	if (ccdc->input == CCDC_INPUT_PARALLEL)
 		pdata = &((struct isp_v4l2_subdevs_group *)sensor->host_priv)
 			->bus.parallel;
+
+	/* Compute shift value for lane shifter to configure the bridge. */
+	fmt_src.pad = pad->index;
+	fmt_src.which = V4L2_SUBDEV_FORMAT_ACTIVE;
+	if (!v4l2_subdev_call(sensor, pad, get_fmt, NULL, &fmt_src)) {
+		fmt_info = omap3isp_video_format_info(fmt_src.format.code);
+		depth_in = fmt_info->bpp;
 	}
 
-	omap3isp_configure_bridge(isp, ccdc->input, pdata);
+	fmt_info = omap3isp_video_format_info
+		(isp->isp_ccdc.formats[CCDC_PAD_SINK].code);
+	depth_out = fmt_info->bpp;
 
-	ccdc->syncif.datsz = pdata ? pdata->width : 10;
+	shift = depth_in - depth_out;
+	omap3isp_configure_bridge(isp, ccdc->input, pdata, shift);
+
+	ccdc->syncif.datsz = depth_out;
+	ccdc->syncif.hdpol = pdata ? pdata->hs_pol : 0;
+	ccdc->syncif.vdpol = pdata ? pdata->vs_pol : 0;
 	ccdc_config_sync_if(ccdc, &ccdc->syncif);
 
 	/* CCDC_PAD_SINK */
@@ -1992,21 +2016,9 @@ static int ccdc_init_formats(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 
 /* V4L2 subdev core operations */
 static const struct v4l2_subdev_core_ops ccdc_v4l2_core_ops = {
-	.queryctrl = v4l2_subdev_queryctrl,
-	.querymenu = v4l2_subdev_querymenu,
-	.g_ctrl = v4l2_subdev_g_ctrl,
-	.s_ctrl = v4l2_subdev_s_ctrl,
-	.g_ext_ctrls = v4l2_subdev_g_ext_ctrls,
-	.try_ext_ctrls = v4l2_subdev_try_ext_ctrls,
-	.s_ext_ctrls = v4l2_subdev_s_ext_ctrls,
 	.ioctl = ccdc_ioctl,
 	.subscribe_event = ccdc_subscribe_event,
 	.unsubscribe_event = ccdc_unsubscribe_event,
-};
-
-/* V4L2 subdev file operations */
-static const struct v4l2_subdev_file_ops ccdc_v4l2_file_ops = {
-	.open = ccdc_init_formats,
 };
 
 /* V4L2 subdev video operations */
@@ -2025,9 +2037,13 @@ static const struct v4l2_subdev_pad_ops ccdc_v4l2_pad_ops = {
 /* V4L2 subdev operations */
 static const struct v4l2_subdev_ops ccdc_v4l2_ops = {
 	.core = &ccdc_v4l2_core_ops,
-	.file = &ccdc_v4l2_file_ops,
 	.video = &ccdc_v4l2_video_ops,
 	.pad = &ccdc_v4l2_pad_ops,
+};
+
+/* V4L2 subdev internal operations */
+static const struct v4l2_subdev_internal_ops ccdc_v4l2_internal_ops = {
+	.open = ccdc_init_formats,
 };
 
 /* -----------------------------------------------------------------------------
@@ -2052,11 +2068,11 @@ static int ccdc_link_setup(struct media_entity *entity,
 	struct isp_device *isp = to_isp_device(ccdc);
 
 	switch (local->index | media_entity_type(remote->entity)) {
-	case CCDC_PAD_SINK | MEDIA_ENTITY_TYPE_SUBDEV:
+	case CCDC_PAD_SINK | MEDIA_ENT_T_V4L2_SUBDEV:
 		/* Read from the sensor (parallel interface), CCP2, CSI2a or
 		 * CSI2c.
 		 */
-		if (!(flags & MEDIA_LINK_FLAG_ACTIVE)) {
+		if (!(flags & MEDIA_LNK_FL_ENABLED)) {
 			ccdc->input = CCDC_INPUT_NONE;
 			break;
 		}
@@ -2080,11 +2096,11 @@ static int ccdc_link_setup(struct media_entity *entity,
 	 * Revisit this when it will be implemented, and return -EBUSY for now.
 	 */
 
-	case CCDC_PAD_SOURCE_VP | MEDIA_ENTITY_TYPE_SUBDEV:
+	case CCDC_PAD_SOURCE_VP | MEDIA_ENT_T_V4L2_SUBDEV:
 		/* Write to preview engine, histogram and H3A. When none of
 		 * those links are active, the video port can be disabled.
 		 */
-		if (flags & MEDIA_LINK_FLAG_ACTIVE) {
+		if (flags & MEDIA_LNK_FL_ENABLED) {
 			if (ccdc->output & ~CCDC_OUTPUT_PREVIEW)
 				return -EBUSY;
 			ccdc->output |= CCDC_OUTPUT_PREVIEW;
@@ -2093,9 +2109,9 @@ static int ccdc_link_setup(struct media_entity *entity,
 		}
 		break;
 
-	case CCDC_PAD_SOURCE_OF | MEDIA_ENTITY_TYPE_NODE:
+	case CCDC_PAD_SOURCE_OF | MEDIA_ENT_T_DEVNODE:
 		/* Write to memory */
-		if (flags & MEDIA_LINK_FLAG_ACTIVE) {
+		if (flags & MEDIA_LNK_FL_ENABLED) {
 			if (ccdc->output & ~CCDC_OUTPUT_MEMORY)
 				return -EBUSY;
 			ccdc->output |= CCDC_OUTPUT_MEMORY;
@@ -2104,9 +2120,9 @@ static int ccdc_link_setup(struct media_entity *entity,
 		}
 		break;
 
-	case CCDC_PAD_SOURCE_OF | MEDIA_ENTITY_TYPE_SUBDEV:
+	case CCDC_PAD_SOURCE_OF | MEDIA_ENT_T_V4L2_SUBDEV:
 		/* Write to resizer */
-		if (flags & MEDIA_LINK_FLAG_ACTIVE) {
+		if (flags & MEDIA_LNK_FL_ENABLED) {
 			if (ccdc->output & ~CCDC_OUTPUT_RESIZER)
 				return -EBUSY;
 			ccdc->output |= CCDC_OUTPUT_RESIZER;
@@ -2143,18 +2159,16 @@ static int ccdc_init_entities(struct isp_ccdc_device *ccdc)
 	ccdc->input = CCDC_INPUT_NONE;
 
 	v4l2_subdev_init(sd, &ccdc_v4l2_ops);
+	sd->internal_ops = &ccdc_v4l2_internal_ops;
 	strlcpy(sd->name, "OMAP3 ISP CCDC", sizeof(sd->name));
 	sd->grp_id = 1 << 16;	/* group ID for isp subdevs */
 	v4l2_set_subdevdata(sd, ccdc);
 	sd->flags |= V4L2_SUBDEV_FL_HAS_EVENTS | V4L2_SUBDEV_FL_HAS_DEVNODE;
 	sd->nevents = OMAP3ISP_CCDC_NEVENTS;
 
-	v4l2_ctrl_handler_init(&ccdc->ctrls, 1);
-	sd->ctrl_handler = &ccdc->ctrls;
-
-	pads[CCDC_PAD_SINK].flags = MEDIA_PAD_FLAG_INPUT;
-	pads[CCDC_PAD_SOURCE_VP].flags = MEDIA_PAD_FLAG_OUTPUT;
-	pads[CCDC_PAD_SOURCE_OF].flags = MEDIA_PAD_FLAG_OUTPUT;
+	pads[CCDC_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
+	pads[CCDC_PAD_SOURCE_VP].flags = MEDIA_PAD_FL_SOURCE;
+	pads[CCDC_PAD_SOURCE_OF].flags = MEDIA_PAD_FL_SOURCE;
 
 	me->ops = &ccdc_media_ops;
 	ret = media_entity_init(me, CCDC_PADS_NUM, pads, 0);
@@ -2187,7 +2201,6 @@ void omap3isp_ccdc_unregister_entities(struct isp_ccdc_device *ccdc)
 	media_entity_cleanup(&ccdc->subdev.entity);
 
 	v4l2_device_unregister_subdev(&ccdc->subdev);
-	v4l2_ctrl_handler_free(&ccdc->ctrls);
 	omap3isp_video_unregister(&ccdc->video_out);
 }
 
@@ -2246,8 +2259,6 @@ int omap3isp_ccdc_init(struct isp_device *isp)
 	ccdc->syncif.fldout = 0;
 	ccdc->syncif.fldpol = 0;
 	ccdc->syncif.fldstat = 0;
-	ccdc->syncif.hdpol = 0;
-	ccdc->syncif.vdpol = 0;
 
 	ccdc->clamp.oblen = 0;
 	ccdc->clamp.dcsubval = 0;

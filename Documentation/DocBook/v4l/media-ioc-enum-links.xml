@@ -125,12 +125,12 @@
         <colspec colname="c2"/>
 	<tbody valign="top">
 	  <row>
-	    <entry><constant>MEDIA_PAD_FLAG_INPUT</constant></entry>
+	    <entry><constant>MEDIA_PAD_FL_SINK</constant></entry>
 	    <entry>Input pad, relative to the entity. Input pads sink data and
 	    are targets of links.</entry>
 	  </row>
 	  <row>
-	    <entry><constant>MEDIA_PAD_FLAG_OUTPUT</constant></entry>
+	    <entry><constant>MEDIA_PAD_FL_SOURCE</constant></entry>
 	    <entry>Output pad, relative to the entity. Output pads source data
 	    and are origins of links.</entry>
 	  </row>
@@ -139,7 +139,7 @@
     </table>
 
     <table pgwide="1" frame="none" id="media-link-desc">
-      <title>struct <structname>media_links_enum</structname></title>
+      <title>struct <structname>media_links_desc</structname></title>
       <tgroup cols="3">
         &cs-str;
 	<tbody valign="top">
@@ -169,26 +169,26 @@
         <colspec colname="c2"/>
 	<tbody valign="top">
 	  <row>
-	    <entry><constant>MEDIA_LINK_FLAG_ENABLED</constant></entry>
+	    <entry><constant>MEDIA_LNK_FL_ENABLED</constant></entry>
 	    <entry>The link is enabled and can be used to transfer media data.
 	    When two or more links target a sink pad, only one of them can be
 	    enabled at a time.</entry>
 	  </row>
 	  <row>
-	    <entry><constant>MEDIA_LINK_FLAG_IMMUTABLE</constant></entry>
+	    <entry><constant>MEDIA_LNK_FL_IMMUTABLE</constant></entry>
 	    <entry>The link enabled state can't be modified at runtime. An
 	    immutable link is always enabled.</entry>
 	  </row>
 	  <row>
-	    <entry><constant>MEDIA_LINK_FLAG_DYNAMIC</constant></entry>
+	    <entry><constant>MEDIA_LNK_FL_DYNAMIC</constant></entry>
 	    <entry>The link enabled state can be modified during streaming. This
 	    flag is set by drivers and is read-only for applications.</entry>
 	  </row>
 	</tbody>
       </tgroup>
     </table>
-    <para>One and only one of <constant>MEDIA_PAD_FLAG_INPUT</constant> and
-    <constant>MEDIA_PAD_FLAG_OUTPUT</constant> must be set for every pad.</para>
+    <para>One and only one of <constant>MEDIA_PAD_FL_SINK</constant> and
+    <constant>MEDIA_PAD_FL_SOURCE</constant> must be set for every pad.</para>
   </refsect1>
 
   <refsect1>

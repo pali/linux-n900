@@ -60,9 +60,9 @@ struct media_device {
 	struct device *dev;
 	struct media_devnode devnode;
 
-	u8 model[32];
-	u8 serial[40];
-	u8 bus_info[32];
+	char model[32];
+	char serial[40];
+	char bus_info[32];
 	u32 hw_revision;
 	u32 driver_version;
 

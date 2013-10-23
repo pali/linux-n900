@@ -209,7 +209,8 @@ static void csi2_set_outaddr(struct isp_csi2_device *csi2, u32 addr)
 	struct isp_device *isp = csi2->isp;
 	struct isp_csi2_ctx_cfg *ctx = &csi2->contexts[0];
 
-	ctx->ping_addr = ctx->pong_addr = addr;
+	ctx->ping_addr = addr;
+	ctx->pong_addr = addr;
 	isp_reg_writel(isp, ctx->ping_addr,
 		       csi2->regs1, ISPCSI2_CTX_DAT_PING_ADDR(ctx->ctxnum));
 	isp_reg_writel(isp, ctx->pong_addr,
@@ -960,7 +961,7 @@ static int csi2_enum_frame_size(struct v4l2_subdev *sd,
  * @sd : pointer to v4l2 subdev structure
  * @fh : V4L2 subdev file handle
  * @fmt: pointer to v4l2 subdev format structure
- * return -EINVAL or zero on sucess
+ * return -EINVAL or zero on success
  */
 static int csi2_get_format(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh,
 			   struct v4l2_subdev_format *fmt)
@@ -1091,22 +1092,6 @@ static int csi2_set_stream(struct v4l2_subdev *sd, int enable)
 	return 0;
 }
 
-/* subdev core operations */
-static const struct v4l2_subdev_core_ops csi2_core_ops = {
-	.queryctrl = v4l2_subdev_queryctrl,
-	.querymenu = v4l2_subdev_querymenu,
-	.g_ctrl = v4l2_subdev_g_ctrl,
-	.s_ctrl = v4l2_subdev_s_ctrl,
-	.g_ext_ctrls = v4l2_subdev_g_ext_ctrls,
-	.try_ext_ctrls = v4l2_subdev_try_ext_ctrls,
-	.s_ext_ctrls = v4l2_subdev_s_ext_ctrls,
-};
-
-/* subdev file operations */
-static const struct v4l2_subdev_file_ops csi2_file_ops = {
-	.open = csi2_init_formats,
-};
-
 /* subdev video operations */
 static const struct v4l2_subdev_video_ops csi2_video_ops = {
 	.s_stream = csi2_set_stream,
@@ -1122,10 +1107,13 @@ static const struct v4l2_subdev_pad_ops csi2_pad_ops = {
 
 /* subdev operations */
 static const struct v4l2_subdev_ops csi2_ops = {
-	.core = &csi2_core_ops,
-	.file = &csi2_file_ops,
 	.video = &csi2_video_ops,
 	.pad = &csi2_pad_ops,
+};
+
+/* subdev internal operations */
+static const struct v4l2_subdev_internal_ops csi2_internal_ops = {
+	.open = csi2_init_formats,
 };
 
 /* -----------------------------------------------------------------------------
@@ -1154,8 +1142,8 @@ static int csi2_link_setup(struct media_entity *entity,
 	 */
 
 	switch (local->index | media_entity_type(remote->entity)) {
-	case CSI2_PAD_SOURCE | MEDIA_ENTITY_TYPE_NODE:
-		if (flags & MEDIA_LINK_FLAG_ACTIVE) {
+	case CSI2_PAD_SOURCE | MEDIA_ENT_T_DEVNODE:
+		if (flags & MEDIA_LNK_FL_ENABLED) {
 			if (csi2->output & ~CSI2_OUTPUT_MEMORY)
 				return -EBUSY;
 			csi2->output |= CSI2_OUTPUT_MEMORY;
@@ -1164,8 +1152,8 @@ static int csi2_link_setup(struct media_entity *entity,
 		}
 		break;
 
-	case CSI2_PAD_SOURCE | MEDIA_ENTITY_TYPE_SUBDEV:
-		if (flags & MEDIA_LINK_FLAG_ACTIVE) {
+	case CSI2_PAD_SOURCE | MEDIA_ENT_T_V4L2_SUBDEV:
+		if (flags & MEDIA_LNK_FL_ENABLED) {
 			if (csi2->output & ~CSI2_OUTPUT_CCDC)
 				return -EBUSY;
 			csi2->output |= CSI2_OUTPUT_CCDC;
@@ -1204,17 +1192,15 @@ static int csi2_init_entities(struct isp_csi2_device *csi2)
 	int ret;
 
 	v4l2_subdev_init(sd, &csi2_ops);
+	sd->internal_ops = &csi2_internal_ops;
 	strlcpy(sd->name, "OMAP3 ISP CSI2a", sizeof(sd->name));
 
 	sd->grp_id = 1 << 16;	/* group ID for isp subdevs */
 	v4l2_set_subdevdata(sd, csi2);
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
-	v4l2_ctrl_handler_init(&csi2->ctrls, 1);
-	sd->ctrl_handler = &csi2->ctrls;
-
-	pads[CSI2_PAD_SOURCE].flags = MEDIA_PAD_FLAG_OUTPUT;
-	pads[CSI2_PAD_SINK].flags = MEDIA_PAD_FLAG_INPUT;
+	pads[CSI2_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
+	pads[CSI2_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
 
 	me->ops = &csi2_media_ops;
 	ret = media_entity_init(me, CSI2_PADS_NUM, pads, 0);
@@ -1250,7 +1236,6 @@ void omap3isp_csi2_unregister_entities(struct isp_csi2_device *csi2)
 	media_entity_cleanup(&csi2->subdev.entity);
 
 	v4l2_device_unregister_subdev(&csi2->subdev);
-	v4l2_ctrl_handler_free(&csi2->ctrls);
 	omap3isp_video_unregister(&csi2->video_out);
 }
 

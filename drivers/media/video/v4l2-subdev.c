@@ -95,9 +95,11 @@ static int subdev_open(struct file *file)
 		}
 	}
 
-	ret = v4l2_subdev_call(sd, file, open, subdev_fh);
-	if (ret < 0 && ret != -ENOIOCTLCMD)
-		goto err;
+	if (sd->internal_ops && sd->internal_ops->open) {
+		ret = sd->internal_ops->open(sd, subdev_fh);
+		if (ret < 0)
+			goto err;
+	}
 
 	return 0;
 
@@ -119,7 +121,8 @@ static int subdev_close(struct file *file)
 	struct v4l2_fh *vfh = file->private_data;
 	struct v4l2_subdev_fh *subdev_fh = to_v4l2_subdev_fh(vfh);
 
-	v4l2_subdev_call(sd, file, close, subdev_fh);
+	if (sd->internal_ops && sd->internal_ops->close)
+		sd->internal_ops->close(sd, subdev_fh);
 	if (sd->v4l2_dev->mdev)
 		media_entity_put(&sd->entity);
 
@@ -141,25 +144,25 @@ static long subdev_do_ioctl(struct file *file, unsigned int cmd, void *arg)
 
 	switch (cmd) {
 	case VIDIOC_QUERYCTRL:
-		return v4l2_subdev_queryctrl(sd, arg);
+		return v4l2_queryctrl(sd->ctrl_handler, arg);
 
 	case VIDIOC_QUERYMENU:
-		return v4l2_subdev_querymenu(sd, arg);
+		return v4l2_querymenu(sd->ctrl_handler, arg);
 
 	case VIDIOC_G_CTRL:
-		return v4l2_subdev_g_ctrl(sd, arg);
+		return v4l2_g_ctrl(sd->ctrl_handler, arg);
 
 	case VIDIOC_S_CTRL:
-		return v4l2_subdev_s_ctrl(sd, arg);
+		return v4l2_s_ctrl(sd->ctrl_handler, arg);
 
 	case VIDIOC_G_EXT_CTRLS:
-		return v4l2_subdev_g_ext_ctrls(sd, arg);
+		return v4l2_g_ext_ctrls(sd->ctrl_handler, arg);
 
 	case VIDIOC_S_EXT_CTRLS:
-		return v4l2_subdev_s_ext_ctrls(sd, arg);
+		return v4l2_s_ext_ctrls(sd->ctrl_handler, arg);
 
 	case VIDIOC_TRY_EXT_CTRLS:
-		return v4l2_subdev_try_ext_ctrls(sd, arg);
+		return v4l2_try_ext_ctrls(sd->ctrl_handler, arg);
 
 	case VIDIOC_DQEVENT:
 		if (!(sd->flags & V4L2_SUBDEV_FL_HAS_EVENTS))
@@ -311,17 +314,6 @@ void v4l2_subdev_init(struct v4l2_subdev *sd, const struct v4l2_subdev_ops *ops)
 	sd->dev_priv = NULL;
 	sd->host_priv = NULL;
 	sd->entity.name = sd->name;
-	sd->entity.type = MEDIA_ENTITY_TYPE_SUBDEV;
+	sd->entity.type = MEDIA_ENT_T_V4L2_SUBDEV;
 }
 EXPORT_SYMBOL(v4l2_subdev_init);
-
-int v4l2_subdev_set_power(struct media_entity *entity, int power)
-{
-	struct v4l2_subdev *sd = media_entity_to_v4l2_subdev(entity);
-
-	dev_dbg(entity->parent->dev,
-		"%s power%s\n", entity->name, power ? "on" : "off");
-
-	return v4l2_subdev_call(sd, core, s_power, power);
-}
-EXPORT_SYMBOL_GPL(v4l2_subdev_set_power);

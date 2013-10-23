@@ -136,12 +136,11 @@ static struct platform_device omap3isp_device = {
 	.resource	= omap3isp_resources,
 };
 
-int omap3_init_camera(void *pdata)
+int omap3_init_camera(struct isp_platform_data *pdata)
 {
 	omap3isp_device.dev.platform_data = pdata;
 	return platform_device_register(&omap3isp_device);
 }
-EXPORT_SYMBOL_GPL(omap3_init_camera);
 
 static inline void omap_init_camera(void)
 {

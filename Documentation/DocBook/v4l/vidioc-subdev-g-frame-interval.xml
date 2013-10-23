@@ -50,6 +50,12 @@
   <refsect1>
     <title>Description</title>
 
+    <note>
+      <title>Experimental</title>
+      <para>This is an <link linkend="experimental">experimental</link>
+      interface and may change in the future.</para>
+    </note>
+
     <para>These ioctls are used to get and set the frame interval at specific
     subdev pads in the image pipeline. The frame interval only makes sense for
     sub-devices that can control the frame period on their own. This includes,
@@ -99,7 +105,7 @@
 	  </row>
 	  <row>
 	    <entry>__u32</entry>
-	    <entry><structfield>reserved</structfield>[5]</entry>
+	    <entry><structfield>reserved</structfield>[9]</entry>
 	    <entry>Reserved for future extensions. Applications and drivers must
 	    set the array to zero.</entry>
 	  </row>

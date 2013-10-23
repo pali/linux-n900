@@ -1505,11 +1505,6 @@ static const struct v4l2_subdev_core_ops smiapp_core_ops = {
 	.s_power = smiapp_set_power,
 };
 
-static const struct v4l2_subdev_file_ops smiapp_file_ops = {
-	.open = smiapp_open,
-	.close = smiapp_close,
-};
-
 static const struct v4l2_subdev_pad_ops smiapp_pad_ops = {
 	.enum_mbus_code = smiapp_enum_mbus_code,
 	.enum_frame_size = smiapp_enum_frame_size,
@@ -1525,7 +1520,6 @@ static const struct v4l2_subdev_sensor_ops smiapp_sensor_ops = {
 
 static const struct v4l2_subdev_ops smiapp_ops = {
 	.core = &smiapp_core_ops,
-	.file = &smiapp_file_ops,
 	.video = &smiapp_video_ops,
 	.pad = &smiapp_pad_ops,
 	.sensor = &smiapp_sensor_ops,
@@ -1533,6 +1527,8 @@ static const struct v4l2_subdev_ops smiapp_ops = {
 
 static const struct v4l2_subdev_internal_ops smiapp_internal_ops = {
 	.registered = smiapp_registered,
+	.open = smiapp_open,
+	.close = smiapp_close,
 };
 
 /* -----------------------------------------------------------------------------
@@ -1609,7 +1605,7 @@ static int smiapp_probe(struct i2c_client *client,
 	sensor->subdev.internal_ops = &smiapp_internal_ops;
 	sensor->subdev.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
-	sensor->pad.flags = MEDIA_PAD_FLAG_OUTPUT;
+	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
 	rval = media_entity_init(&sensor->subdev.entity, 1, &sensor->pad, 0);
 	if (rval < 0)
 		kfree(sensor);

@@ -29,7 +29,6 @@
 
 #include <linux/types.h>
 #include <linux/videodev2.h>
-#include <media/v4l2-ctrls.h>
 
 struct isp_csiphy;
 
@@ -133,8 +132,6 @@ struct isp_csi2_device {
 	struct v4l2_subdev subdev;
 	struct media_pad pads[CSI2_PADS_NUM];
 	struct v4l2_mbus_framefmt formats[CSI2_PADS_NUM];
-
-	struct v4l2_ctrl_handler ctrls;
 
 	struct isp_video video_out;
 	struct isp_device *isp;

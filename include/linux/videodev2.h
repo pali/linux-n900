@@ -168,6 +168,7 @@ enum v4l2_ctrl_type {
 	V4L2_CTRL_TYPE_INTEGER64     = 5,
 	V4L2_CTRL_TYPE_CTRL_CLASS    = 6,
 	V4L2_CTRL_TYPE_STRING        = 7,
+	V4L2_CTRL_TYPE_BITMASK       = 8,
 };
 
 enum v4l2_tuner_type {
@@ -295,6 +296,7 @@ struct v4l2_pix_format {
 /* Grey formats */
 #define V4L2_PIX_FMT_GREY    v4l2_fourcc('G', 'R', 'E', 'Y') /*  8  Greyscale     */
 #define V4L2_PIX_FMT_Y10     v4l2_fourcc('Y', '1', '0', ' ') /* 10  Greyscale     */
+#define V4L2_PIX_FMT_Y12     v4l2_fourcc('Y', '1', '2', ' ') /* 12  Greyscale     */
 #define V4L2_PIX_FMT_Y16     v4l2_fourcc('Y', '1', '6', ' ') /* 16  Greyscale     */
 
 /* Palette formats */
@@ -831,6 +833,7 @@ struct v4l2_ext_controls {
 #define V4L2_CTRL_CLASS_CAMERA 0x009a0000	/* Camera class controls */
 #define V4L2_CTRL_CLASS_FM_TX 0x009b0000	/* FM Modulator control class */
 #define V4L2_CTRL_CLASS_MODE 0x009b0000		/* Sensor mode information */
+#define V4L2_CTRL_CLASS_FLASH 0x009c0000	/* Camera flash controls */
 
 #define V4L2_CTRL_ID_MASK      	  (0x0fffffff)
 #define V4L2_CTRL_ID2CLASS(id)    ((id) & 0x0fff0000UL)
@@ -1214,6 +1217,43 @@ enum v4l2_preemphasis {
 #define V4L2_CID_MODE_PIXELCLOCK		(V4L2_CID_MODE_CLASS_BASE+5)
 #define V4L2_CID_MODE_SENSITIVITY		(V4L2_CID_MODE_CLASS_BASE+6)
 #define V4L2_CID_MODE_OPSYSCLOCK		(V4L2_CID_MODE_CLASS_BASE+7)
+
+/* Flash and privacy (indicator) light controls */
+#define V4L2_CID_FLASH_CLASS_BASE		(V4L2_CTRL_CLASS_FLASH | 0x900)
+#define V4L2_CID_FLASH_CLASS			(V4L2_CTRL_CLASS_FLASH | 1)
+
+#define V4L2_CID_FLASH_LED_MODE			(V4L2_CID_FLASH_CLASS_BASE + 1)
+enum v4l2_flash_led_mode {
+	V4L2_FLASH_LED_MODE_NONE,
+	V4L2_FLASH_LED_MODE_FLASH,
+	V4L2_FLASH_LED_MODE_TORCH,
+};
+
+#define V4L2_CID_FLASH_STROBE_SOURCE		(V4L2_CID_FLASH_CLASS_BASE + 2)
+enum v4l2_flash_strobe_source {
+	V4L2_FLASH_STROBE_SOURCE_SOFTWARE,
+	V4L2_FLASH_STROBE_SOURCE_EXTERNAL,
+};
+
+#define V4L2_CID_FLASH_STROBE			(V4L2_CID_FLASH_CLASS_BASE + 3)
+#define V4L2_CID_FLASH_STROBE_STOP		(V4L2_CID_FLASH_CLASS_BASE + 4)
+#define V4L2_CID_FLASH_STROBE_STATUS		(V4L2_CID_FLASH_CLASS_BASE + 5)
+
+#define V4L2_CID_FLASH_TIMEOUT			(V4L2_CID_FLASH_CLASS_BASE + 6)
+#define V4L2_CID_FLASH_INTENSITY		(V4L2_CID_FLASH_CLASS_BASE + 7)
+#define V4L2_CID_FLASH_TORCH_INTENSITY		(V4L2_CID_FLASH_CLASS_BASE + 8)
+#define V4L2_CID_FLASH_INDICATOR_INTENSITY	(V4L2_CID_FLASH_CLASS_BASE + 9)
+
+#define V4L2_CID_FLASH_FAULT			(V4L2_CID_FLASH_CLASS_BASE + 10)
+#define V4L2_FLASH_FAULT_OVER_VOLTAGE		(1 << 0)
+#define V4L2_FLASH_FAULT_TIMEOUT		(1 << 1)
+#define V4L2_FLASH_FAULT_OVER_TEMPERATURE	(1 << 2)
+#define V4L2_FLASH_FAULT_SHORT_CIRCUIT		(1 << 3)
+#define V4L2_FLASH_FAULT_OVER_CURRENT		(1 << 4)
+#define V4L2_FLASH_FAULT_INDICATOR		(1 << 5)
+
+#define V4L2_CID_FLASH_CHARGE			(V4L2_CID_FLASH_CLASS_BASE + 11)
+#define V4L2_CID_FLASH_READY			(V4L2_CID_FLASH_CLASS_BASE + 12)
 
 /*
  *	T U N I N G

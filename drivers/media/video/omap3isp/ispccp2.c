@@ -30,6 +30,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/uaccess.h>
+#include <linux/regulator/consumer.h>
 
 #include "isp.h"
 #include "ispreg.h"
@@ -149,6 +150,9 @@ static void ccp2_if_enable(struct isp_ccp2_device *ccp2, u8 enable)
 	struct isp_pipeline *pipe = to_isp_pipeline(&ccp2->subdev.entity);
 	int i;
 
+	if (enable && ccp2->vdds_csib)
+		regulator_enable(ccp2->vdds_csib);
+
 	/* Enable/Disable all the LCx channels */
 	for (i = 0; i < CCP2_LCx_CHANS_NUM; i++)
 		isp_reg_clr_set(isp, OMAP3_ISP_IOMEM_CCP2, ISPCCP2_LCx_CTRL(i),
@@ -172,6 +176,9 @@ static void ccp2_if_enable(struct isp_ccp2_device *ccp2, u8 enable)
 				    ISPCCP2_LC01_IRQENABLE,
 				    ISPCCP2_LC01_IRQSTATUS_LC0_FS_IRQ);
 	}
+
+	if (!enable && ccp2->vdds_csib)
+		regulator_disable(ccp2->vdds_csib);
 }
 
 /*
@@ -757,7 +764,7 @@ static int ccp2_enum_frame_size(struct v4l2_subdev *sd,
  * @sd    : pointer to v4l2 subdev structure
  * @fh    : V4L2 subdev file handle
  * @fmt   : pointer to v4l2 subdev format structure
- * return -EINVAL or zero on sucess
+ * return -EINVAL or zero on success
  */
 static int ccp2_get_format(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh,
 			      struct v4l2_subdev_format *fmt)
@@ -900,22 +907,6 @@ static int ccp2_s_stream(struct v4l2_subdev *sd, int enable)
 	return 0;
 }
 
-/* subdev core operations */
-static const struct v4l2_subdev_core_ops ccp2_sd_core_ops = {
-	.queryctrl = v4l2_subdev_queryctrl,
-	.querymenu = v4l2_subdev_querymenu,
-	.g_ctrl = v4l2_subdev_g_ctrl,
-	.s_ctrl = v4l2_subdev_s_ctrl,
-	.g_ext_ctrls = v4l2_subdev_g_ext_ctrls,
-	.try_ext_ctrls = v4l2_subdev_try_ext_ctrls,
-	.s_ext_ctrls = v4l2_subdev_s_ext_ctrls,
-};
-
-/* subdev file operations */
-static const struct v4l2_subdev_file_ops ccp2_sd_file_ops = {
-	.open = ccp2_init_formats,
-};
-
 /* subdev video operations */
 static const struct v4l2_subdev_video_ops ccp2_sd_video_ops = {
 	.s_stream = ccp2_s_stream,
@@ -931,10 +922,13 @@ static const struct v4l2_subdev_pad_ops ccp2_sd_pad_ops = {
 
 /* subdev operations */
 static const struct v4l2_subdev_ops ccp2_sd_ops = {
-	.core = &ccp2_sd_core_ops,
-	.file = &ccp2_sd_file_ops,
 	.video = &ccp2_sd_video_ops,
 	.pad = &ccp2_sd_pad_ops,
+};
+
+/* subdev internal operations */
+static const struct v4l2_subdev_internal_ops ccp2_sd_internal_ops = {
+	.open = ccp2_init_formats,
 };
 
 /* --------------------------------------------------------------------------
@@ -979,9 +973,9 @@ static int ccp2_link_setup(struct media_entity *entity,
 	struct isp_ccp2_device *ccp2 = v4l2_get_subdevdata(sd);
 
 	switch (local->index | media_entity_type(remote->entity)) {
-	case CCP2_PAD_SINK | MEDIA_ENTITY_TYPE_NODE:
+	case CCP2_PAD_SINK | MEDIA_ENT_T_DEVNODE:
 		/* read from memory */
-		if (flags & MEDIA_LINK_FLAG_ACTIVE) {
+		if (flags & MEDIA_LNK_FL_ENABLED) {
 			if (ccp2->input == CCP2_INPUT_SENSOR)
 				return -EBUSY;
 			ccp2->input = CCP2_INPUT_MEMORY;
@@ -991,9 +985,9 @@ static int ccp2_link_setup(struct media_entity *entity,
 		}
 		break;
 
-	case CCP2_PAD_SINK | MEDIA_ENTITY_TYPE_SUBDEV:
+	case CCP2_PAD_SINK | MEDIA_ENT_T_V4L2_SUBDEV:
 		/* read from sensor/phy */
-		if (flags & MEDIA_LINK_FLAG_ACTIVE) {
+		if (flags & MEDIA_LNK_FL_ENABLED) {
 			if (ccp2->input == CCP2_INPUT_MEMORY)
 				return -EBUSY;
 			ccp2->input = CCP2_INPUT_SENSOR;
@@ -1002,9 +996,9 @@ static int ccp2_link_setup(struct media_entity *entity,
 				ccp2->input = CCP2_INPUT_NONE;
 		} break;
 
-	case CCP2_PAD_SOURCE | MEDIA_ENTITY_TYPE_SUBDEV:
+	case CCP2_PAD_SOURCE | MEDIA_ENT_T_V4L2_SUBDEV:
 		/* write to video port/ccdc */
-		if (flags & MEDIA_LINK_FLAG_ACTIVE)
+		if (flags & MEDIA_LNK_FL_ENABLED)
 			ccp2->output = CCP2_OUTPUT_CCDC;
 		else
 			ccp2->output = CCP2_OUTPUT_NONE;
@@ -1038,16 +1032,14 @@ static int ccp2_init_entities(struct isp_ccp2_device *ccp2)
 	ccp2->output = CCP2_OUTPUT_NONE;
 
 	v4l2_subdev_init(sd, &ccp2_sd_ops);
+	sd->internal_ops = &ccp2_sd_internal_ops;
 	strlcpy(sd->name, "OMAP3 ISP CCP2", sizeof(sd->name));
 	sd->grp_id = 1 << 16;   /* group ID for isp subdevs */
 	v4l2_set_subdevdata(sd, ccp2);
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
-	v4l2_ctrl_handler_init(&ccp2->ctrls, 1);
-	sd->ctrl_handler = &ccp2->ctrls;
-
-	pads[CCP2_PAD_SINK].flags = MEDIA_PAD_FLAG_INPUT;
-	pads[CCP2_PAD_SOURCE].flags = MEDIA_PAD_FLAG_OUTPUT;
+	pads[CCP2_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
+	pads[CCP2_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 
 	me->ops = &ccp2_media_ops;
 	ret = media_entity_init(me, CCP2_PADS_NUM, pads, 0);
@@ -1096,7 +1088,6 @@ void omap3isp_ccp2_unregister_entities(struct isp_ccp2_device *ccp2)
 	media_entity_cleanup(&ccp2->subdev.entity);
 
 	v4l2_device_unregister_subdev(&ccp2->subdev);
-	v4l2_ctrl_handler_free(&ccp2->ctrls);
 	omap3isp_video_unregister(&ccp2->video_in);
 }
 
@@ -1138,6 +1129,9 @@ error:
  */
 void omap3isp_ccp2_cleanup(struct isp_device *isp)
 {
+	struct isp_ccp2_device *ccp2 = &isp->isp_ccp2;
+
+	regulator_put(ccp2->vdds_csib);
 }
 
 /*
@@ -1152,14 +1146,27 @@ int omap3isp_ccp2_init(struct isp_device *isp)
 
 	init_waitqueue_head(&ccp2->wait);
 
-	/* On the OMAP36xx, the CCP2 uses the CSI PHY1 or PHY2, shared with
+	/*
+	 * On the OMAP34xx the CSI1 receiver is operated in the CSIb IO
+	 * complex, which is powered by vdds_csib power rail. Hence the
+	 * request for the regulator.
+	 *
+	 * On the OMAP36xx, the CCP2 uses the CSI PHY1 or PHY2, shared with
 	 * the CSI2c or CSI2a receivers. The PHY then needs to be explicitly
 	 * configured.
 	 *
 	 * TODO: Don't hardcode the usage of PHY1 (shared with CSI2c).
 	 */
-	if (isp->revision == ISP_REVISION_15_0)
+	if (isp->revision == ISP_REVISION_2_0) {
+		ccp2->vdds_csib = regulator_get(isp->dev, "vdds_csib");
+		if (IS_ERR(ccp2->vdds_csib)) {
+			dev_dbg(isp->dev,
+				"Could not get regulator vdds_csib\n");
+			ccp2->vdds_csib = NULL;
+		}
+	} else if (isp->revision == ISP_REVISION_15_0) {
 		ccp2->phy = &isp->isp_csiphy1;
+	}
 
 	ret = ccp2_init_entities(ccp2);
 	if (ret < 0)

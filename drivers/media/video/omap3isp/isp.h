@@ -102,8 +102,11 @@ enum isp_interface_type {
 	ISP_INTERFACE_CSI2C_PHY1,
 };
 
+/* ISP: OMAP 34xx ES 1.0 */
 #define ISP_REVISION_1_0		0x10
+/* ISP2: OMAP 34xx ES 2.0, 2.1 and 3.0 */
 #define ISP_REVISION_2_0		0x20
+/* ISP2P: OMAP 36xx */
 #define ISP_REVISION_15_0		0xF0
 
 /*
@@ -129,7 +132,6 @@ struct isp_reg {
 
 /**
  * struct isp_parallel_platform_data - Parallel interface platform data
- * @width: Parallel bus width in bits (8, 10, 11 or 12)
  * @data_lane_shift: Data lane shifter
  *		0 - CAMEXT[13:0] -> CAM[13:0]
  *		1 - CAMEXT[13:2] -> CAM[11:0]
@@ -137,15 +139,20 @@ struct isp_reg {
  *		3 - CAMEXT[13:6] -> CAM[7:0]
  * @clk_pol: Pixel clock polarity
  *		0 - Non Inverted, 1 - Inverted
+ * @hs_pol: Horizontal synchronization polarity
+ *		0 - Active high, 1 - Active low
+ * @vs_pol: Vertical synchronization polarity
+ *		0 - Active high, 1 - Active low
  * @bridge: CCDC Bridge input control
  *		ISPCTRL_PAR_BRIDGE_DISABLE - Disable
  *		ISPCTRL_PAR_BRIDGE_LENDIAN - Little endian
  *		ISPCTRL_PAR_BRIDGE_BENDIAN - Big endian
  */
 struct isp_parallel_platform_data {
-	unsigned int width;
 	unsigned int data_lane_shift:2;
 	unsigned int clk_pol:1;
+	unsigned int hs_pol:1;
+	unsigned int vs_pol:1;
 	unsigned int bridge:4;
 };
 
@@ -258,6 +265,7 @@ struct isp_device {
 	/* ISP Obj */
 	spinlock_t stat_lock;	/* common lock for statistic drivers */
 	struct mutex isp_mutex;	/* For handling ref_count field */
+	bool needs_reset;
 	int has_context;
 	int ref_count;
 	u32 xclk_divisor[2];	/* Two clocks, a and b. */
@@ -306,7 +314,8 @@ int omap3isp_pipeline_set_stream(struct isp_pipeline *pipe,
 				 enum isp_pipeline_stream_state state);
 void omap3isp_configure_bridge(struct isp_device *isp,
 			       enum ccdc_input_entity input,
-			       const struct isp_parallel_platform_data *pdata);
+			       const struct isp_parallel_platform_data *pdata,
+			       unsigned int shift);
 
 #define ISP_XCLK_NONE			0
 #define ISP_XCLK_A			1
@@ -417,7 +426,7 @@ isp_pad_buffer_type(const struct v4l2_subdev *subdev, int pad)
 	if (pad >= subdev->entity.num_pads)
 		return 0;
 
-	if (subdev->entity.pads[pad].flags & MEDIA_PAD_FLAG_INPUT)
+	if (subdev->entity.pads[pad].flags & MEDIA_PAD_FL_SINK)
 		return V4L2_BUF_TYPE_VIDEO_OUTPUT;
 	else
 		return V4L2_BUF_TYPE_VIDEO_CAPTURE;

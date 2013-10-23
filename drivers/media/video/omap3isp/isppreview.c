@@ -34,7 +34,7 @@
 #include "ispreg.h"
 #include "isppreview.h"
 
-/* Default values in Office Flourescent Light for RGBtoRGB Blending */
+/* Default values in Office Fluorescent Light for RGBtoRGB Blending */
 static struct omap3isp_prev_rgbtorgb flr_rgb2rgb = {
 	{	/* RGB-RGB Matrix */
 		{0x01E2, 0x0F30, 0x0FEE},
@@ -44,7 +44,7 @@ static struct omap3isp_prev_rgbtorgb flr_rgb2rgb = {
 	{0x0000, 0x0000, 0x0000}
 };
 
-/* Default values in Office Flourescent Light for RGB to YUV Conversion*/
+/* Default values in Office Fluorescent Light for RGB to YUV Conversion*/
 static struct omap3isp_prev_csc flr_prev_csc = {
 	{	/* CSC Coef Matrix */
 		{66, 129, 25},
@@ -54,22 +54,22 @@ static struct omap3isp_prev_csc flr_prev_csc = {
 	{0x0, 0x0, 0x0}
 };
 
-/* Default values in Office Flourescent Light for CFA Gradient*/
+/* Default values in Office Fluorescent Light for CFA Gradient*/
 #define FLR_CFA_GRADTHRS_HORZ	0x28
 #define FLR_CFA_GRADTHRS_VERT	0x28
 
-/* Default values in Office Flourescent Light for Chroma Suppression*/
+/* Default values in Office Fluorescent Light for Chroma Suppression*/
 #define FLR_CSUP_GAIN		0x0D
 #define FLR_CSUP_THRES		0xEB
 
-/* Default values in Office Flourescent Light for Noise Filter*/
+/* Default values in Office Fluorescent Light for Noise Filter*/
 #define FLR_NF_STRGTH		0x03
 
 /* Default values for White Balance */
 #define FLR_WBAL_DGAIN		0x100
 #define FLR_WBAL_COEF		0x20
 
-/* Default values in Office Flourescent Light for Black Adjustment*/
+/* Default values in Office Fluorescent Light for Black Adjustment*/
 #define FLR_BLKADJ_BLUE		0x0
 #define FLR_BLKADJ_GREEN	0x0
 #define FLR_BLKADJ_RED		0x0
@@ -137,7 +137,7 @@ preview_enable_invalaw(struct isp_prev_device *prev, u8 enable)
  * @enable: 1 - Enable, 0 - Disable
  *
  * NOTE: PRV_WSDR_ADDR and PRV_WADD_OFFSET must be set also
- * The proccess is applied for each captured frame.
+ * The process is applied for each captured frame.
  */
 static void
 preview_enable_drkframe_capture(struct isp_prev_device *prev, u8 enable)
@@ -157,7 +157,7 @@ preview_enable_drkframe_capture(struct isp_prev_device *prev, u8 enable)
  * @enable: 1 - Acquires memory bandwidth since the pixels in each frame is
  *          subtracted with the pixels in the current frame.
  *
- * The proccess is applied for each captured frame.
+ * The process is applied for each captured frame.
  */
 static void
 preview_enable_drkframe(struct isp_prev_device *prev, u8 enable)
@@ -1528,7 +1528,7 @@ static long preview_ioctl(struct v4l2_subdev *sd, unsigned int cmd, void *arg)
  * preview_set_stream - Enable/Disable streaming on preview subdev
  * @sd    : pointer to v4l2 subdev structure
  * @enable: 1 == Enable, 0 == Disable
- * return -EINVAL or zero on sucess
+ * return -EINVAL or zero on success
  */
 static int preview_set_stream(struct v4l2_subdev *sd, int enable)
 {
@@ -1780,7 +1780,7 @@ static int preview_enum_frame_size(struct v4l2_subdev *sd,
  * @sd : pointer to v4l2 subdev structure
  * @fh : V4L2 subdev file handle
  * @fmt: pointer to v4l2 subdev format structure
- * return -EINVAL or zero on sucess
+ * return -EINVAL or zero on success
  */
 static int preview_get_format(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh,
 			      struct v4l2_subdev_format *fmt)
@@ -1855,19 +1855,7 @@ static int preview_init_formats(struct v4l2_subdev *sd,
 
 /* subdev core operations */
 static const struct v4l2_subdev_core_ops preview_v4l2_core_ops = {
-	.queryctrl = v4l2_subdev_queryctrl,
-	.querymenu = v4l2_subdev_querymenu,
-	.g_ctrl = v4l2_subdev_g_ctrl,
-	.s_ctrl = v4l2_subdev_s_ctrl,
-	.g_ext_ctrls = v4l2_subdev_g_ext_ctrls,
-	.try_ext_ctrls = v4l2_subdev_try_ext_ctrls,
-	.s_ext_ctrls = v4l2_subdev_s_ext_ctrls,
 	.ioctl = preview_ioctl,
-};
-
-/* subdev file operations */
-static const struct v4l2_subdev_file_ops preview_v4l2_file_ops = {
-	.open = preview_init_formats,
 };
 
 /* subdev video operations */
@@ -1886,9 +1874,13 @@ static const struct v4l2_subdev_pad_ops preview_v4l2_pad_ops = {
 /* subdev operations */
 static const struct v4l2_subdev_ops preview_v4l2_ops = {
 	.core = &preview_v4l2_core_ops,
-	.file = &preview_v4l2_file_ops,
 	.video = &preview_v4l2_video_ops,
 	.pad = &preview_v4l2_pad_ops,
+};
+
+/* subdev internal operations */
+static const struct v4l2_subdev_internal_ops preview_v4l2_internal_ops = {
+	.open = preview_init_formats,
 };
 
 /* -----------------------------------------------------------------------------
@@ -1911,9 +1903,9 @@ static int preview_link_setup(struct media_entity *entity,
 	struct isp_prev_device *prev = v4l2_get_subdevdata(sd);
 
 	switch (local->index | media_entity_type(remote->entity)) {
-	case PREV_PAD_SINK | MEDIA_ENTITY_TYPE_NODE:
+	case PREV_PAD_SINK | MEDIA_ENT_T_DEVNODE:
 		/* read from memory */
-		if (flags & MEDIA_LINK_FLAG_ACTIVE) {
+		if (flags & MEDIA_LNK_FL_ENABLED) {
 			if (prev->input == PREVIEW_INPUT_CCDC)
 				return -EBUSY;
 			prev->input = PREVIEW_INPUT_MEMORY;
@@ -1923,9 +1915,9 @@ static int preview_link_setup(struct media_entity *entity,
 		}
 		break;
 
-	case PREV_PAD_SINK | MEDIA_ENTITY_TYPE_SUBDEV:
+	case PREV_PAD_SINK | MEDIA_ENT_T_V4L2_SUBDEV:
 		/* read from ccdc */
-		if (flags & MEDIA_LINK_FLAG_ACTIVE) {
+		if (flags & MEDIA_LNK_FL_ENABLED) {
 			if (prev->input == PREVIEW_INPUT_MEMORY)
 				return -EBUSY;
 			prev->input = PREVIEW_INPUT_CCDC;
@@ -1940,9 +1932,9 @@ static int preview_link_setup(struct media_entity *entity,
 	 * Revisit this when it will be implemented, and return -EBUSY for now.
 	 */
 
-	case PREV_PAD_SOURCE | MEDIA_ENTITY_TYPE_NODE:
+	case PREV_PAD_SOURCE | MEDIA_ENT_T_DEVNODE:
 		/* write to memory */
-		if (flags & MEDIA_LINK_FLAG_ACTIVE) {
+		if (flags & MEDIA_LNK_FL_ENABLED) {
 			if (prev->output & ~PREVIEW_OUTPUT_MEMORY)
 				return -EBUSY;
 			prev->output |= PREVIEW_OUTPUT_MEMORY;
@@ -1951,9 +1943,9 @@ static int preview_link_setup(struct media_entity *entity,
 		}
 		break;
 
-	case PREV_PAD_SOURCE | MEDIA_ENTITY_TYPE_SUBDEV:
+	case PREV_PAD_SOURCE | MEDIA_ENT_T_V4L2_SUBDEV:
 		/* write to resizer */
-		if (flags & MEDIA_LINK_FLAG_ACTIVE) {
+		if (flags & MEDIA_LNK_FL_ENABLED) {
 			if (prev->output & ~PREVIEW_OUTPUT_RESIZER)
 				return -EBUSY;
 			prev->output |= PREVIEW_OUTPUT_RESIZER;
@@ -1989,12 +1981,13 @@ static int preview_init_entities(struct isp_prev_device *prev)
 	prev->input = PREVIEW_INPUT_NONE;
 
 	v4l2_subdev_init(sd, &preview_v4l2_ops);
+	sd->internal_ops = &preview_v4l2_internal_ops;
 	strlcpy(sd->name, "OMAP3 ISP preview", sizeof(sd->name));
 	sd->grp_id = 1 << 16;	/* group ID for isp subdevs */
 	v4l2_set_subdevdata(sd, prev);
 	sd->flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 
-	v4l2_ctrl_handler_init(&prev->ctrls, 3);
+	v4l2_ctrl_handler_init(&prev->ctrls, 2);
 	v4l2_ctrl_new_std(&prev->ctrls, &preview_ctrl_ops, V4L2_CID_BRIGHTNESS,
 			  ISPPRV_BRIGHT_LOW, ISPPRV_BRIGHT_HIGH,
 			  ISPPRV_BRIGHT_STEP, ISPPRV_BRIGHT_DEF);
@@ -2004,8 +1997,8 @@ static int preview_init_entities(struct isp_prev_device *prev)
 	v4l2_ctrl_handler_setup(&prev->ctrls);
 	sd->ctrl_handler = &prev->ctrls;
 
-	pads[PREV_PAD_SINK].flags = MEDIA_PAD_FLAG_INPUT;
-	pads[PREV_PAD_SOURCE].flags = MEDIA_PAD_FLAG_OUTPUT;
+	pads[PREV_PAD_SINK].flags = MEDIA_PAD_FL_SINK;
+	pads[PREV_PAD_SOURCE].flags = MEDIA_PAD_FL_SOURCE;
 
 	me->ops = &preview_media_ops;
 	ret = media_entity_init(me, PREV_PADS_NUM, pads, 0);

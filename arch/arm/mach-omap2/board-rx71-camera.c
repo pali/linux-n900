@@ -465,15 +465,12 @@ static struct ad58xx_platform_data rx71_ad5836_platform_data = {
 };
 
 static struct as3645a_flash_torch_parms rx71_main_camera_flash_setup = {
-	.flash_min_current	= 0,
-	.flash_max_current	= 7,
-	.flash_step		= 1,
-	.torch_min_current	= 0,
-	.torch_max_current	= 3,
-	.torch_step		= 3,
-	.timeout_min_us		= 100000,
-	.timeout_max_us		= 150000,
-	.timeout_step		= 1,
+	.flash_min_current	= 200,
+	.flash_max_current	= 320,
+	.torch_min_current	= 20,
+	.torch_max_current	= 60,
+	.timeout_min		= 100000,
+	.timeout_max		= 150000,
 };
 
 static struct as3645a_platform_data rx71_as3645a_platform_data = {

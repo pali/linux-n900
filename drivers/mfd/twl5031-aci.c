@@ -1275,7 +1275,7 @@ static int twl5031_av_detection(struct twl5031_aci_data *aci)
 	/* basic headset */
 	ret = twl5031_v_hs_mic_out(aci);
 	/* sane settings _after_ measuring voltage */
-	val = AV_COMP2_EN | HOOK_DET_EN;
+	val = AV_COMP2_EN | HOOK_DET_EN | HOOK_DET_EN_SLEEP_MODE;
 	twl5031_aci_write(TWL5031_ACI_AV_CTRL, val);
 	twl5031_aci_write(TWL5031_ECI_DBI_CTRL,
 			ACI_ENABLE | ACI_ACCESSORY_MODE);

@@ -46,9 +46,11 @@ struct v4l2_pix_format;
  * struct isp_format_info - ISP media bus format information
  * @code: V4L2 media bus format code
  * @truncated: V4L2 media bus format code for the same format truncated to 10
- * 	bits. Identical to @code if the format is 10 bits wide or less.
+ *	bits. Identical to @code if the format is 10 bits wide or less.
  * @uncompressed: V4L2 media bus format code for the corresponding uncompressed
- * 	format. Identical to @code if the format is not DPCM compressed.
+ *	format. Identical to @code if the format is not DPCM compressed.
+ * @flavor: V4L2 media bus format code for the same pixel layout but
+ *	shifted to be 8 bits per pixel. =0 if format is not shiftable.
  * @pixelformat: V4L2 pixel format FCC identifier
  * @bpp: Bits per pixel
  */
@@ -56,6 +58,7 @@ struct isp_format_info {
 	enum v4l2_mbus_pixelcode code;
 	enum v4l2_mbus_pixelcode truncated;
 	enum v4l2_mbus_pixelcode uncompressed;
+	enum v4l2_mbus_pixelcode flavor;
 	u32 pixelformat;
 	unsigned int bpp;
 };
@@ -85,7 +88,7 @@ enum isp_pipeline_state {
 
 struct isp_pipeline {
 	struct media_pipeline pipe;
-	spinlock_t lock;
+	spinlock_t lock;		/* Pipeline state and queue flags */
 	unsigned int state;
 	enum isp_pipeline_stream_state stream_state;
 	struct isp_video *input;
@@ -146,7 +149,7 @@ struct isp_video {
 	enum v4l2_buf_type type;
 	struct media_pad pad;
 
-	struct mutex mutex;
+	struct mutex mutex;		/* format and crop settings */
 	atomic_t active;
 
 	struct isp_device *isp;
@@ -163,7 +166,7 @@ struct isp_video {
 
 	/* Pipeline state */
 	struct isp_pipeline pipe;
-	struct mutex stream_lock;
+	struct mutex stream_lock;	/* pipeline and stream states */
 
 	/* Video buffers queue */
 	struct isp_video_queue *queue;

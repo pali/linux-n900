@@ -79,6 +79,14 @@
 #define OT_ONETOUCHGESTURE	24
 #define OT_SELFTEST		25
 #define OT_CTECONFIG		28
+#define OT_DEBUG_DIAG		37
+
+#define MSG_STATUS_COMSERR	(1 << 2)
+#define MSG_STATUS_CFGERR	(1 << 3)
+#define MSG_STATUS_CALIBRATION	(1 << 4)
+#define MSG_STATUS_SIGERR	(1 << 5)
+#define MSG_STATUS_OVERFLOW	(1 << 6)
+#define MSG_STATUS_RESET	(1 << 7)
 
 #define CTRL_REG		0
 #define CTRL_ENABLE		(1 << 0)
@@ -87,6 +95,7 @@
 #define CMD_RESET		0
 #define CMD_BACKUPNV		1
 #define CMD_CALIBRATE		2
+#define CMD_DIAG		5
 
 #define SELFTEST_TEST_ALL	0xfe
 #define SELFTEST_RES_PASS	0xfe
@@ -114,9 +123,30 @@
 #define TOUCH_MSG_AMPLITUDE	5
 #define TOUCH_MSG_VECTOR	6
 
+#define CTECONFIG_CTRL		0
+#define CTECONFIG_CMD		1
+
+#define CTECONFIG_CMD_CALIBRATE	0xA5
+
 #define FSTATE_NOT_DETECTED	0
 #define FSTATE_DETECTED		1
 #define FSTATE_RELEASED		2
+
+#define DIAG_PAGEUP		0x01
+#define DIAG_PAGEDOWN		0x02
+#define DIAG_DELTAS		0x10
+#define DIAG_REFS		0x11
+#define DIAG_GAINS		0x31
+#define DIAG_XCOMMONS		0xF2
+
+#define DIAG_MAX_PAGES		4
+
+#define DIAG_MODE		0
+#define DIAG_PAGE		1
+#define DIAG_DATA_START		2
+#define DIAG_DATA_END		130
+#define DIAG_PAGE_LEN		(DIAG_DATA_END - DIAG_DATA_START)
+#define DIAG_TOTAL_LEN		DIAG_DATA_END
 
 #define POWER_ON_RESET_WAIT	65
 
@@ -557,6 +587,16 @@ static inline int mxt_variant(const struct mxt *td)
 static inline int mxt_build(const struct mxt *td)
 {
 	return td->info_block[INFO_BLOCK_BUILD];
+}
+
+static inline int mxt_lines_x(const struct mxt *td)
+{
+	return td->info_block[INFO_BLOCK_MATRIX_X];
+}
+
+static inline int mxt_lines_y(const struct mxt *td)
+{
+	return td->info_block[INFO_BLOCK_MATRIX_Y];
 }
 
 static void mxt_print_version(const struct mxt *td)
@@ -2232,7 +2272,7 @@ static int mxt_msg_handler_cmd(struct mxt *td, const struct msg *m)
 	td->nonvol_cfg_crc = m->msg[1] | (m->msg[2] << 8) |
 		(m->msg[3] << 16);
 
-	if (m->msg[0] & (1 << 7)) {
+	if (m->msg[0] & MSG_STATUS_RESET) {
 		int r;
 
 		r = mxt_object_init(td);
@@ -2249,13 +2289,13 @@ static int mxt_msg_handler_cmd(struct mxt *td, const struct msg *m)
 		dev_info(&td->client->dev, "cfg 0x%x status 0x%02x\n",
 			 td->nonvol_cfg_crc, m->msg[0]);
 
-	if (m->msg[0] & (1 << 2)) {
+	if (m->msg[0] & MSG_STATUS_COMSERR) {
 		dev_info(&td->client->dev, "i2c crc error\n");
 		td->err_i2c_crc++;
 		mxt_reset(td);
 	}
 
-	if (m->msg[0] & (1 << 3)) {
+	if (m->msg[0] & MSG_STATUS_CFGERR) {
 		int r;
 
 		if (printk_timed_ratelimit(&cfg_error_warntime, 15 * 1000))
@@ -2267,15 +2307,15 @@ static int mxt_msg_handler_cmd(struct mxt *td, const struct msg *m)
 				"can't handle config error: %d\n", r);
 	}
 
-	if (m->msg[0] & (1 << 4))
+	if (m->msg[0] & MSG_STATUS_CALIBRATION)
 		td->num_cals++;
 
-	if (m->msg[0] & (1 << 5)) {
+	if (m->msg[0] & MSG_STATUS_SIGERR) {
 		dev_warn(&td->client->dev, "acquisition error\n");
 		td->err_sigerr++;
 	}
 
-	if (m->msg[0] & (1 << 6))
+	if (m->msg[0] & MSG_STATUS_OVERFLOW)
 		td->err_overflow++;
 
 	return 0;
@@ -2881,6 +2921,291 @@ out:
 	mutex_unlock(&td->lock);
 
 	return r;
+}
+
+static int mxt_diag_get_page(struct mxt *td, u8 mode, u8 page, u8 *data, int l)
+{
+	u8 hdr[2];
+	int r;
+	unsigned long wait_start;
+
+	if (l < 0 || l > DIAG_PAGE_LEN)
+		return -EINVAL;
+
+	wait_start = jiffies;
+
+	/*
+	 * Apparently controller is slow to get the values.
+	 * We need to retry/wait until the right page appears.
+	 * There is no mentioning of having to wait in protocol guide.
+	 * Assumption is that the next sensor sampling will trigger
+	 * the page change. So all we can do is wait it to happen.
+	 */
+	while (1) {
+		r = mxt_object_read_nc(td, OT_DEBUG_DIAG, 0,
+				hdr, sizeof(hdr));
+		if (r < 0)
+			goto out;
+
+		if (hdr[DIAG_MODE] == mode && hdr[DIAG_PAGE] == page)
+			break;
+
+		if (jiffies_to_msecs(jiffies - wait_start) > 500)
+			break;
+
+		/* Let's wait for controller to get data ready */
+		msleep(5);
+	}
+
+	if (td->debug_flags & DFLAG_VERBOSE)
+		dev_info(&td->client->dev,
+			"got page %d in %d ms\n", page,
+			jiffies_to_msecs(jiffies - wait_start));
+
+	if (hdr[DIAG_MODE] != mode) {
+		dev_err(&td->client->dev,
+			"diag mode differs 0x%02x vs 0x%02x\n",
+			mode, hdr[DIAG_MODE]);
+		r = -EIO;
+		goto out;
+	}
+
+	if (hdr[DIAG_PAGE] != page) {
+		dev_err(&td->client->dev,
+			"diag page differs 0x%02x vs 0x%02x\n",
+			page, hdr[DIAG_PAGE]);
+		r = -EIO;
+		goto out;
+	}
+
+	if (l)
+		r = mxt_object_read_nc(td, OT_DEBUG_DIAG, DIAG_DATA_START,
+				data, l);
+	else
+		r = 0;
+
+out:
+	return r;
+}
+
+static int mxt_diag_write_cmd(struct mxt *td, u8 cmd)
+{
+	int r;
+	u8 rb;
+	unsigned long wait_start;
+
+	r = mxt_object_write_nc(td, OT_CMD_PROCESSOR, CMD_DIAG, &cmd, 1);
+	if (r < 0)
+		return r;
+
+	wait_start = jiffies;
+
+	while (1) {
+		r = mxt_object_read_nc(td, OT_CMD_PROCESSOR, CMD_DIAG, &rb, 1);
+		if (r < 0)
+			return r;
+
+		if (rb == 0)
+			break;
+
+		if (jiffies_to_msecs(jiffies - wait_start) > 500)
+			break;
+
+		msleep(5);
+	}
+
+	if (td->debug_flags & DFLAG_VERBOSE)
+		dev_info(&td->client->dev,
+			"cmd %d %s in %d ms\n", cmd, (r == 0) ? "" : "timeout",
+			jiffies_to_msecs(jiffies - wait_start));
+
+	if (r >= 0 && rb == 0)
+		return 0;
+
+	return -EIO;
+}
+
+static int mxt_diag_get_values(struct mxt *td, u8 mode, char *buf, ssize_t size)
+{
+	ssize_t l = 0;
+	u8 *d;
+	int i;
+	int r;
+	int num_vals;
+	int bytes_per_value;
+
+	if (mode != DIAG_REFS &&
+	    mode != DIAG_DELTAS &&
+	    mode != DIAG_GAINS &&
+	    mode != DIAG_XCOMMONS)
+		return -EINVAL;
+
+	if (!td->preinit_done)
+		return -ENODEV;
+
+	if (mode == DIAG_GAINS) {
+		const u8 cal_cmd[1] = { CTECONFIG_CMD_CALIBRATE };
+
+		num_vals = 2 + mxt_lines_y(td);
+		bytes_per_value = 1;
+
+		/* Gains need to be measured explicitly */
+		r = mxt_object_write_nc(td, OT_CTECONFIG, CTECONFIG_CMD,
+					cal_cmd, sizeof(cal_cmd));
+		if (r < 0)
+			goto out_nofree;
+	} else if (mode == DIAG_XCOMMONS) {
+		/* For some odd reason xcommons are in page 1 */
+		num_vals = (DIAG_PAGE_LEN >> 1) + mxt_lines_x(td);
+		bytes_per_value = 2;
+	} else {
+		num_vals = mxt_lines_x(td) * mxt_lines_y(td);
+		bytes_per_value = 2;
+	}
+
+	d = kmalloc(num_vals * bytes_per_value, GFP_KERNEL);
+	if (d == NULL)
+		return -ENOMEM;
+
+	r = mxt_diag_write_cmd(td, mode);
+	if (r < 0)
+		goto out;
+
+	for (i = 0; i < DIAG_MAX_PAGES; i++) {
+		int bytes_to_read = (num_vals * bytes_per_value) -
+			(i * DIAG_PAGE_LEN);
+
+		if (bytes_to_read >= DIAG_PAGE_LEN)
+			bytes_to_read = DIAG_PAGE_LEN;
+
+		r = mxt_diag_get_page(td, mode, i,
+				      d + (i * DIAG_PAGE_LEN), bytes_to_read);
+
+		if (bytes_to_read < DIAG_PAGE_LEN)
+			break;
+
+		if (i != (DIAG_MAX_PAGES - 1)) {
+			r = mxt_diag_write_cmd(td, DIAG_PAGEUP);
+			if (r < 0)
+				goto out;
+		}
+	}
+
+	switch (mode) {
+	case DIAG_REFS:
+	{
+		u16 v;
+
+		/* With some firmwares adjusting with xcommons is needed */
+		if (mxt_firmware_version(td) == 0x11) {
+			u8 *xc;
+
+			xc = kmalloc(mxt_lines_x(td) * 2, GFP_KERNEL);
+			if (xc == NULL) {
+				r = -ENOMEM;
+				goto out;
+			}
+
+			r = mxt_diag_write_cmd(td, DIAG_XCOMMONS);
+			if (r < 0)
+				goto endref;
+
+			/*
+			 * Don't read. Just make sure page has changed.
+			 * Seems that issuing page up command too quickly will
+			 * get firmware to ignore it.
+			 */
+			r = mxt_diag_get_page(td, DIAG_XCOMMONS, 0, NULL, 0);
+			if (r < 0)
+				goto endref;
+
+			r = mxt_diag_write_cmd(td, DIAG_PAGEUP);
+			if (r < 0)
+				goto endref;
+
+			r = mxt_diag_get_page(td, DIAG_XCOMMONS, 1,
+					      xc, mxt_lines_x(td) * 2);
+			if (r < 0)
+				goto endref;
+
+			for (i = 0; i < num_vals; i++) {
+				const int xline = i / mxt_lines_y(td);
+				int real_ref;
+				u16 com;
+
+				if (xline >= mxt_lines_x(td)) {
+					r = -EINVAL;
+					goto endref;
+				}
+
+				v = (int)d[i * 2] | ((int)(d[i * 2 + 1]) << 8);
+				com = (int)xc[xline * 2] |
+					((int)(xc[xline * 2 + 1]) << 8);
+				real_ref = v + com - 65536;
+				d[i * 2] = real_ref & 0xff;
+				d[i * 2 + 1] = (real_ref & 0xff00) >> 8;
+			}
+
+endref:
+			kfree(xc);
+			if (r < 0)
+				goto out;
+		}
+
+		for (i = 0; i < num_vals; i++) {
+			v = (int)d[i * 2] | ((int)(d[i * 2 + 1]) << 8);
+			l += snprintf(buf + l, size - l, "%d,", v);
+		}
+
+	}
+	break;
+
+	case DIAG_XCOMMONS:
+	{
+		u16 v;
+		num_vals = mxt_lines_x(td);
+
+		for (i = 0; i < num_vals; i++) {
+			v = (int)d[DIAG_PAGE_LEN + i * 2] |
+				((int)(d[DIAG_PAGE_LEN + i * 2 + 1]) << 8);
+			l += snprintf(buf + l, size - l, "%d,", v);
+		}
+	}
+	break;
+
+	case DIAG_DELTAS:
+	{
+		s16 v;
+
+		for (i = 0; i < num_vals; i++) {
+			v = (int)d[i * 2] | ((int)(d[i * 2 + 1]) << 8);
+			l += snprintf(buf + l, size - l, "%d,", v);
+		}
+	}
+	break;
+
+	case DIAG_GAINS:
+	{
+		u8 v;
+		const u8 nv = d[0] < (num_vals - 2) ? d[0] : (num_vals - 2);
+
+		for (i = 0; i < nv; i++) {
+			v = d[i + 2];
+			l += snprintf(buf + l, size - l, "%d,", v);
+		}
+	}
+	break;
+	}
+
+	l -= (l > 0); /* overwrite final comma, if any */
+	l += snprintf(buf + l, size - l, "\n");
+out:
+	kfree(d);
+out_nofree:
+	if (r < 0)
+		return r;
+
+	return l;
 }
 
 static ssize_t mxt_show_attr_flash(struct device *dev,
@@ -3788,6 +4113,48 @@ out:
 	return count;
 }
 
+static ssize_t mxt_show_attr_diag(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct mxt *td = platform_get_drvdata(pdev);
+	const size_t size = PAGE_SIZE;
+	int r;
+	u8 mode;
+
+	if (!strcmp(attr->attr.name, "deltas"))
+		mode = DIAG_DELTAS;
+	else if (!strcmp(attr->attr.name, "gains"))
+		mode = DIAG_GAINS;
+	else if (!strcmp(attr->attr.name, "refs"))
+		mode = DIAG_REFS;
+	else if (!strcmp(attr->attr.name, "xcommons"))
+		mode = DIAG_XCOMMONS;
+	else
+		return -EINVAL;
+
+	mutex_lock(&td->lock);
+	r = mxt_diag_get_values(td, mode, buf, size);
+	mutex_unlock(&td->lock);
+
+	return r;
+}
+
+static ssize_t mxt_show_attr_lines(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	struct mxt *td = platform_get_drvdata(pdev);
+
+	if (!strcmp(attr->attr.name, "xlines"))
+		return sprintf(buf, "%u\n", mxt_lines_x(td));
+
+	if (!strcmp(attr->attr.name, "ylines"))
+		return sprintf(buf, "%u\n", mxt_lines_y(td));
+
+	return -EINVAL;
+}
+
 static ssize_t mxt_show_attr_stats(struct device *dev,
 				   struct device_attribute *attr, char *buf)
 {
@@ -4538,6 +4905,14 @@ static DEVICE_ATTR(stats, S_IRUGO,
 		   mxt_show_attr_stats,
 		   NULL);
 
+static DEVICE_ATTR(deltas, S_IRUSR, mxt_show_attr_diag, NULL);
+static DEVICE_ATTR(refs, S_IRUSR, mxt_show_attr_diag, NULL);
+static DEVICE_ATTR(gains, S_IRUSR, mxt_show_attr_diag, NULL);
+static DEVICE_ATTR(xcommons, S_IRUSR, mxt_show_attr_diag, NULL);
+
+static DEVICE_ATTR(xlines, S_IRUGO, mxt_show_attr_lines, NULL);
+static DEVICE_ATTR(ylines, S_IRUGO, mxt_show_attr_lines, NULL);
+
 static DEVICE_ATTR(play, S_IWUSR,
 		   NULL,
 		   mxt_store_attr_play);
@@ -4568,6 +4943,12 @@ static struct attribute *mxt_attrs[] = {
 	&dev_attr_disable_ts.attr,
 	&dev_attr_wait_for_gesture.attr,
 	&dev_attr_stats.attr,
+	&dev_attr_deltas.attr,
+	&dev_attr_refs.attr,
+	&dev_attr_gains.attr,
+	&dev_attr_xcommons.attr,
+	&dev_attr_xlines.attr,
+	&dev_attr_ylines.attr,
 	&dev_attr_play.attr,
 #ifdef CONFIG_TOUCHSCREEN_ATMEL_MXT_DEBUGFS
 	&dev_attr_debug_fs.attr,

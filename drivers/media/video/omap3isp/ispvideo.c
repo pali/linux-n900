@@ -46,29 +46,59 @@
 
 static struct isp_format_info formats[] = {
 	{ V4L2_MBUS_FMT_Y8_1X8, V4L2_MBUS_FMT_Y8_1X8,
-	  V4L2_MBUS_FMT_Y8_1X8, V4L2_PIX_FMT_GREY, 8, },
+	  V4L2_MBUS_FMT_Y8_1X8, V4L2_MBUS_FMT_Y8_1X8,
+	  V4L2_PIX_FMT_GREY, 8, },
+	{ V4L2_MBUS_FMT_Y10_1X10, V4L2_MBUS_FMT_Y10_1X10,
+	  V4L2_MBUS_FMT_Y10_1X10, V4L2_MBUS_FMT_Y8_1X8,
+	  V4L2_PIX_FMT_Y10, 10, },
+	{ V4L2_MBUS_FMT_Y12_1X12, V4L2_MBUS_FMT_Y10_1X10,
+	  V4L2_MBUS_FMT_Y12_1X12, V4L2_MBUS_FMT_Y8_1X8,
+	  V4L2_PIX_FMT_Y12, 12, },
+	{ V4L2_MBUS_FMT_SBGGR8_1X8, V4L2_MBUS_FMT_SBGGR8_1X8,
+	  V4L2_MBUS_FMT_SBGGR8_1X8, V4L2_MBUS_FMT_SBGGR8_1X8,
+	  V4L2_PIX_FMT_SBGGR8, 8, },
+	{ V4L2_MBUS_FMT_SGBRG8_1X8, V4L2_MBUS_FMT_SGBRG8_1X8,
+	  V4L2_MBUS_FMT_SGBRG8_1X8, V4L2_MBUS_FMT_SGBRG8_1X8,
+	  V4L2_PIX_FMT_SGBRG8, 8, },
+	{ V4L2_MBUS_FMT_SGRBG8_1X8, V4L2_MBUS_FMT_SGRBG8_1X8,
+	  V4L2_MBUS_FMT_SGRBG8_1X8, V4L2_MBUS_FMT_SGRBG8_1X8,
+	  V4L2_PIX_FMT_SGRBG8, 8, },
+	{ V4L2_MBUS_FMT_SRGGB8_1X8, V4L2_MBUS_FMT_SRGGB8_1X8,
+	  V4L2_MBUS_FMT_SRGGB8_1X8, V4L2_MBUS_FMT_SRGGB8_1X8,
+	  V4L2_PIX_FMT_SRGGB8, 8, },
 	{ V4L2_MBUS_FMT_SGRBG10_DPCM8_1X8, V4L2_MBUS_FMT_SGRBG10_DPCM8_1X8,
-	  V4L2_MBUS_FMT_SGRBG10_1X10, V4L2_PIX_FMT_SGRBG10DPCM8, 8, },
+	  V4L2_MBUS_FMT_SGRBG10_1X10, 0,
+	  V4L2_PIX_FMT_SGRBG10DPCM8, 8, },
 	{ V4L2_MBUS_FMT_SBGGR10_1X10, V4L2_MBUS_FMT_SBGGR10_1X10,
-	  V4L2_MBUS_FMT_SBGGR10_1X10, V4L2_PIX_FMT_SBGGR10, 10, },
+	  V4L2_MBUS_FMT_SBGGR10_1X10, V4L2_MBUS_FMT_SBGGR8_1X8,
+	  V4L2_PIX_FMT_SBGGR10, 10, },
 	{ V4L2_MBUS_FMT_SGBRG10_1X10, V4L2_MBUS_FMT_SGBRG10_1X10,
-	  V4L2_MBUS_FMT_SGBRG10_1X10, V4L2_PIX_FMT_SGBRG10, 10, },
+	  V4L2_MBUS_FMT_SGBRG10_1X10, V4L2_MBUS_FMT_SGBRG8_1X8,
+	  V4L2_PIX_FMT_SGBRG10, 10, },
 	{ V4L2_MBUS_FMT_SGRBG10_1X10, V4L2_MBUS_FMT_SGRBG10_1X10,
-	  V4L2_MBUS_FMT_SGRBG10_1X10, V4L2_PIX_FMT_SGRBG10, 10, },
+	  V4L2_MBUS_FMT_SGRBG10_1X10, V4L2_MBUS_FMT_SGRBG8_1X8,
+	  V4L2_PIX_FMT_SGRBG10, 10, },
 	{ V4L2_MBUS_FMT_SRGGB10_1X10, V4L2_MBUS_FMT_SRGGB10_1X10,
-	  V4L2_MBUS_FMT_SRGGB10_1X10, V4L2_PIX_FMT_SRGGB10, 10, },
+	  V4L2_MBUS_FMT_SRGGB10_1X10, V4L2_MBUS_FMT_SRGGB8_1X8,
+	  V4L2_PIX_FMT_SRGGB10, 10, },
 	{ V4L2_MBUS_FMT_SBGGR12_1X12, V4L2_MBUS_FMT_SBGGR10_1X10,
-	  V4L2_MBUS_FMT_SBGGR12_1X12, V4L2_PIX_FMT_SBGGR12, 12, },
+	  V4L2_MBUS_FMT_SBGGR12_1X12, V4L2_MBUS_FMT_SBGGR8_1X8,
+	  V4L2_PIX_FMT_SBGGR12, 12, },
 	{ V4L2_MBUS_FMT_SGBRG12_1X12, V4L2_MBUS_FMT_SGBRG10_1X10,
-	  V4L2_MBUS_FMT_SGBRG12_1X12, V4L2_PIX_FMT_SGBRG12, 12, },
+	  V4L2_MBUS_FMT_SGBRG12_1X12, V4L2_MBUS_FMT_SGBRG8_1X8,
+	  V4L2_PIX_FMT_SGBRG12, 12, },
 	{ V4L2_MBUS_FMT_SGRBG12_1X12, V4L2_MBUS_FMT_SGRBG10_1X10,
-	  V4L2_MBUS_FMT_SGRBG12_1X12, V4L2_PIX_FMT_SGRBG12, 12, },
+	  V4L2_MBUS_FMT_SGRBG12_1X12, V4L2_MBUS_FMT_SGRBG8_1X8,
+	  V4L2_PIX_FMT_SGRBG12, 12, },
 	{ V4L2_MBUS_FMT_SRGGB12_1X12, V4L2_MBUS_FMT_SRGGB10_1X10,
-	  V4L2_MBUS_FMT_SRGGB12_1X12, V4L2_PIX_FMT_SRGGB12, 12, },
+	  V4L2_MBUS_FMT_SRGGB12_1X12, V4L2_MBUS_FMT_SRGGB8_1X8,
+	  V4L2_PIX_FMT_SRGGB12, 12, },
 	{ V4L2_MBUS_FMT_UYVY8_1X16, V4L2_MBUS_FMT_UYVY8_1X16,
-	  V4L2_MBUS_FMT_UYVY8_1X16, V4L2_PIX_FMT_UYVY, 16, },
+	  V4L2_MBUS_FMT_UYVY8_1X16, 0,
+	  V4L2_PIX_FMT_UYVY, 16, },
 	{ V4L2_MBUS_FMT_YUYV8_1X16, V4L2_MBUS_FMT_YUYV8_1X16,
-	  V4L2_MBUS_FMT_YUYV8_1X16, V4L2_PIX_FMT_YUYV, 16, },
+	  V4L2_MBUS_FMT_YUYV8_1X16, 0,
+	  V4L2_PIX_FMT_YUYV, 16, },
 };
 
 const struct isp_format_info *
@@ -82,6 +112,37 @@ omap3isp_video_format_info(enum v4l2_mbus_pixelcode code)
 	}
 
 	return NULL;
+}
+
+/*
+ * Decide whether desired output pixel code can be obtained with
+ * the lane shifter by shifting the input pixel code.
+ * @in: input pixelcode to shifter
+ * @out: output pixelcode from shifter
+ * @additional_shift: # of bits the sensor's LSB is offset from CAMEXT[0]
+ *
+ * return true if the combination is possible
+ * return false otherwise
+ */
+static bool isp_video_is_shiftable(enum v4l2_mbus_pixelcode in,
+		enum v4l2_mbus_pixelcode out,
+		unsigned int additional_shift)
+{
+	const struct isp_format_info *in_info, *out_info;
+
+	if (in == out)
+		return true;
+
+	in_info = omap3isp_video_format_info(in);
+	out_info = omap3isp_video_format_info(out);
+
+	if ((in_info->flavor == 0) || (out_info->flavor == 0))
+		return false;
+
+	if (in_info->flavor != out_info->flavor)
+		return false;
+
+	return in_info->bpp - out_info->bpp + additional_shift <= 6;
 }
 
 /*
@@ -169,7 +230,7 @@ isp_video_remote_subdev(struct isp_video *video, u32 *pad)
 	remote = media_entity_remote_source(&video->pad);
 
 	if (remote == NULL ||
-	    media_entity_type(remote->entity) != MEDIA_ENTITY_TYPE_SUBDEV)
+	    media_entity_type(remote->entity) != MEDIA_ENT_T_V4L2_SUBDEV)
 		return NULL;
 
 	if (pad)
@@ -194,7 +255,7 @@ isp_video_far_end(struct isp_video *video)
 		if (entity == &video->video.entity)
 			continue;
 
-		if (media_entity_type(entity) != MEDIA_ENTITY_TYPE_NODE)
+		if (media_entity_type(entity) != MEDIA_ENT_T_DEVNODE)
 			continue;
 
 		far_end = to_isp_video(media_entity_to_video_device(entity));
@@ -234,9 +295,10 @@ static int isp_video_validate_pipeline(struct isp_pipeline *pipe)
 		return -EPIPE;
 
 	while (1) {
+		unsigned int shifter_link;
 		/* Retrieve the sink format */
 		pad = &subdev->entity.pads[0];
-		if (!(pad->flags & MEDIA_PAD_FLAG_INPUT))
+		if (!(pad->flags & MEDIA_PAD_FL_SINK))
 			break;
 
 		fmt_sink.pad = pad->index;
@@ -262,10 +324,14 @@ static int isp_video_validate_pipeline(struct isp_pipeline *pipe)
 				return -ENOSPC;
 		}
 
+		/* If sink pad is on CCDC, the link has the lane shifter
+		 * in the middle of it. */
+		shifter_link = subdev == &isp->isp_ccdc.subdev;
+
 		/* Retrieve the source format */
 		pad = media_entity_remote_source(pad);
 		if (pad == NULL ||
-		    media_entity_type(pad->entity) != MEDIA_ENTITY_TYPE_SUBDEV)
+		    media_entity_type(pad->entity) != MEDIA_ENT_T_V4L2_SUBDEV)
 			break;
 
 		subdev = media_entity_to_v4l2_subdev(pad->entity);
@@ -277,9 +343,23 @@ static int isp_video_validate_pipeline(struct isp_pipeline *pipe)
 			return -EPIPE;
 
 		/* Check if the two ends match */
-		if (fmt_source.format.code != fmt_sink.format.code ||
-		    fmt_source.format.width != fmt_sink.format.width ||
+		if (fmt_source.format.width != fmt_sink.format.width ||
 		    fmt_source.format.height != fmt_sink.format.height)
+			return -EPIPE;
+
+		if (shifter_link) {
+			unsigned int parallel_shift = 0;
+			if (isp->isp_ccdc.input == CCDC_INPUT_PARALLEL) {
+				struct isp_parallel_platform_data *pdata =
+					&((struct isp_v4l2_subdevs_group *)
+					      subdev->host_priv)->bus.parallel;
+				parallel_shift = pdata->data_lane_shift * 2;
+			}
+			if (!isp_video_is_shiftable(fmt_source.format.code,
+						fmt_sink.format.code,
+						parallel_shift))
+				return -EPIPE;
+		} else if (fmt_source.format.code != fmt_sink.format.code)
 			return -EPIPE;
 	}
 
@@ -493,12 +573,12 @@ static const struct isp_video_queue_operations isp_video_queue_ops = {
 /*
  * omap3isp_video_buffer_next - Complete the current buffer and return the next
  * @video: ISP video object
- * @error: Whether an error occured during capture
+ * @error: Whether an error occurred during capture
  *
  * Remove the current video buffer from the DMA queue and fill its timestamp,
  * field count and state fields before waking up its completion handler.
  *
- * The buffer state is set to VIDEOBUF_DONE if no error occured (@error is 0)
+ * The buffer state is set to VIDEOBUF_DONE if no error occurred (@error is 0)
  * or VIDEOBUF_ERROR otherwise (@error is non-zero).
  *
  * The DMA queue is expected to contain at least one buffer.
@@ -577,7 +657,7 @@ struct isp_buffer *omap3isp_video_buffer_next(struct isp_video *video,
 /*
  * omap3isp_video_resume - Perform resume operation on the buffers
  * @video: ISP video object
- * @continuous: Pipeline is in single shot mode if 0 or continous mode otherwise
+ * @continuous: Pipeline is in single shot mode if 0 or continuous mode otherwise
  *
  * This function is intended to be used on suspend/resume scenario. It
  * requests video queue layer to discard buffers marked as DONE if it's in
@@ -1202,11 +1282,11 @@ int omap3isp_video_init(struct isp_video *video, const char *name)
 	switch (video->type) {
 	case V4L2_BUF_TYPE_VIDEO_CAPTURE:
 		direction = "output";
-		video->pad.flags = MEDIA_PAD_FLAG_INPUT;
+		video->pad.flags = MEDIA_PAD_FL_SINK;
 		break;
 	case V4L2_BUF_TYPE_VIDEO_OUTPUT:
 		direction = "input";
-		video->pad.flags = MEDIA_PAD_FLAG_OUTPUT;
+		video->pad.flags = MEDIA_PAD_FL_SOURCE;
 		break;
 
 	default:

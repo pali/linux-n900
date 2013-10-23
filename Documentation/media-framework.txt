@@ -155,9 +155,9 @@ the driver if required.
 
 Entities have flags that describe the entity capabilities and state.
 
-	MEDIA_ENTITY_FLAG_DEFAULT indicates the default entity for a given
-	type. This can be used to report the default audio and video devices
-	or the default camera sensor.
+	MEDIA_ENT_FL_DEFAULT indicates the default entity for a given type.
+	This can be used to report the default audio and video devices or the
+	default camera sensor.
 
 Logical entity groups can be defined by setting the group ID of all member
 entities to the same non-zero value. An entity group serves no purpose in the
@@ -184,17 +184,17 @@ pointer the canonical way to store and pass link references.
 
 Pads have flags that describe the pad capabilities and state.
 
-	MEDIA_PAD_FLAG_INPUT indicates that the pad supports sinking data.
-	MEDIA_PAD_FLAG_OUTPUT indicates that the pad supports sourcing data.
+	MEDIA_PAD_FL_SINK indicates that the pad supports sinking data.
+	MEDIA_PAD_FL_SOURCE indicates that the pad supports sourcing data.
 
-One and only one of MEDIA_PAD_FLAG_INPUT and MEDIA_PAD_FLAG_OUTPUT must be set
-for each pad.
+One and only one of MEDIA_PAD_FL_SINK and MEDIA_PAD_FL_SOURCE must be set for
+each pad.
 
 - Links
 
 Links are represented by a struct media_link instance, defined in
 include/media/media-entity.h. Each entity stores all links originating at or
-targetting any of its pads in a links array. A given link is thus stored
+targeting any of its pads in a links array. A given link is thus stored
 twice, once in the source entity and once in the target entity. The array is
 pre-allocated and grows dynamically as needed.
 
@@ -209,13 +209,13 @@ to source and sink pads.
 
 Links have flags that describe the link capabilities and state.
 
-	MEDIA_LINK_FLAG_ENABLED indicates that the link is enabled and can be
-	used to transfer media data. When two or more links target a sink pad,
-	only one of them can be enabled at a time.
-	MEDIA_LINK_FLAG_IMMUTABLE indicates that the link enabled state can't
-	be modified at runtime. If MEDIA_LINK_FLAG_IMMUTABLE is set, then
-	MEDIA_LINK_FLAG_ENABLED must also be set since an immutable link is
-	always enabled.
+	MEDIA_LNK_FL_ENABLED indicates that the link is enabled and can be used
+	to transfer media data. When two or more links target a sink pad, only
+	one of them can be enabled at a time.
+	MEDIA_LNK_FL_IMMUTABLE indicates that the link enabled state can't be
+	modified at runtime. If MEDIA_LNK_FL_IMMUTABLE is set, then
+	MEDIA_LNK_FL_ENABLED must also be set since an immutable link is always
+	enabled.
 
 
 Graph traversal
@@ -300,6 +300,11 @@ link_setup operation for the two entities at the source and sink of the link,
 in that order. If the second link_setup call fails, another link_setup call is
 made on the first entity to restore the original link flags.
 
+Media device drivers can be notified of link setup operations by setting the
+media_device::link_notify pointer to a callback function. If provided, the
+notification callback will be called before enabling and after disabling
+links.
+
 Entity drivers must implement the link_setup operation if any of their links
 is non-immutable. The operation must either configure the hardware or store
 the configuration information to be applied later.
@@ -308,17 +313,6 @@ Link configuration must not have any side effect on other links. If an enabled
 link at a sink pad prevents another link at the same pad from being disabled,
 the link_setup operation must return -EBUSY and can't implicitly disable the
 first enabled link.
-
-Enabling and disabling a link has effects on entities' reference counts. When
-two sub-graphs are connected, the reference count of each of them is incremented
-by the total reference count of all node entities in the other sub-graph. When
-two sub-graphs are disconnected, the reverse operation is performed. In both
-cases the set_power operations are called accordingly, ensuring that the
-link_setup calls are made with power active on the source and sink entities.
-
-In other words, enabling or disabling a link propagates reference count changes
-through the graph, and the final state is identical to what it would have been
-if the link had been enabled or disabled from the start.
 
 
 Pipelines and media streams
@@ -351,9 +345,9 @@ media_entity pipe field is reset to NULL on the last nested stop call.
 
 Link configuration will fail with -EBUSY by default if either end of the link is
 a streaming entity. Links that can be modified while streaming must be marked
-with the MEDIA_LINK_FLAG_DYNAMIC flag.
+with the MEDIA_LNK_FL_DYNAMIC flag.
 
 If other operations need to be disallowed on streaming entities (such as
-changing entities configuration parameters) drivers can explictly check the
+changing entities configuration parameters) drivers can explicitly check the
 media_entity stream_count field to find out if an entity is streaming. This
 operation must be done with the media_device graph_mutex held.

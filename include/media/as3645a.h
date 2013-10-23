@@ -29,25 +29,22 @@
 #define AS3645A_NAME				"as3645a"
 #define AS3645A_I2C_ADDR			(0x60 >> 1) /* W:0x60, R:0x61 */
 
+/*
+ * as3645a_flash_torch_parms - Flash and torch currents and timeout limits
+ * @flash_min_current:	Min flash current (mA)
+ * @flash_max_current:	Max flash current (mA)
+ * @torch_min_current:	Min torch current (mA)
+ * @torch_max_current:	Max torch current (mA)
+ * @timeout_min:	Min flash timeout (us)
+ * @timeout_max:	Max flash timeout (us)
+ */
 struct as3645a_flash_torch_parms {
-	/* Min flash current allowed by LEDs */
-	u8 flash_min_current;
-	/* Max flash current allowed by LEDs*/
-	u8 flash_max_current;
-	/* Flash current step */
-	u8 flash_step;
-	/* Min torch current allowed by LEDs*/
-	u8 torch_min_current;
-	/* Max torch current allowed by LEDs*/
-	u8 torch_max_current;
-	/* Torch current step */
-	u8 torch_step;
-	/* Min flash timeout in us allowed by LEDs*/
-	u32 timeout_min_us;
-	/* Max flash timeout in us allowed by LEDs*/
-	u32 timeout_max_us;
-	/* Flash timeout step in us */
-	u32 timeout_step;
+	unsigned int flash_min_current;
+	unsigned int flash_max_current;
+	unsigned int torch_min_current;
+	unsigned int torch_max_current;
+	unsigned int timeout_min;
+	unsigned int timeout_max;
 };
 
 struct as3645a_platform_data {

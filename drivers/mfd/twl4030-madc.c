@@ -667,7 +667,7 @@ static void twl4030_madc_process_queues(void)
 			use_polarity = req->polarity;
 		}
 	} else if (!list_empty(&the_madc->sw_queue) &&
-		   !(modes_busy & TWL4030_MADC_MODE_RT) &&
+		   !(modes_busy & (1<<TWL4030_MADC_MODE_RT)) &&
 		   (the_madc->current_delay > 5)) {
 		/* 2 */
 		if (modes_busy) {

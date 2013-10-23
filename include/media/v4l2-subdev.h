@@ -133,15 +133,6 @@ struct v4l2_subdev_core_ops {
 				 struct v4l2_event_subscription *sub);
 };
 
-/* open: called when the subdev device node is opened by an application.
-
-   close: called when the subdev device node is close.
- */
-struct v4l2_subdev_file_ops {
-	int (*open)(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh);
-	int (*close)(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh);
-};
-
 /* s_mode: switch the tuner to a specific tuner mode. Replacement of s_radio.
 
    s_radio: v4l device was opened in Radio mode, to be replaced by s_mode.
@@ -306,7 +297,6 @@ struct v4l2_subdev_sensor_ops {
 
 struct v4l2_subdev_ops {
 	const struct v4l2_subdev_core_ops	*core;
-	const struct v4l2_subdev_file_ops	*file;
 	const struct v4l2_subdev_tuner_ops	*tuner;
 	const struct v4l2_subdev_audio_ops	*audio;
 	const struct v4l2_subdev_video_ops	*video;
@@ -323,10 +313,16 @@ struct v4l2_subdev_ops {
  *
  * unregistered: called when this subdev is unregistered. When called the
  *	v4l2_dev field is still set to the correct v4l2_device.
+ *
+ * open: called when the subdev device node is opened by an application.
+ *
+ * close: called when the subdev device node is closed.
  */
 struct v4l2_subdev_internal_ops {
 	int (*registered)(struct v4l2_subdev *sd);
 	void (*unregistered)(struct v4l2_subdev *sd);
+	int (*open)(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh);
+	int (*close)(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh);
 };
 
 #define V4L2_SUBDEV_NAME_SIZE 32
@@ -419,8 +415,6 @@ static inline void *v4l2_get_subdev_hostdata(const struct v4l2_subdev *sd)
 
 void v4l2_subdev_init(struct v4l2_subdev *sd,
 		      const struct v4l2_subdev_ops *ops);
-
-int v4l2_subdev_set_power(struct media_entity *entity, int power);
 
 /* Call an ops of a v4l2_subdev, doing the right checks against
    NULL pointers.

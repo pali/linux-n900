@@ -20,6 +20,7 @@
 #include <plat/onenand.h>
 #include <plat/board.h>
 #include <plat/gpmc.h>
+#include <linux/mtd/onenand.h>
 
 static struct omap_onenand_platform_data *gpmc_onenand_data;
 
@@ -241,7 +242,9 @@ static int omap2_onenand_set_sync_mode(struct omap_onenand_platform_data *cfg,
 	tick_ns = gpmc_ticks_to_ns(1);
 	div = gpmc_cs_calc_divider(cs, min_gpmc_clk_period);
 	gpmc_clk_ns = gpmc_ticks_to_ns(div);
-	if (gpmc_clk_ns < 15) /* >66Mhz */
+	if ((gpmc_clk_ns < 15) ||/* >66Mhz */
+	    (readw(onenand_base + ONENAND_REG_MANUFACTURER_ID) ==
+	     ONENAND_MFR_SAMSUNG))
 		hf = 1;
 	if (gpmc_clk_ns < 12) /* >83Mhz */
 		vhf = 1;

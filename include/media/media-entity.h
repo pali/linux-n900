@@ -33,13 +33,13 @@ struct media_link {
 	struct media_pad *source;	/* Source pad */
 	struct media_pad *sink;		/* Sink pad  */
 	struct media_link *reverse;	/* Link in the reverse direction */
-	unsigned long flags;		/* Link flags (MEDIA_LINK_FLAG_*) */
+	unsigned long flags;		/* Link flags (MEDIA_LNK_FL_*) */
 };
 
 struct media_pad {
 	struct media_entity *entity;	/* Entity this pad belongs to */
 	u16 index;			/* Pad index in the entity pads array */
-	unsigned long flags;		/* Pad flags (MEDIA_PAD_FLAG_*) */
+	unsigned long flags;		/* Pad flags (MEDIA_PAD_FL_*) */
 };
 
 struct media_entity_operations {
@@ -54,14 +54,14 @@ struct media_entity {
 	u32 id;				/* Entity ID, unique in the parent media
 					 * device context */
 	const char *name;		/* Entity name */
-	u32 type;			/* Entity type (MEDIA_ENTITY_TYPE_*) */
+	u32 type;			/* Entity type (MEDIA_ENT_T_*) */
 	u32 revision;			/* Entity revision, driver specific */
-	unsigned long flags;		/* Entity flags (MEDIA_ENTITY_FLAG_*) */
+	unsigned long flags;		/* Entity flags (MEDIA_ENT_FL_*) */
 	u32 group_id;			/* Entity group ID */
 
-	u16 num_pads;			/* Number of input and output pads */
-	u16 num_links;			/* Number of existing links, both active
-					 * and inactive */
+	u16 num_pads;			/* Number of sink and source pads */
+	u16 num_links;			/* Number of existing links, both
+					 * enabled and disabled */
 	u16 num_backlinks;		/* Number of backlinks */
 	u16 max_links;			/* Maximum number of links */
 
@@ -70,6 +70,10 @@ struct media_entity {
 
 	const struct media_entity_operations *ops;	/* Entity operations */
 
+	/* Reference counts must never be negative, but are signed integers on
+	 * purpose: a simple WARN_ON(<0) check can be used to detect reference
+	 * count bugs that would make them negative.
+	 */
 	int stream_count;		/* Stream count for the entity. */
 	int use_count;			/* Use count for the entity. */
 
@@ -99,12 +103,12 @@ struct media_entity {
 
 static inline u32 media_entity_type(struct media_entity *entity)
 {
-	return entity->type & MEDIA_ENTITY_TYPE_MASK;
+	return entity->type & MEDIA_ENT_TYPE_MASK;
 }
 
 static inline u32 media_entity_subtype(struct media_entity *entity)
 {
-	return entity->type & MEDIA_ENTITY_SUBTYPE_MASK;
+	return entity->type & MEDIA_ENT_SUBTYPE_MASK;
 }
 
 #define MEDIA_ENTITY_ENUM_MAX_DEPTH	16

@@ -1023,12 +1023,12 @@ static const struct v4l2_ctrl_ops ad5807_ctrl_ops = {
 	.s_ctrl = ad5807_set_ctrl,
 };
 
-static const char *ad5807_opda_mode_menu[] = {
+static const char * const ad5807_opda_mode_menu[] = {
 	"Drive by I2C cmd",
 	"Drive by Strobe input",
 };
 
-static const char *ad5807_opd_mode_menu[] = {
+static const char * const ad5807_opd_mode_menu[] = {
 	"Single Shot Drive: I2C and Strobe",
 	"Multi Shot Drive:  Strobe ONLY",
 	"Continuous Drive:  I2C ONLY",
@@ -1275,18 +1275,14 @@ static const struct v4l2_subdev_core_ops ad5807_core_ops = {
 	.ioctl = ad5807_ioctl,
 };
 
-static const struct v4l2_subdev_file_ops ad5807_file_ops = {
-	.open = ad5807_open,
-	.close = ad5807_close,
-};
-
 static const struct v4l2_subdev_ops ad5807_ops = {
 	.core = &ad5807_core_ops,
-	.file = &ad5807_file_ops,
 };
 
 static const struct v4l2_subdev_internal_ops ad5807_internal_ops = {
 	.registered = ad5807_registered,
+	.open = ad5807_open,
+	.close = ad5807_close,
 };
 
 /* -----------------------------------------------------------------------------

@@ -23,6 +23,7 @@
 #include <linux/i2c.h>
 #include <linux/videodev2.h>
 #include <media/v4l2-device.h>
+#include <media/v4l2-ctrls.h>
 
 int v4l2_device_register(struct device *dev, struct v4l2_device *v4l2_dev)
 {
@@ -127,6 +128,15 @@ int v4l2_device_register_subdev(struct v4l2_device *v4l2_dev,
 		}
 	}
 
+	/* This just returns 0 if either of the two args is NULL */
+	err = v4l2_ctrl_add_handler(v4l2_dev->ctrl_handler, sd->ctrl_handler);
+	if (err) {
+		if (sd->internal_ops && sd->internal_ops->unregistered)
+			sd->internal_ops->unregistered(sd);
+		module_put(sd->owner);
+		return err;
+	}
+
 	/* Register the entity. */
 	if (v4l2_dev->mdev) {
 		err = media_device_register_entity(v4l2_dev->mdev, entity);
@@ -161,7 +171,7 @@ int v4l2_device_register_subdev_nodes(struct v4l2_device *v4l2_dev)
 
 		vdev = &sd->devnode;
 		strlcpy(vdev->name, sd->name, sizeof(vdev->name));
-		vdev->parent = v4l2_dev->dev;
+		vdev->v4l2_dev = v4l2_dev;
 		vdev->fops = &v4l2_subdev_fops;
 		vdev->release = video_device_release_empty;
 		err = __video_register_device(vdev, VFL_TYPE_SUBDEV, -1, 1,

@@ -57,6 +57,12 @@
   <refsect1>
     <title>Description</title>
 
+    <note>
+      <title>Experimental</title>
+      <para>This is an <link linkend="experimental">experimental</link>
+      interface and may change in the future.</para>
+    </note>
+
     <para>To retrieve the current crop rectangle applications set the
     <structfield>pad</structfield> field of a &v4l2-subdev-crop; to the
     desired pad number as reported by the media API and the
@@ -109,6 +115,12 @@
 	    <entry>&v4l2-rect;</entry>
 	    <entry><structfield>rect</structfield></entry>
 	    <entry>Crop rectangle boundaries, in pixels.</entry>
+	  </row>
+	  <row>
+	    <entry>__u32</entry>
+	    <entry><structfield>reserved</structfield>[8]</entry>
+	    <entry>Reserved for future extensions. Applications and drivers must
+	    set the array to zero.</entry>
 	  </row>
 	</tbody>
       </tgroup>
