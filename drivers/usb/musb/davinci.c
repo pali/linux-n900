@@ -42,7 +42,7 @@
 #include "musb_core.h"
 
 #ifdef CONFIG_MACH_DAVINCI_EVM
-#define GPIO_nVBUS_DRV		144
+#define GPIO_nVBUS_DRV		160
 #endif
 
 #include "davinci.h"
@@ -83,6 +83,15 @@ static inline void phy_off(void)
 }
 
 static int dma_off = 1;
+
+#ifdef CONFIG_PM
+void musb_platform_power_on(struct musb *musb)
+{
+}
+void musb_platform_power_off(struct musb *musb)
+{
+}
+#endif
 
 void musb_platform_enable(struct musb *musb)
 {
@@ -387,6 +396,8 @@ int __init musb_platform_init(struct musb *musb)
 	if (!musb->xceiv)
 		return -ENODEV;
 
+	musb->xceiv->can_suspendm = true;
+
 	musb->mregs += DAVINCI_BASE_OFFSET;
 
 	clk_enable(musb->clock);
@@ -442,6 +453,7 @@ int __init musb_platform_init(struct musb *musb)
 		musb_readb(tibase, DAVINCI_USB_CTRL_REG));
 
 	musb->isr = davinci_interrupt;
+
 	return 0;
 
 fail:

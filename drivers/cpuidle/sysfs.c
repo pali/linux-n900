@@ -237,6 +237,38 @@ static ssize_t show_state_##_name(struct cpuidle_state *state, char *buf) \
 	return sprintf(buf, "%s\n", state->_name);\
 }
 
+static ssize_t show_state_flags(struct cpuidle_state *state, char *buf)
+{
+	int len = 0;
+
+	if (state->flags & CPUIDLE_FLAG_TIME_VALID)
+		len += sprintf(buf, "%s", "time valid");
+
+	if (state->flags & CPUIDLE_FLAG_CHECK_BM)
+		len += sprintf(buf + len, "%s%s", (len > 0) ? ", " : "",
+				 "BM check");
+
+	if (state->flags & CPUIDLE_FLAG_POLL)
+		len += sprintf(buf + len, "%s%s", (len > 0) ? ", " : "",
+				 "no latency");
+
+	if (state->flags & CPUIDLE_FLAG_SHALLOW)
+		len += sprintf(buf + len, "%s%s", (len > 0) ? ", " : "",
+				 "medium latency");
+
+	if (state->flags & CPUIDLE_FLAG_DEEP)
+		len += sprintf(buf + len, "%s%s", (len > 0) ? ", " : "",
+				 "high latency");
+
+	if (state->flags & CPUIDLE_FLAG_IGNORE)
+		len += sprintf(buf + len, "%s%s", (len > 0) ? ", " : "",
+				 "disabled\n");
+	else
+		len += sprintf(buf + len, "\n");
+
+	return len;
+}
+
 define_show_state_function(exit_latency)
 define_show_state_function(power_usage)
 define_show_state_ull_function(usage)
@@ -250,6 +282,7 @@ define_one_state_ro(latency, show_state_exit_latency);
 define_one_state_ro(power, show_state_power_usage);
 define_one_state_ro(usage, show_state_usage);
 define_one_state_ro(time, show_state_time);
+define_one_state_ro(flags, show_state_flags);
 
 static struct attribute *cpuidle_state_default_attrs[] = {
 	&attr_name.attr,
@@ -258,6 +291,7 @@ static struct attribute *cpuidle_state_default_attrs[] = {
 	&attr_power.attr,
 	&attr_usage.attr,
 	&attr_time.attr,
+	&attr_flags.attr,
 	NULL
 };
 

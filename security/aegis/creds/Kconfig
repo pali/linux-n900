@@ -1,0 +1,11 @@
+config SECURITY_AEGIS_CREDS
+	tristate "Credentials retrieval"
+	depends on SECURITY_AEGIS
+	default n
+	help
+	  This selects the Credentials Retrieval module, which
+	  provides the task credentials information for the
+	  user space applications.
+	  This is part of Maemo Aegis Security framework.
+	  If you are unsure how to answer this question, answer N.
+

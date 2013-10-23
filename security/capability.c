@@ -827,6 +827,11 @@ static int cap_inode_notifysecctx(struct inode *inode, void *ctx, u32 ctxlen)
 	return 0;
 }
 
+static int cap_load_module(const void *data, unsigned long len)
+{
+	return 0;
+}
+
 static int cap_inode_setsecctx(struct dentry *dentry, void *ctx, u32 ctxlen)
 {
 	return 0;
@@ -1047,6 +1052,7 @@ void security_fixup_ops(struct security_operations *ops)
 	set_to_cap_if_null(ops, secctx_to_secid);
 	set_to_cap_if_null(ops, release_secctx);
 	set_to_cap_if_null(ops, inode_notifysecctx);
+	set_to_cap_if_null(ops, load_module);
 	set_to_cap_if_null(ops, inode_setsecctx);
 	set_to_cap_if_null(ops, inode_getsecctx);
 #ifdef CONFIG_SECURITY_NETWORK

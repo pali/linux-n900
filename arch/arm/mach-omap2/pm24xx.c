@@ -36,12 +36,12 @@
 #include <asm/mach-types.h>
 
 #include <mach/irqs.h>
-#include <mach/clock.h>
-#include <mach/sram.h>
-#include <mach/control.h>
-#include <mach/mux.h>
-#include <mach/dma.h>
-#include <mach/board.h>
+#include <plat/clock.h>
+#include <plat/sram.h>
+#include <plat/control.h>
+#include <plat/mux.h>
+#include <plat/dma.h>
+#include <plat/board.h>
 
 #include "prm.h"
 #include "prm-regbits-24xx.h"
@@ -50,8 +50,8 @@
 #include "sdrc.h"
 #include "pm.h"
 
-#include <mach/powerdomain.h>
-#include <mach/clockdomain.h>
+#include <plat/powerdomain.h>
+#include <plat/clockdomain.h>
 
 static void (*omap2_sram_idle)(void);
 static void (*omap2_sram_suspend)(u32 dllctrl, void __iomem *sdrc_dlla_ctrl,
@@ -110,7 +110,7 @@ static void omap2_enter_full_retention(void)
 	l = omap_ctrl_readl(OMAP2_CONTROL_DEVCONF0) | OMAP24XX_USBSTANDBYCTRL;
 	omap_ctrl_writel(l, OMAP2_CONTROL_DEVCONF0);
 
-	omap2_gpio_prepare_for_retention();
+	omap2_gpio_prepare_for_idle(PWRDM_POWER_RET);
 
 	if (omap2_pm_debug) {
 		omap2_pm_dump(0, 0, 0);
@@ -144,7 +144,7 @@ no_sleep:
 		tmp = timespec_to_ns(&ts_idle) * NSEC_PER_USEC;
 		omap2_pm_dump(0, 1, tmp);
 	}
-	omap2_gpio_resume_after_retention();
+	omap2_gpio_resume_after_idle();
 
 	clk_enable(osc_ck);
 

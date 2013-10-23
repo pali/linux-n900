@@ -43,7 +43,7 @@
 #include <linux/io.h>
 #include <linux/uaccess.h>
 #include <mach/hardware.h>
-#include <mach/prcm.h>
+#include <plat/prcm.h>
 
 #include "omap_wdt.h"
 
@@ -81,6 +81,8 @@ static void omap_wdt_ping(struct omap_wdt_dev *wdev)
 	while ((__raw_readl(base + OMAP_WATCHDOG_WPS)) & 0x08)
 		cpu_relax();
 	/* reloaded WCRR from WLDR */
+
+	pm_wdt_ping(timer_margin);
 }
 
 static void omap_wdt_enable(struct omap_wdt_dev *wdev)
@@ -179,6 +181,8 @@ static int omap_wdt_release(struct inode *inode, struct file *file)
 	clk_disable(wdev->ick);
 	clk_disable(wdev->fck);
 #else
+	/* Give the user application some time to recover in case of crash. */
+	omap_wdt_ping(wdev);
 	printk(KERN_CRIT "omap_wdt: Unexpected close, not stopping!\n");
 #endif
 	wdev->omap_wdt_users = 0;
@@ -325,10 +329,6 @@ static int __devinit omap_wdt_probe(struct platform_device *pdev)
 	wdev->omap_wdt_miscdev.name = "watchdog";
 	wdev->omap_wdt_miscdev.fops = &omap_wdt_fops;
 
-	ret = misc_register(&(wdev->omap_wdt_miscdev));
-	if (ret)
-		goto err_misc;
-
 	pr_info("OMAP Watchdog Timer Rev 0x%02x: initial timeout %d sec\n",
 		__raw_readl(wdev->base + OMAP_WATCHDOG_REV) & 0xFF,
 		timer_margin);
@@ -340,11 +340,16 @@ static int __devinit omap_wdt_probe(struct platform_device *pdev)
 	clk_disable(wdev->fck);
 
 	omap_wdt_dev = pdev;
+	ret = misc_register(&(wdev->omap_wdt_miscdev));
+	if (ret)
+		goto err_misc;
 
 	return 0;
 
 err_misc:
 	platform_set_drvdata(pdev, NULL);
+	omap_wdt_dev = NULL;
+
 	iounmap(wdev->base);
 
 err_ioremap:

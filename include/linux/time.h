@@ -112,6 +112,8 @@ unsigned long get_seconds(void);
 struct timespec current_kernel_time(void);
 struct timespec __current_kernel_time(void); /* does not hold xtime_lock */
 struct timespec get_monotonic_coarse(void);
+void get_xtime_and_monotonic_and_sleep_offset(struct timespec *xtim,
+				struct timespec *wtom, struct timespec *sleep);
 
 #define CURRENT_TIME		(current_kernel_time())
 #define CURRENT_TIME_SEC	((struct timespec) { get_seconds(), 0 })
@@ -145,6 +147,7 @@ extern void getnstimeofday(struct timespec *tv);
 extern void getrawmonotonic(struct timespec *ts);
 extern void getboottime(struct timespec *ts);
 extern void monotonic_to_bootbased(struct timespec *ts);
+extern void get_monotonic_boottime(struct timespec *ts);
 
 extern struct timespec timespec_trunc(struct timespec t, unsigned gran);
 extern int timekeeping_valid_for_hres(void);
@@ -276,6 +279,11 @@ struct itimerval {
 #define CLOCK_MONOTONIC_RAW		4
 #define CLOCK_REALTIME_COARSE		5
 #define CLOCK_MONOTONIC_COARSE		6
+
+#ifdef __KERNEL__
+/* This clock is not exposed to user space */
+#define CLOCK_REALTIME_COS		7
+#endif
 
 /*
  * The IDs of various hardware clocks:

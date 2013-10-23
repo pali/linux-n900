@@ -16,18 +16,18 @@
 
 #include <linux/mmc/card.h>
 #include <linux/mmc/host.h>
+#include <asm/atomic.h>
 
 #include "core.h"
 #include "sdio_cis.h"
 #include "bus.h"
 
-#define dev_to_mmc_card(d)	container_of(d, struct mmc_card, dev)
 #define to_mmc_driver(d)	container_of(d, struct mmc_driver, drv)
 
 static ssize_t mmc_type_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	struct mmc_card *card = dev_to_mmc_card(dev);
+	struct mmc_card *card = mmc_dev_to_card(dev);
 
 	switch (card->type) {
 	case MMC_TYPE_MMC:
@@ -59,7 +59,7 @@ static int mmc_bus_match(struct device *dev, struct device_driver *drv)
 static int
 mmc_bus_uevent(struct device *dev, struct kobj_uevent_env *env)
 {
-	struct mmc_card *card = dev_to_mmc_card(dev);
+	struct mmc_card *card = mmc_dev_to_card(dev);
 	const char *type;
 	int retval = 0;
 
@@ -99,7 +99,7 @@ mmc_bus_uevent(struct device *dev, struct kobj_uevent_env *env)
 static int mmc_bus_probe(struct device *dev)
 {
 	struct mmc_driver *drv = to_mmc_driver(dev->driver);
-	struct mmc_card *card = dev_to_mmc_card(dev);
+	struct mmc_card *card = mmc_dev_to_card(dev);
 
 	return drv->probe(card);
 }
@@ -107,7 +107,7 @@ static int mmc_bus_probe(struct device *dev)
 static int mmc_bus_remove(struct device *dev)
 {
 	struct mmc_driver *drv = to_mmc_driver(dev->driver);
-	struct mmc_card *card = dev_to_mmc_card(dev);
+	struct mmc_card *card = mmc_dev_to_card(dev);
 
 	drv->remove(card);
 
@@ -117,7 +117,7 @@ static int mmc_bus_remove(struct device *dev)
 static int mmc_bus_suspend(struct device *dev, pm_message_t state)
 {
 	struct mmc_driver *drv = to_mmc_driver(dev->driver);
-	struct mmc_card *card = dev_to_mmc_card(dev);
+	struct mmc_card *card = mmc_dev_to_card(dev);
 	int ret = 0;
 
 	if (dev->driver && drv->suspend)
@@ -128,7 +128,7 @@ static int mmc_bus_suspend(struct device *dev, pm_message_t state)
 static int mmc_bus_resume(struct device *dev)
 {
 	struct mmc_driver *drv = to_mmc_driver(dev->driver);
-	struct mmc_card *card = dev_to_mmc_card(dev);
+	struct mmc_card *card = mmc_dev_to_card(dev);
 	int ret = 0;
 
 	if (dev->driver && drv->resume)
@@ -183,7 +183,7 @@ EXPORT_SYMBOL(mmc_unregister_driver);
 
 static void mmc_release_card(struct device *dev)
 {
-	struct mmc_card *card = dev_to_mmc_card(dev);
+	struct mmc_card *card = mmc_dev_to_card(dev);
 
 	sdio_free_common_cis(card);
 
@@ -205,6 +205,8 @@ struct mmc_card *mmc_alloc_card(struct mmc_host *host, struct device_type *type)
 		return ERR_PTR(-ENOMEM);
 
 	card->host = host;
+
+	atomic_set(&card->power_claims, 0);
 
 	device_initialize(&card->dev);
 

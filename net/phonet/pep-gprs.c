@@ -96,11 +96,11 @@ static int gprs_recv(struct gprs_dev *gp, struct sk_buff *skb)
 		goto drop;
 	}
 
-	if (likely(skb_headroom(skb) & 3)) {
+	if (skb_headroom(skb) & 3) {
 		struct sk_buff *rskb, *fs;
 		int flen = 0;
 
-		/* Phonet Pipe data header is misaligned (3 bytes),
+		/* Phonet Pipe data header may be misaligned (3 bytes),
 		 * so wrap the IP packet as a single fragment of an head-less
 		 * socket buffer. The network stack will pull what it needs,
 		 * but at least, the whole IP payload is not memcpy'd. */
@@ -242,7 +242,7 @@ static void gprs_setup(struct net_device *dev)
 	dev->mtu		= GPRS_DEFAULT_MTU;
 	dev->hard_header_len	= 0;
 	dev->addr_len		= 0;
-	dev->tx_queue_len	= 10;
+	dev->tx_queue_len	= 100;
 
 	dev->netdev_ops		= &gprs_netdev_ops;
 	dev->destructor		= free_netdev;

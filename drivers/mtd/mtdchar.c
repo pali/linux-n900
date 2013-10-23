@@ -15,12 +15,16 @@
 #include <linux/smp_lock.h>
 #include <linux/backing-dev.h>
 #include <linux/compat.h>
-
+#include <linux/mount.h>
+#include <linux/blkpg.h>
 #include <linux/mtd/mtd.h>
+#include <linux/mtd/partitions.h>
 #include <linux/mtd/compatmac.h>
-
+#include <linux/mtd/partitions.h>
 #include <asm/uaccess.h>
 
+#define MTD_INODE_FS_MAGIC 0x11307854
+static struct vfsmount *mtd_inode_mnt __read_mostly;
 
 /*
  * Data structure to hold the pointer to the mtd device as well
@@ -28,6 +32,7 @@
  */
 struct mtd_file_info {
 	struct mtd_info *mtd;
+	struct inode *ino;
 	enum mtd_file_modes mode;
 };
 
@@ -64,6 +69,7 @@ static int mtd_open(struct inode *inode, struct file *file)
 	int ret = 0;
 	struct mtd_info *mtd;
 	struct mtd_file_info *mfi;
+	struct inode *mtd_ino;
 
 	DEBUG(MTD_DEBUG_LEVEL0, "MTD_open\n");
 
@@ -88,11 +94,23 @@ static int mtd_open(struct inode *inode, struct file *file)
 		goto out;
 	}
 
-	if (mtd->backing_dev_info)
-		file->f_mapping->backing_dev_info = mtd->backing_dev_info;
+	mtd_ino = iget_locked(mtd_inode_mnt->mnt_sb, devnum);
+	if (!mtd_ino) {
+		put_mtd_device(mtd);
+		ret = -ENOMEM;
+		goto out;
+	}
+	if (mtd_ino->i_state & I_NEW) {
+		mtd_ino->i_private = mtd;
+		mtd_ino->i_mode = S_IFCHR;
+		mtd_ino->i_data.backing_dev_info = mtd->backing_dev_info;
+		unlock_new_inode(mtd_ino);
+	}
+	file->f_mapping = mtd_ino->i_mapping;
 
 	/* You can't open it RW if it's not a writeable device */
 	if ((file->f_mode & FMODE_WRITE) && !(mtd->flags & MTD_WRITEABLE)) {
+		iput(mtd_ino);
 		put_mtd_device(mtd);
 		ret = -EACCES;
 		goto out;
@@ -100,10 +118,12 @@ static int mtd_open(struct inode *inode, struct file *file)
 
 	mfi = kzalloc(sizeof(*mfi), GFP_KERNEL);
 	if (!mfi) {
+		iput(mtd_ino);
 		put_mtd_device(mtd);
 		ret = -ENOMEM;
 		goto out;
 	}
+	mfi->ino = mtd_ino;
 	mfi->mtd = mtd;
 	file->private_data = mfi;
 
@@ -125,6 +145,8 @@ static int mtd_close(struct inode *inode, struct file *file)
 	if ((file->f_mode & FMODE_WRITE) && mtd->sync)
 		mtd->sync(mtd);
 
+	iput(mfi->ino);
+
 	put_mtd_device(mtd);
 	file->private_data = NULL;
 	kfree(mfi);
@@ -137,12 +159,45 @@ static int mtd_close(struct inode *inode, struct file *file)
 */
 #define MAX_KMALLOC_SIZE 0x20000
 
+static void *__mtd_buf_kmalloc(size_t size)
+{
+	gfp_t flags;
+
+	if (size > PAGE_SIZE)
+		flags = GFP_KERNEL | __GFP_NOWARN;
+	else
+		flags = GFP_KERNEL;
+
+	return kmalloc(size, flags);
+}
+
+static void *mtd_buf_alloc(size_t *size)
+{
+	void *kbuf;
+	size_t next;
+
+	if (*size > MAX_KMALLOC_SIZE)
+		*size = MAX_KMALLOC_SIZE;
+
+	kbuf = __mtd_buf_kmalloc(*size);
+	next = 1 << (fls(*size - 1) - 1);
+
+	while (!kbuf && next >= PAGE_SIZE) {
+		*size = next;
+		next /= 2;
+		kbuf = __mtd_buf_kmalloc(*size);
+	}
+
+	return kbuf;
+}
+
 static ssize_t mtd_read(struct file *file, char __user *buf, size_t count,loff_t *ppos)
 {
 	struct mtd_file_info *mfi = file->private_data;
 	struct mtd_info *mtd = mfi->mtd;
 	size_t retlen=0;
 	size_t total_retlen=0;
+	size_t alloc;
 	int ret=0;
 	int len;
 	char *kbuf;
@@ -158,18 +213,14 @@ static ssize_t mtd_read(struct file *file, char __user *buf, size_t count,loff_t
 	/* FIXME: Use kiovec in 2.5 to lock down the user's buffers
 	   and pass them directly to the MTD functions */
 
-	if (count > MAX_KMALLOC_SIZE)
-		kbuf=kmalloc(MAX_KMALLOC_SIZE, GFP_KERNEL);
-	else
-		kbuf=kmalloc(count, GFP_KERNEL);
-
+	alloc = count;
+	kbuf = mtd_buf_alloc(&alloc);
 	if (!kbuf)
 		return -ENOMEM;
 
 	while (count) {
-
-		if (count > MAX_KMALLOC_SIZE)
-			len = MAX_KMALLOC_SIZE;
+		if (count > alloc)
+			len = alloc;
 		else
 			len = count;
 
@@ -237,6 +288,7 @@ static ssize_t mtd_write(struct file *file, const char __user *buf, size_t count
 	char *kbuf;
 	size_t retlen;
 	size_t total_retlen=0;
+	size_t alloc;
 	int ret=0;
 	int len;
 
@@ -251,18 +303,16 @@ static ssize_t mtd_write(struct file *file, const char __user *buf, size_t count
 	if (!count)
 		return 0;
 
-	if (count > MAX_KMALLOC_SIZE)
-		kbuf=kmalloc(MAX_KMALLOC_SIZE, GFP_KERNEL);
-	else
-		kbuf=kmalloc(count, GFP_KERNEL);
+	alloc = count;
+	kbuf = mtd_buf_alloc(&alloc);
 
 	if (!kbuf)
 		return -ENOMEM;
 
 	while (count) {
 
-		if (count > MAX_KMALLOC_SIZE)
-			len = MAX_KMALLOC_SIZE;
+		if (count > alloc)
+			len = alloc;
 		else
 			len = count;
 
@@ -449,6 +499,100 @@ static int mtd_do_readoob(struct mtd_info *mtd, uint64_t start,
 	kfree(ops.oobbuf);
 	return ret;
 }
+
+#ifdef CONFIG_MTD_PARTITIONS
+static int mtd_blkpg_ioctl(struct mtd_info *mtd,
+			   struct blkpg_ioctl_arg __user *arg)
+{
+	struct blkpg_ioctl_arg a;
+	struct blkpg_partition p;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	if (copy_from_user(&a, arg, sizeof(struct blkpg_ioctl_arg)))
+		return -EFAULT;
+
+	if (copy_from_user(&p, a.data, sizeof(struct blkpg_partition)))
+		return -EFAULT;
+
+	switch (a.op) {
+	case BLKPG_ADD_PARTITION:
+
+		/* Only master mtd device must be used to add partitions */
+		if (mtd_is_partition(mtd))
+			return -EINVAL;
+
+		return mtd_add_partition(mtd, p.devname, p.start, p.length);
+
+	case BLKPG_DEL_PARTITION:
+
+		if (p.pno < 0)
+			return -EINVAL;
+
+		return mtd_del_partition(mtd, p.pno);
+
+	default:
+		return -EINVAL;
+	}
+}
+
+static int mtd_do_repartition(struct file *file, struct mtd_info *mtd,
+			      uint32_t nparts, void __user *ptr)
+{
+	struct mtd_partition *parts;
+	struct mtd_partition_user *up;
+	int size, i, ret = -ENOMEM;
+
+	if (!(file->f_mode & FMODE_WRITE))
+		return -EPERM;
+
+	size = nparts * sizeof(struct mtd_partition_user);
+	if (!size)
+		return -EINVAL;
+
+	if (!access_ok(VERIFY_READ, ptr, size))
+		return -EFAULT;
+
+	up = kmalloc(size, GFP_KERNEL);
+	if (!up)
+		return -ENOMEM;
+
+	if (copy_from_user(up, ptr, size)) {
+		ret = -EFAULT;
+		goto err_free_up;
+	}
+
+	size = nparts * sizeof(struct mtd_partition);
+	parts = kzalloc(size, GFP_KERNEL);
+	if (!parts)
+		goto err_free_up;
+
+	for (i = 0; i < nparts; i++) {
+		parts[i].offset = up[i].offset;
+		parts[i].size = up[i].size;
+		parts[i].mask_flags = up[i].mask_flags;
+
+		parts[i].name = kstrndup(up[i].name, MTD_MAX_PARTITION_NAME_LEN,
+					 GFP_KERNEL);
+		if (!parts[i].name)
+			goto err_free;
+	}
+
+	ret = del_mtd_partitions(mtd);
+	if (!ret)
+		ret = add_mtd_partitions(mtd, parts, nparts);
+
+err_free:
+	for (i = 0; i < nparts; i++)
+		kfree(parts[i].name);
+	kfree(parts);
+err_free_up:
+	kfree(up);
+
+	return ret;
+}
+#endif
 
 static int mtd_ioctl(struct inode *inode, struct file *file,
 		     u_int cmd, u_long arg)
@@ -814,7 +958,39 @@ static int mtd_ioctl(struct inode *inode, struct file *file,
 		file->f_pos = 0;
 		break;
 	}
+#ifdef CONFIG_MTD_PARTITIONS
+	case BLKPG:
+	{
+		ret = mtd_blkpg_ioctl(mtd,
+				      (struct blkpg_ioctl_arg __user *)arg);
+		break;
+	}
 
+	case BLKRRPART:
+	{
+		/* No reread partition feature. Just return ok */
+		ret = 0;
+		break;
+	}
+
+	case MTDREPARTITION:
+	{
+		struct mtd_partitions p;
+		struct mtd_info *master;
+
+		/* only root (no assigned master) device can be accessed */
+		master = part_get_mtd_master(mtd);
+		if (master)
+			return -EACCES;
+
+		if (copy_from_user(&p, argp, sizeof(p)))
+			return -EFAULT;
+
+		ret = mtd_do_repartition(file, mtd, p.nparts, p.parts);
+
+		break;
+	}
+#endif
 	default:
 		ret = -ENOTTY;
 	}
@@ -832,6 +1008,15 @@ struct mtd_oob_buf32 {
 
 #define MEMWRITEOOB32		_IOWR('M', 3, struct mtd_oob_buf32)
 #define MEMREADOOB32		_IOWR('M', 4, struct mtd_oob_buf32)
+
+#ifdef CONFIG_MTD_PARTITIONS
+struct mtd_partitions32 {
+	uint32_t nparts;
+	compat_caddr_t ptr;
+};
+
+#define MTDREPARTITION32	_IOW('M', 23, struct mtd_partitions32)
+#endif
 
 static long mtd_compat_ioctl(struct file *file, unsigned int cmd,
 	unsigned long arg)
@@ -873,6 +1058,28 @@ static long mtd_compat_ioctl(struct file *file, unsigned int cmd,
 				&buf_user->start);
 		break;
 	}
+
+#ifdef CONFIG_MTD_PARTITIONS
+	case MTDREPARTITION32:
+	{
+		struct mtd_partitions32 p;
+		struct mtd_info *master;
+
+		/* only root (no assigned master) device can be accessed */
+		master = part_get_mtd_master(mtd);
+		if (!master) {
+			if (copy_from_user(&p, argp, sizeof(p)))
+				ret = -EFAULT;
+			else
+				ret = mtd_do_repartition(file, mtd, p.nparts,
+							 compat_ptr(p.ptr));
+		} else {
+			ret = -EACCES;
+		}
+
+		break;
+	}
+#endif
 	default:
 		ret = mtd_ioctl(inode, file, cmd, (unsigned long)argp);
 	}
@@ -954,21 +1161,79 @@ static const struct file_operations mtd_fops = {
 #endif
 };
 
+static int mtd_inodefs_get_sb(struct file_system_type *fs_type, int flags,
+		const char *dev_name, void *data,
+		struct vfsmount *mnt)
+{
+	return get_sb_pseudo(fs_type, "mtd_inode:", NULL, MTD_INODE_FS_MAGIC,
+			mnt);
+}
+
+static struct file_system_type mtd_inodefs_type = {
+       .name = "mtd_inodefs",
+       .get_sb = mtd_inodefs_get_sb,
+       .kill_sb = kill_anon_super,
+};
+
+static void mtdchar_notify_add(struct mtd_info *mtd)
+{
+}
+
+static void mtdchar_notify_remove(struct mtd_info *mtd)
+{
+       struct inode *mtd_ino = ilookup(mtd_inode_mnt->mnt_sb, mtd->index);
+
+       if (mtd_ino) {
+               /* Destroy the inode if it exists */
+               mtd_ino->i_nlink = 0;
+               iput(mtd_ino);
+       }
+}
+
+static struct mtd_notifier mtdchar_notifier = {
+       .add = mtdchar_notify_add,
+       .remove = mtdchar_notify_remove,
+};
+
 static int __init init_mtdchar(void)
 {
-	int status;
+	int ret;
 
-	status = register_chrdev(MTD_CHAR_MAJOR, "mtd", &mtd_fops);
-	if (status < 0) {
-		printk(KERN_NOTICE "Can't allocate major number %d for Memory Technology Devices.\n",
-		       MTD_CHAR_MAJOR);
+	ret = register_chrdev(MTD_CHAR_MAJOR, "mtd", &mtd_fops);
+	if (ret < 0) {
+		pr_notice("Can't allocate major number %d for "
+				"Memory Technology Devices.\n", MTD_CHAR_MAJOR);
+		return ret;
 	}
 
-	return status;
+	ret = register_filesystem(&mtd_inodefs_type);
+	if (ret) {
+		pr_notice("Can't register mtd_inodefs filesystem: %d\n", ret);
+		goto err_unregister_chdev;
+	}
+
+	mtd_inode_mnt = kern_mount(&mtd_inodefs_type);
+	if (IS_ERR(mtd_inode_mnt)) {
+		ret = PTR_ERR(mtd_inode_mnt);
+		pr_notice("Error mounting mtd_inodefs filesystem: %d\n", ret);
+		goto err_unregister_filesystem;
+	}
+	register_mtd_user(&mtdchar_notifier);
+
+	return ret;
+
+err_unregister_filesystem:
+	unregister_filesystem(&mtd_inodefs_type);
+err_unregister_chdev:
+	unregister_chrdev(MTD_CHAR_MAJOR, "mtd");
+	return ret;
 }
 
 static void __exit cleanup_mtdchar(void)
 {
+	unregister_mtd_user(&mtdchar_notifier);
+	mntput(mtd_inode_mnt);
+	unregister_filesystem(&mtd_inodefs_type);
 	unregister_chrdev(MTD_CHAR_MAJOR, "mtd");
 }
 

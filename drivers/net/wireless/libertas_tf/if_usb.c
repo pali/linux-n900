@@ -648,12 +648,15 @@ static int if_usb_prog_firmware(struct if_usb_card *cardp)
 	static int reset_count = 10;
 	int ret = 0;
 
+	kparam_block_sysfs_write(fw_name);
 	ret = request_firmware(&cardp->fw, lbtf_fw_name, &cardp->udev->dev);
 	if (ret < 0) {
 		printk(KERN_INFO "libertastf: firmware %s not found\n",
 		       lbtf_fw_name);
+		kparam_unblock_sysfs_write(fw_name);
 		goto done;
 	}
+	kparam_unblock_sysfs_write(fw_name);
 
 	if (check_fwfile_format(cardp->fw->data, cardp->fw->size))
 		goto release_fw;

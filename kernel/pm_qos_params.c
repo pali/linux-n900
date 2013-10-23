@@ -29,7 +29,6 @@
 
 #include <linux/pm_qos_params.h>
 #include <linux/sched.h>
-#include <linux/smp_lock.h>
 #include <linux/spinlock.h>
 #include <linux/slab.h>
 #include <linux/time.h>
@@ -352,20 +351,15 @@ static int pm_qos_power_open(struct inode *inode, struct file *filp)
 	int ret;
 	long pm_qos_class;
 
-	lock_kernel();
 	pm_qos_class = find_pm_qos_object_by_minor(iminor(inode));
 	if (pm_qos_class >= 0) {
 		filp->private_data = (void *)pm_qos_class;
 		sprintf(name, "process_%d", current->pid);
 		ret = pm_qos_add_requirement(pm_qos_class, name,
 					PM_QOS_DEFAULT_VALUE);
-		if (ret >= 0) {
-			unlock_kernel();
+		if (ret >= 0)
 			return 0;
-		}
 	}
-	unlock_kernel();
-
 	return -EPERM;
 }
 
@@ -421,3 +415,28 @@ static int __init pm_qos_power_init(void)
 }
 
 late_initcall(pm_qos_power_init);
+
+int pm_qos_dump_reqs(struct seq_file *s, void *unused)
+{
+	struct requirement_list *node;
+	unsigned long flags;
+	int i;
+	const char *pm_qos_names[] = {
+		"DMA_LATENCY",
+		"NET_LATENCY",
+		"NET_TPUT",
+	};
+
+	spin_lock_irqsave(&pm_qos_lock, flags);
+	for (i = 0; i < ARRAY_SIZE(pm_qos_names); i++) {
+		seq_printf(s, "%s: %d\n", pm_qos_names[i],
+				atomic_read(&pm_qos_array[i+1]->target_value));
+		list_for_each_entry(node,
+			&pm_qos_array[i+1]->requirements.list, list) {
+			seq_printf(s, "  %s: %d\n",
+				node->name, node->value);
+		}
+	}
+	spin_unlock_irqrestore(&pm_qos_lock, flags);
+	return 0;
+}

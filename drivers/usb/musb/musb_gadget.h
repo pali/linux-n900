@@ -35,13 +35,17 @@
 #ifndef __MUSB_GADGET_H
 #define __MUSB_GADGET_H
 
+#include <linux/list.h>
+
 struct musb_request {
 	struct usb_request	request;
 	struct musb_ep		*ep;
 	struct musb		*musb;
+	struct list_head	queue;
 	u8 tx;			/* endpoint direction */
 	u8 epnum;
 	u8 mapped;
+	u8 complete;
 };
 
 static inline struct musb_request *to_musb_request(struct usb_request *req)
@@ -75,8 +79,15 @@ struct musb_ep {
 	/* later things are modified based on usage */
 	struct list_head		req_list;
 
+	u8				wedged;
+
 	/* true if lock must be dropped but req_list may not be advanced */
-	u8				busy;
+	u8				busy:1;
+	u8				rx_pending:1;
+
+	/* true if endpoint is stalled */
+	u8				stalled:1;
+	u8				pio_coming:1;
 };
 
 static inline struct musb_ep *to_musb_ep(struct usb_ep *ep)
@@ -84,26 +95,26 @@ static inline struct musb_ep *to_musb_ep(struct usb_ep *ep)
 	return ep ? container_of(ep, struct musb_ep, end_point) : NULL;
 }
 
-static inline struct usb_request *next_request(struct musb_ep *ep)
+static inline struct musb_request *next_request(struct musb_ep *ep)
 {
 	struct list_head	*queue = &ep->req_list;
 
 	if (list_empty(queue))
 		return NULL;
-	return container_of(queue->next, struct usb_request, list);
+	return list_first_entry(queue, struct musb_request, queue);
 }
 
 extern void musb_g_tx(struct musb *musb, u8 epnum);
-extern void musb_g_rx(struct musb *musb, u8 epnum);
+extern void musb_g_rx(struct musb *musb, u8 epnum, bool is_dma);
 
 extern const struct usb_ep_ops musb_g_ep0_ops;
 
 extern int musb_gadget_setup(struct musb *);
 extern void musb_gadget_cleanup(struct musb *);
 
-extern void musb_g_giveback(struct musb_ep *, struct usb_request *, int);
+extern void musb_g_giveback(struct musb_ep *, struct musb_request *, int);
 
-extern int musb_gadget_set_halt(struct usb_ep *ep, int value);
+extern void musb_pullup(struct musb *musb, int is_on);
 
 extern void musb_ep_restart(struct musb *, struct musb_request *);
 

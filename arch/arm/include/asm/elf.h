@@ -92,8 +92,8 @@ struct elf32_hdr;
 /*
  * This is used to ensure we don't load something for the wrong architecture.
  */
-extern int elf_check_arch(const struct elf32_hdr *);
-#define elf_check_arch elf_check_arch
+extern int arm_elf_check_arch(const struct elf32_hdr *);
+#define elf_check_arch(x) arm_elf_check_arch((const struct elf32_hdr *)(x))
 
 extern int arm_elf_read_implies_exec(const struct elf32_hdr *, int);
 #define elf_read_implies_exec(ex,stk) arm_elf_read_implies_exec(&(ex), stk)

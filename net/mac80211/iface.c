@@ -62,6 +62,23 @@ static int ieee80211_change_mtu(struct net_device *dev, int new_mtu)
 	return 0;
 }
 
+static int ieee80211_change_mac(struct net_device *dev, void *addr)
+{
+	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+	struct sockaddr *sa = addr;
+	int ret;
+
+	if (ieee80211_sdata_running(sdata))
+		return -EBUSY;
+
+	ret = eth_mac_addr(dev, sa);
+
+	if (ret == 0)
+		memcpy(sdata->vif.addr, sa->sa_data, ETH_ALEN);
+
+	return ret;
+}
+
 static inline int identical_mac_addr_allowed(int type1, int type2)
 {
 	return type1 == NL80211_IFTYPE_MONITOR ||
@@ -82,7 +99,6 @@ static int ieee80211_open(struct net_device *dev)
 	struct ieee80211_sub_if_data *nsdata;
 	struct ieee80211_local *local = sdata->local;
 	struct sta_info *sta;
-	struct ieee80211_if_init_conf conf;
 	u32 changed = 0;
 	int res;
 	u32 hw_reconf_flags = 0;
@@ -97,7 +113,7 @@ static int ieee80211_open(struct net_device *dev)
 	list_for_each_entry(nsdata, &local->interfaces, list) {
 		struct net_device *ndev = nsdata->dev;
 
-		if (ndev != dev && netif_running(ndev)) {
+		if (ndev != dev && ieee80211_sdata_running(nsdata)) {
 			/*
 			 * Allow only a single IBSS interface to be up at any
 			 * time. This is restricted because beacon distribution
@@ -183,13 +199,15 @@ static int ieee80211_open(struct net_device *dev)
 		struct net_device *ndev = nsdata->dev;
 
 		/*
-		 * No need to check netif_running since we do not allow
+		 * No need to check running since we do not allow
 		 * it to start up with this invalid address.
 		 */
-		if (compare_ether_addr(null_addr, ndev->dev_addr) == 0)
+		if (compare_ether_addr(null_addr, ndev->dev_addr) == 0) {
 			memcpy(ndev->dev_addr,
 			       local->hw.wiphy->perm_addr,
 			       ETH_ALEN);
+			memcpy(ndev->perm_addr, ndev->dev_addr, ETH_ALEN);
+		}
 	}
 
 	/*
@@ -214,8 +232,8 @@ static int ieee80211_open(struct net_device *dev)
 		/* must be before the call to ieee80211_configure_filter */
 		local->monitors++;
 		if (local->monitors == 1) {
-			local->hw.conf.flags |= IEEE80211_CONF_RADIOTAP;
-			hw_reconf_flags |= IEEE80211_CONF_CHANGE_RADIOTAP;
+			local->hw.conf.flags |= IEEE80211_CONF_MONITOR;
+			hw_reconf_flags |= IEEE80211_CONF_CHANGE_MONITOR;
 		}
 
 		if (sdata->u.mntr_flags & MONITOR_FLAG_FCSFAIL)
@@ -232,10 +250,7 @@ static int ieee80211_open(struct net_device *dev)
 		ieee80211_configure_filter(local);
 		break;
 	default:
-		conf.vif = &sdata->vif;
-		conf.type = sdata->vif.type;
-		conf.mac_addr = dev->dev_addr;
-		res = drv_add_interface(local, &conf);
+		res = drv_add_interface(local, &sdata->vif);
 		if (res)
 			goto err_stop;
 
@@ -252,7 +267,6 @@ static int ieee80211_open(struct net_device *dev)
 
 		changed |= ieee80211_reset_erp_info(sdata);
 		ieee80211_bss_info_change_notify(sdata, changed);
-		ieee80211_enable_keys(sdata);
 
 		if (sdata->vif.type == NL80211_IFTYPE_STATION)
 			netif_carrier_off(dev);
@@ -318,7 +332,7 @@ static int ieee80211_open(struct net_device *dev)
 
 	return 0;
  err_del_interface:
-	drv_remove_interface(local, &conf);
+	drv_remove_interface(local, &sdata->vif);
  err_stop:
 	if (!local->open_count)
 		drv_stop(local);
@@ -333,7 +347,6 @@ static int ieee80211_stop(struct net_device *dev)
 {
 	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
 	struct ieee80211_local *local = sdata->local;
-	struct ieee80211_if_init_conf conf;
 	struct sta_info *sta;
 	unsigned long flags;
 	struct sk_buff *skb, *tmp;
@@ -344,6 +357,11 @@ static int ieee80211_stop(struct net_device *dev)
 	 * Stop TX on this interface first.
 	 */
 	netif_tx_stop_all_queues(dev);
+
+	/*
+	 * Purge work for this interface.
+	 */
+	ieee80211_work_purge(sdata);
 
 	/*
 	 * Now delete all active aggregation sessions.
@@ -435,8 +453,8 @@ static int ieee80211_stop(struct net_device *dev)
 
 		local->monitors--;
 		if (local->monitors == 0) {
-			local->hw.conf.flags &= ~IEEE80211_CONF_RADIOTAP;
-			hw_reconf_flags |= IEEE80211_CONF_CHANGE_RADIOTAP;
+			local->hw.conf.flags &= ~IEEE80211_CONF_MONITOR;
+			hw_reconf_flags |= IEEE80211_CONF_CHANGE_MONITOR;
 		}
 
 		if (sdata->u.mntr_flags & MONITOR_FLAG_FCSFAIL)
@@ -467,7 +485,7 @@ static int ieee80211_stop(struct net_device *dev)
 		cancel_work_sync(&sdata->u.mgd.work);
 		cancel_work_sync(&sdata->u.mgd.chswitch_work);
 		cancel_work_sync(&sdata->u.mgd.monitor_work);
-		cancel_work_sync(&sdata->u.mgd.beacon_loss_work);
+		cancel_work_sync(&sdata->u.mgd.beacon_connection_loss_work);
 
 		/*
 		 * When we get here, the interface is marked down.
@@ -512,12 +530,9 @@ static int ieee80211_stop(struct net_device *dev)
 				BSS_CHANGED_BEACON_ENABLED);
 		}
 
-		conf.vif = &sdata->vif;
-		conf.type = sdata->vif.type;
-		conf.mac_addr = dev->dev_addr;
-		/* disable all keys for as long as this netdev is down */
-		ieee80211_disable_keys(sdata);
-		drv_remove_interface(local, &conf);
+		/* free all remaining keys, there shouldn't be any */
+		ieee80211_free_keys(sdata);
+		drv_remove_interface(local, &sdata->vif);
 	}
 
 	sdata->bss = NULL;
@@ -657,7 +672,7 @@ static const struct net_device_ops ieee80211_dataif_ops = {
 	.ndo_start_xmit		= ieee80211_subif_start_xmit,
 	.ndo_set_multicast_list = ieee80211_set_multicast_list,
 	.ndo_change_mtu 	= ieee80211_change_mtu,
-	.ndo_set_mac_address 	= eth_mac_addr,
+	.ndo_set_mac_address 	= ieee80211_change_mac,
 	.ndo_select_queue	= ieee80211_netdev_select_queue,
 };
 
@@ -668,6 +683,7 @@ static u16 ieee80211_monitor_select_queue(struct net_device *dev,
 	struct ieee80211_local *local = sdata->local;
 	struct ieee80211_hdr *hdr;
 	struct ieee80211_radiotap_header *rtap = (void *)skb->data;
+	u8 *p;
 
 	if (local->hw.queues < 4)
 		return 0;
@@ -682,8 +698,14 @@ static u16 ieee80211_monitor_select_queue(struct net_device *dev,
 		skb->priority = 7;
 		return ieee802_1d_to_ac[skb->priority];
 	}
+	if (!ieee80211_is_data_qos(hdr->frame_control)) {
+		skb->priority = 0;
+		return ieee802_1d_to_ac[skb->priority];
+	}
 
-	skb->priority = 0;
+	p = ieee80211_get_qos_ctl(hdr);
+	skb->priority = *p & IEEE80211_QOS_CTL_TAG1D_MASK;
+
 	return ieee80211_downgrade_queue(local, skb);
 }
 
@@ -718,6 +740,9 @@ static void ieee80211_setup_sdata(struct ieee80211_sub_if_data *sdata,
 	sdata->vif.type = type;
 	sdata->dev->netdev_ops = &ieee80211_dataif_ops;
 	sdata->wdev.iftype = type;
+
+	sdata->control_port_protocol = cpu_to_be16(ETH_P_PAE);
+	sdata->control_port_no_encrypt = false;
 
 	/* only monitor differs */
 	sdata->dev->type = ARPHRD_ETHER;
@@ -774,7 +799,7 @@ int ieee80211_if_change_type(struct ieee80211_sub_if_data *sdata,
 	 * and goes into the requested mode.
 	 */
 
-	if (netif_running(sdata->dev))
+	if (ieee80211_sdata_running(sdata))
 		return -EBUSY;
 
 	/* Purge and reset type-dependent state. */
@@ -786,13 +811,123 @@ int ieee80211_if_change_type(struct ieee80211_sub_if_data *sdata,
 		ieee80211_mandatory_rates(sdata->local,
 			sdata->local->hw.conf.channel->band);
 	sdata->drop_unencrypted = 0;
+	if (type == NL80211_IFTYPE_STATION)
+		sdata->u.mgd.use_4addr = false;
 
 	return 0;
 }
 
-static struct device_type wiphy_type = {
-	.name	= "wlan",
-};
+static void ieee80211_assign_perm_addr(struct ieee80211_local *local,
+				       struct net_device *dev,
+				       enum nl80211_iftype type)
+{
+	struct ieee80211_sub_if_data *sdata;
+	u64 mask, start, addr, val, inc;
+	u8 *m;
+	u8 tmp_addr[ETH_ALEN];
+	int i;
+
+	/* default ... something at least */
+	memcpy(dev->perm_addr, local->hw.wiphy->perm_addr, ETH_ALEN);
+
+	if (is_zero_ether_addr(local->hw.wiphy->addr_mask) &&
+	    local->hw.wiphy->n_addresses <= 1)
+		return;
+
+
+	mutex_lock(&local->iflist_mtx);
+
+	switch (type) {
+	case NL80211_IFTYPE_MONITOR:
+		/* doesn't matter */
+		break;
+	case NL80211_IFTYPE_WDS:
+	case NL80211_IFTYPE_AP_VLAN:
+		/* match up with an AP interface */
+		list_for_each_entry(sdata, &local->interfaces, list) {
+			if (sdata->vif.type != NL80211_IFTYPE_AP)
+				continue;
+			memcpy(dev->perm_addr, sdata->vif.addr, ETH_ALEN);
+			break;
+		}
+		/* keep default if no AP interface present */
+		break;
+	default:
+		/* assign a new address if possible -- try n_addresses first */
+		for (i = 0; i < local->hw.wiphy->n_addresses; i++) {
+			bool used = false;
+
+			list_for_each_entry(sdata, &local->interfaces, list) {
+				if (memcmp(local->hw.wiphy->addresses[i].addr,
+					   sdata->vif.addr, ETH_ALEN) == 0) {
+					used = true;
+					break;
+				}
+			}
+
+			if (!used) {
+				memcpy(dev->perm_addr,
+				       local->hw.wiphy->addresses[i].addr,
+				       ETH_ALEN);
+				break;
+			}
+		}
+
+		/* try mask if available */
+		if (is_zero_ether_addr(local->hw.wiphy->addr_mask))
+			break;
+
+		m = local->hw.wiphy->addr_mask;
+		mask =	((u64)m[0] << 5*8) | ((u64)m[1] << 4*8) |
+			((u64)m[2] << 3*8) | ((u64)m[3] << 2*8) |
+			((u64)m[4] << 1*8) | ((u64)m[5] << 0*8);
+
+		if (__ffs64(mask) + hweight64(mask) != fls64(mask)) {
+			/* not a contiguous mask ... not handled now! */
+			printk(KERN_DEBUG "not contiguous\n");
+			break;
+		}
+
+		m = local->hw.wiphy->perm_addr;
+		start = ((u64)m[0] << 5*8) | ((u64)m[1] << 4*8) |
+			((u64)m[2] << 3*8) | ((u64)m[3] << 2*8) |
+			((u64)m[4] << 1*8) | ((u64)m[5] << 0*8);
+
+		inc = 1ULL<<__ffs64(mask);
+		val = (start & mask);
+		addr = (start & ~mask) | (val & mask);
+		do {
+			bool used = false;
+
+			tmp_addr[5] = addr >> 0*8;
+			tmp_addr[4] = addr >> 1*8;
+			tmp_addr[3] = addr >> 2*8;
+			tmp_addr[2] = addr >> 3*8;
+			tmp_addr[1] = addr >> 4*8;
+			tmp_addr[0] = addr >> 5*8;
+
+			val += inc;
+
+			list_for_each_entry(sdata, &local->interfaces, list) {
+				if (memcmp(tmp_addr, sdata->vif.addr,
+							ETH_ALEN) == 0) {
+					used = true;
+					break;
+				}
+			}
+
+			if (!used) {
+				memcpy(dev->perm_addr, tmp_addr, ETH_ALEN);
+				break;
+			}
+			addr = (start & ~mask) | (val & mask);
+		} while (addr != start);
+
+		break;
+	}
+
+	mutex_unlock(&local->iflist_mtx);
+}
 
 int ieee80211_if_add(struct ieee80211_local *local, const char *name,
 		     struct net_device **new_dev, enum nl80211_iftype type,
@@ -823,29 +958,44 @@ int ieee80211_if_add(struct ieee80211_local *local, const char *name,
 	if (ret < 0)
 		goto fail;
 
-	memcpy(ndev->dev_addr, local->hw.wiphy->perm_addr, ETH_ALEN);
+	ieee80211_assign_perm_addr(local, ndev, type);
+	memcpy(ndev->dev_addr, ndev->perm_addr, ETH_ALEN);
 	SET_NETDEV_DEV(ndev, wiphy_dev(local->hw.wiphy));
-	SET_NETDEV_DEVTYPE(ndev, &wiphy_type);
 
 	/* don't use IEEE80211_DEV_TO_SUB_IF because it checks too much */
 	sdata = netdev_priv(ndev);
 	ndev->ieee80211_ptr = &sdata->wdev;
+	memcpy(sdata->vif.addr, ndev->dev_addr, ETH_ALEN);
+	memcpy(sdata->name, ndev->name, IFNAMSIZ);
 
 	/* initialise type-independent data */
 	sdata->wdev.wiphy = local->hw.wiphy;
 	sdata->local = local;
 	sdata->dev = ndev;
+#ifdef CONFIG_INET
+	sdata->arp_filter_state = true;
+#endif
 
 	for (i = 0; i < IEEE80211_FRAGMENT_MAX; i++)
 		skb_queue_head_init(&sdata->fragments[i].skb_list);
 
 	INIT_LIST_HEAD(&sdata->key_list);
 
-	sdata->force_unicast_rateidx = -1;
-	sdata->max_ratectrl_rateidx = -1;
+	for (i = 0; i < IEEE80211_NUM_BANDS; i++) {
+		struct ieee80211_supported_band *sband;
+		sband = local->hw.wiphy->bands[i];
+		sdata->rc_rateidx_mask[i] =
+			sband ? (1 << sband->n_bitrates) - 1 : 0;
+	}
 
 	/* setup type-dependent data */
 	ieee80211_setup_sdata(sdata, type);
+
+	if (params) {
+		ndev->ieee80211_ptr->use_4addr = params->use_4addr;
+		if (type == NL80211_IFTYPE_STATION)
+			sdata->u.mgd.use_4addr = params->use_4addr;
+	}
 
 	ret = register_netdevice(ndev);
 	if (ret)
@@ -890,22 +1040,18 @@ void ieee80211_if_remove(struct ieee80211_sub_if_data *sdata)
 void ieee80211_remove_interfaces(struct ieee80211_local *local)
 {
 	struct ieee80211_sub_if_data *sdata, *tmp;
+	LIST_HEAD(unreg_list);
 
 	ASSERT_RTNL();
 
+	mutex_lock(&local->iflist_mtx);
 	list_for_each_entry_safe(sdata, tmp, &local->interfaces, list) {
-		/*
-		 * we cannot hold the iflist_mtx across unregister_netdevice,
-		 * but we only need to hold it for list modifications to lock
-		 * out readers since we're under the RTNL here as all other
-		 * writers.
-		 */
-		mutex_lock(&local->iflist_mtx);
 		list_del(&sdata->list);
-		mutex_unlock(&local->iflist_mtx);
 
-		unregister_netdevice(sdata->dev);
+		unregister_netdevice_queue(sdata->dev, &unreg_list);
 	}
+	mutex_unlock(&local->iflist_mtx);
+	unregister_netdevice_many(&unreg_list);
 }
 
 static u32 ieee80211_idle_off(struct ieee80211_local *local,
@@ -933,6 +1079,8 @@ static u32 ieee80211_idle_on(struct ieee80211_local *local)
 	       wiphy_name(local->hw.wiphy));
 #endif
 
+	drv_flush(local, false);
+
 	local->hw.conf.flags |= IEEE80211_CONF_IDLE;
 	return IEEE80211_CONF_CHANGE_IDLE;
 }
@@ -942,16 +1090,18 @@ u32 __ieee80211_recalc_idle(struct ieee80211_local *local)
 	struct ieee80211_sub_if_data *sdata;
 	int count = 0;
 
+	if (!list_empty(&local->work_list))
+		return ieee80211_idle_off(local, "working");
+
 	if (local->scanning)
 		return ieee80211_idle_off(local, "scanning");
 
 	list_for_each_entry(sdata, &local->interfaces, list) {
-		if (!netif_running(sdata->dev))
+		if (!ieee80211_sdata_running(sdata))
 			continue;
 		/* do not count disabled managed interfaces */
 		if (sdata->vif.type == NL80211_IFTYPE_STATION &&
-		    !sdata->u.mgd.associated &&
-		    list_empty(&sdata->u.mgd.work_list))
+		    !sdata->u.mgd.associated)
 			continue;
 		/* do not count unused IBSS interfaces */
 		if (sdata->vif.type == NL80211_IFTYPE_ADHOC &&
@@ -978,4 +1128,42 @@ void ieee80211_recalc_idle(struct ieee80211_local *local)
 	mutex_unlock(&local->iflist_mtx);
 	if (chg)
 		ieee80211_hw_config(local, chg);
+}
+
+static int netdev_notify(struct notifier_block *nb,
+			 unsigned long state,
+			 void *ndev)
+{
+	struct net_device *dev = ndev;
+	struct ieee80211_sub_if_data *sdata;
+
+	if (state != NETDEV_CHANGENAME)
+		return 0;
+
+	if (!dev->ieee80211_ptr || !dev->ieee80211_ptr->wiphy)
+		return 0;
+
+	if (dev->ieee80211_ptr->wiphy->privid != mac80211_wiphy_privid)
+		return 0;
+
+	sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+
+	memcpy(sdata->name, dev->name, IFNAMSIZ);
+
+	ieee80211_debugfs_rename_netdev(sdata);
+	return 0;
+}
+
+static struct notifier_block mac80211_netdev_notifier = {
+	.notifier_call = netdev_notify,
+};
+
+int ieee80211_iface_init(void)
+{
+	return register_netdevice_notifier(&mac80211_netdev_notifier);
+}
+
+void ieee80211_iface_exit(void)
+{
+	unregister_netdevice_notifier(&mac80211_netdev_notifier);
 }

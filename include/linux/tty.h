@@ -46,6 +46,7 @@
 #define N_GIGASET_M101	16	/* Siemens Gigaset M101 serial DECT adapter */
 #define N_SLCAN		17	/* Serial / USB serial CAN Adaptors */
 #define N_PPS		18	/* Pulse per Second */
+#define N_FBUS		19	/* Nokia FBUS */
 
 #define N_V253		19	/* Codec control over voice modem */
 

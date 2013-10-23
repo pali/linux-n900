@@ -71,3 +71,4 @@ obj-$(CONFIG_IP_NF_ARPFILTER) += arptable_filter.o
 
 obj-$(CONFIG_IP_NF_QUEUE) += ip_queue.o
 
+obj-$(CONFIG_IP_NF_HB) += iphb.o

@@ -58,7 +58,7 @@ static int exofs_file_fsync(struct file *filp, struct dentry *dentry,
 	/* This is a good place to write the sb */
 	/* TODO: Sechedule an sb-sync on create */
 	sb = inode->i_sb;
-	if (sb->s_dirt)
+	if (sb_is_dirty(sb))
 		exofs_sync_fs(sb, 1);
 
 	return ret;

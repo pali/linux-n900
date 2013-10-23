@@ -38,7 +38,13 @@
 #ifndef CONFIG_BLACKFIN
 
 #define MUSB_HSDMA_BASE		0x200
-#define MUSB_HSDMA_INTR		(MUSB_HSDMA_BASE + 0)
+/*
+ * DMA Interrupt Status register is nominally documented to be at offset 0, but
+ * is confirmed by HW experts to be aliased in each channel at offsets n*0x10.
+ * Offset 0 has an address decoding bug in HW and may sometimes return zero
+ * instead of the correct value. A workaround is to use offset 0x10 instead.
+ */
+#define MUSB_HSDMA_INTR		(MUSB_HSDMA_BASE + 0x10)
 #define MUSB_HSDMA_CONTROL		0x4
 #define MUSB_HSDMA_ADDRESS		0x8
 #define MUSB_HSDMA_COUNT		0xc
@@ -54,6 +60,10 @@
 	musb_writel(mbase, \
 		    MUSB_HSDMA_CHANNEL_OFFSET(bchannel, MUSB_HSDMA_ADDRESS), \
 		    addr)
+
+#define musb_read_hsdma_count(mbase, bchannel)	\
+	musb_readl(mbase,	\
+		   MUSB_HSDMA_CHANNEL_OFFSET(bchannel, MUSB_HSDMA_COUNT))
 
 #define musb_write_hsdma_count(mbase, bchannel, len) \
 	musb_writel(mbase, \
@@ -96,32 +106,35 @@ static inline void musb_write_hsdma_addr(void __iomem *mbase,
 		((u16)(((u32) dma_addr >> 16) & 0xFFFF)));
 }
 
+static inline u32 musb_read_hsdma_count(void __iomem *mbase, u8 bchannel)
+{
+	return musb_readl(mbase,
+		MUSB_HSDMA_CHANNEL_OFFSET(bchannel, MUSB_HSDMA_COUNT_HIGH));
+}
+
 static inline void musb_write_hsdma_count(void __iomem *mbase,
 				u8 bchannel, u32 len)
 {
-	musb_writew(mbase,
-		MUSB_HSDMA_CHANNEL_OFFSET(bchannel, MUSB_HSDMA_COUNT_LOW),
-		((u16)((u32) len & 0xFFFF)));
-	musb_writew(mbase,
+	musb_writel(mbase,
 		MUSB_HSDMA_CHANNEL_OFFSET(bchannel, MUSB_HSDMA_COUNT_HIGH),
-		((u16)(((u32) len >> 16) & 0xFFFF)));
+		len);
 }
 
 #endif /* CONFIG_BLACKFIN */
 
 /* control register (16-bit): */
-#define MUSB_HSDMA_ENABLE_SHIFT		0
-#define MUSB_HSDMA_TRANSMIT_SHIFT	1
-#define MUSB_HSDMA_MODE1_SHIFT		2
-#define MUSB_HSDMA_IRQENABLE_SHIFT	3
+#define MUSB_HSDMA_ENABLE		(1 << 0)
+#define MUSB_HSDMA_TRANSMIT		(1 << 1)
+#define MUSB_HSDMA_MODE1		(1 << 2)
+#define MUSB_HSDMA_IRQENABLE		(1 << 3)
 #define MUSB_HSDMA_ENDPOINT_SHIFT	4
-#define MUSB_HSDMA_BUSERROR_SHIFT	8
+#define MUSB_HSDMA_BUSERROR		(1 << 8)
+
 #define MUSB_HSDMA_BURSTMODE_SHIFT	9
-#define MUSB_HSDMA_BURSTMODE		(3 << MUSB_HSDMA_BURSTMODE_SHIFT)
-#define MUSB_HSDMA_BURSTMODE_UNSPEC	0
-#define MUSB_HSDMA_BURSTMODE_INCR4	1
-#define MUSB_HSDMA_BURSTMODE_INCR8	2
-#define MUSB_HSDMA_BURSTMODE_INCR16	3
+#define MUSB_HSDMA_BURSTMODE_UNSPEC	(0 << MUSB_HSDMA_BURSTMODE_SHIFT)
+#define MUSB_HSDMA_BURSTMODE_INCR4	(1 << MUSB_HSDMA_BURSTMODE_SHIFT)
+#define MUSB_HSDMA_BURSTMODE_INCR8	(2 << MUSB_HSDMA_BURSTMODE_SHIFT)
+#define MUSB_HSDMA_BURSTMODE_INCR16	(3 << MUSB_HSDMA_BURSTMODE_SHIFT)
 
 #define MUSB_HSDMA_CHANNELS		8
 
@@ -146,4 +159,6 @@ struct musb_dma_controller {
 	u8				channel_count;
 	u8				used_channels;
 	u8				irq;
+	u8				tx_active;
+	u8				rx_active;
 };

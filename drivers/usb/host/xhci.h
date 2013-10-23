@@ -656,13 +656,17 @@ struct xhci_virt_ep {
 	struct xhci_ring		*new_ring;
 	unsigned int			ep_state;
 #define SET_DEQ_PENDING		(1 << 0)
-#define EP_HALTED		(1 << 1)
+#define EP_HALTED		(1 << 1)	/* For stall handling */
+#define EP_HALT_PENDING		(1 << 2)	/* For URB cancellation */
 	/* ----  Related to URB cancellation ---- */
 	struct list_head	cancelled_td_list;
-	unsigned int		cancels_pending;
 	/* The TRB that was last reported in a stopped endpoint ring */
 	union xhci_trb		*stopped_trb;
 	struct xhci_td		*stopped_td;
+	/* Watchdog timer for stop endpoint command to cancel URBs */
+	struct timer_list	stop_cmd_timer;
+	int			stop_cmds_pending;
+	struct xhci_hcd		*xhci;
 };
 
 struct xhci_virt_device {
@@ -677,6 +681,10 @@ struct xhci_virt_device {
 	struct xhci_container_ctx       *out_ctx;
 	/* Used for addressing devices and configuration changes */
 	struct xhci_container_ctx       *in_ctx;
+	/* Rings saved to ensure old alt settings can be re-instated */
+	struct xhci_ring		**ring_cache;
+	int				num_rings_cached;
+#define	XHCI_MAX_RINGS_CACHED	31
 	struct xhci_virt_ep		eps[31];
 	struct completion		cmd_completion;
 	/* Status of the last command issued for this device */
@@ -828,9 +836,6 @@ struct xhci_event_cmd {
 /* Normal TRB fields */
 /* transfer_len bitmasks - bits 0:16 */
 #define	TRB_LEN(p)		((p) & 0x1ffff)
-/* TD size - number of bytes remaining in the TD (including this TRB):
- * bits 17 - 21.  Shift the number of bytes by 10. */
-#define TD_REMAINDER(p)		((((p) >> 10) & 0x1f) << 17)
 /* Interrupter Target - which MSI-X vector to target the completion event at */
 #define TRB_INTR_TARGET(p)	(((p) & 0x3ff) << 22)
 #define GET_INTR_TARGET(p)	(((p) >> 22) & 0x3ff)
@@ -1026,6 +1031,8 @@ struct xhci_scratchpad {
 #define	ERST_ENTRIES	1
 /* Poll every 60 seconds */
 #define	POLL_TIMEOUT	60
+/* Stop endpoint command timeout (secs) for URB cancellation watchdog timer */
+#define XHCI_STOP_EP_CMD_TIMEOUT	5
 /* XXX: Make these module parameters */
 
 
@@ -1087,6 +1094,21 @@ struct xhci_hcd {
 	struct timer_list	event_ring_timer;
 	int			zombie;
 #endif
+	/* Host controller watchdog timer structures */
+	unsigned int		xhc_state;
+/* Host controller is dying - not responding to commands. "I'm not dead yet!"
+ *
+ * xHC interrupts have been disabled and a watchdog timer will (or has already)
+ * halt the xHCI host, and complete all URBs with an -ESHUTDOWN code.  Any code
+ * that sees this status (other than the timer that set it) should stop touching
+ * hardware immediately.  Interrupt handlers should return immediately when
+ * they see this status (any time they drop and re-acquire xhci->lock).
+ * xhci_urb_dequeue() should call usb_hcd_check_unlink_urb() and return without
+ * putting the TD on the canceled list, etc.
+ *
+ * There are no reports of xHCI host controllers that display this issue.
+ */
+#define XHCI_STATE_DYING	(1 << 0)
 	/* Statistics */
 	int			noops_submitted;
 	int			noops_handled;
@@ -1192,6 +1214,8 @@ void xhci_dbg_erst(struct xhci_hcd *xhci, struct xhci_erst *erst);
 void xhci_dbg_cmd_ptrs(struct xhci_hcd *xhci);
 void xhci_dbg_ring_ptrs(struct xhci_hcd *xhci, struct xhci_ring *ring);
 void xhci_dbg_ctx(struct xhci_hcd *xhci, struct xhci_container_ctx *ctx, unsigned int last_ep);
+inline char *xhci_get_slot_state(struct xhci_hcd *xhci,
+		struct xhci_container_ctx *ctx);
 
 /* xHCI memory management */
 void xhci_mem_cleanup(struct xhci_hcd *xhci);
@@ -1215,8 +1239,12 @@ int xhci_endpoint_init(struct xhci_hcd *xhci, struct xhci_virt_device *virt_dev,
 		struct usb_device *udev, struct usb_host_endpoint *ep,
 		gfp_t mem_flags);
 void xhci_ring_free(struct xhci_hcd *xhci, struct xhci_ring *ring);
+void xhci_free_or_cache_endpoint_ring(struct xhci_hcd *xhci,
+		struct xhci_virt_device *virt_dev,
+		unsigned int ep_index);
 struct xhci_command *xhci_alloc_command(struct xhci_hcd *xhci,
-		bool allocate_completion, gfp_t mem_flags);
+		bool allocate_in_ctx, bool allocate_completion,
+		gfp_t mem_flags);
 void xhci_free_command(struct xhci_hcd *xhci,
 		struct xhci_command *command);
 
@@ -1227,6 +1255,7 @@ void xhci_unregister_pci(void);
 #endif
 
 /* xHCI host controller glue */
+void xhci_quiesce(struct xhci_hcd *xhci);
 int xhci_halt(struct xhci_hcd *xhci);
 int xhci_reset(struct xhci_hcd *xhci);
 int xhci_init(struct usb_hcd *hcd);
@@ -1245,11 +1274,16 @@ int xhci_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status);
 int xhci_add_endpoint(struct usb_hcd *hcd, struct usb_device *udev, struct usb_host_endpoint *ep);
 int xhci_drop_endpoint(struct usb_hcd *hcd, struct usb_device *udev, struct usb_host_endpoint *ep);
 void xhci_endpoint_reset(struct usb_hcd *hcd, struct usb_host_endpoint *ep);
+int xhci_reset_device(struct usb_hcd *hcd, struct usb_device *udev);
 int xhci_check_bandwidth(struct usb_hcd *hcd, struct usb_device *udev);
 void xhci_reset_bandwidth(struct usb_hcd *hcd, struct usb_device *udev);
 
 /* xHCI ring, segment, TRB, and TD functions */
 dma_addr_t xhci_trb_virt_to_dma(struct xhci_segment *seg, union xhci_trb *trb);
+struct xhci_segment *trb_in_td(struct xhci_segment *start_seg,
+		union xhci_trb *start_trb, union xhci_trb *end_trb,
+		dma_addr_t suspect_dma);
+int xhci_is_vendor_info_code(struct xhci_hcd *xhci, unsigned int trb_comp_code);
 void xhci_ring_cmd_db(struct xhci_hcd *xhci);
 void *xhci_setup_one_noop(struct xhci_hcd *xhci);
 void xhci_handle_event(struct xhci_hcd *xhci);
@@ -1271,6 +1305,7 @@ int xhci_queue_evaluate_context(struct xhci_hcd *xhci, dma_addr_t in_ctx_ptr,
 		u32 slot_id);
 int xhci_queue_reset_ep(struct xhci_hcd *xhci, int slot_id,
 		unsigned int ep_index);
+int xhci_queue_reset_device(struct xhci_hcd *xhci, u32 slot_id);
 void xhci_find_new_dequeue_state(struct xhci_hcd *xhci,
 		unsigned int slot_id, unsigned int ep_index,
 		struct xhci_td *cur_td, struct xhci_dequeue_state *state);
@@ -1282,6 +1317,7 @@ void xhci_cleanup_stalled_ring(struct xhci_hcd *xhci,
 void xhci_queue_config_ep_quirk(struct xhci_hcd *xhci,
 		unsigned int slot_id, unsigned int ep_index,
 		struct xhci_dequeue_state *deq_state);
+void xhci_stop_endpoint_command_watchdog(unsigned long arg);
 
 /* xHCI roothub code */
 int xhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue, u16 wIndex,

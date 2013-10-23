@@ -120,6 +120,17 @@ struct mtd_info {
 	 */
 	uint32_t writesize;
 
+	/*
+	 * Size of the write buffer used by the MTD. MTD devices having a write
+	 * buffer can write multiple writesize chunks at a time. E.g. while
+	 * writing 4 * writesize bytes to a device with 2 * writesize bytes
+	 * buffer the MTD driver can (but doesn't have to) do 2 writesize
+	 * operations, but not 4. Currently, all NANDs have writebufsize
+	 * equivalent to writesize (NAND page size). Some NOR flashes do have
+	 * writebufsize greater than writesize.
+	 */
+	uint32_t writebufsize;
+
 	uint32_t oobsize;   // Amount of OOB data per block (e.g. 16)
 	uint32_t oobavail;  // Available OOB bytes per block
 
@@ -176,7 +187,6 @@ struct mtd_info {
 	 * - provides mmap capabilities
 	 */
 	struct backing_dev_info *backing_dev_info;
-
 
 	int (*read) (struct mtd_info *mtd, loff_t from, size_t len, size_t *retlen, u_char *buf);
 	int (*write) (struct mtd_info *mtd, loff_t to, size_t len, size_t *retlen, const u_char *buf);

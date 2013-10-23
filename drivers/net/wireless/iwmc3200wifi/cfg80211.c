@@ -680,10 +680,10 @@ static int iwm_cfg80211_disconnect(struct wiphy *wiphy, struct net_device *dev,
 }
 
 static int iwm_cfg80211_set_txpower(struct wiphy *wiphy,
-				    enum tx_power_setting type, int dbm)
+				    enum nl80211_tx_power_setting type, int mbm)
 {
 	switch (type) {
-	case TX_POWER_AUTOMATIC:
+	case NL80211_TX_POWER_AUTOMATIC:
 		return 0;
 	default:
 		return -EOPNOTSUPP;

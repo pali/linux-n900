@@ -22,6 +22,7 @@
 #include <linux/tick.h>
 #include <linux/ktime.h>
 #include <linux/sched.h>
+#include <../arch/arm/mach-omap2/pm-optimizer.h>
 
 /*
  * dbs is used in this file as a shortform for demandbased switching
@@ -517,6 +518,8 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 		if (load_freq > max_load_freq)
 			max_load_freq = load_freq;
 	}
+
+	policy = pm_optimizer_cpufreq_limits(policy);
 
 	/* Check for frequency increase */
 	if (max_load_freq > dbs_tuners_ins.up_threshold * policy->cur) {

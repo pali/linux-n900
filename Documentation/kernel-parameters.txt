@@ -2706,6 +2706,16 @@ and is between 256 and 4096 characters. It is defined in the file
 			This is actually a boot loader parameter; the value is
 			passed to the kernel using a special protocol.
 
+	vhash=		[SECURITY]
+			Format: <hexstring>
+			SHA1 hash of the hashlist loader executable
+			See Documentation/aegis_validator.txt
+			This is set by bootloader to authorize execution of
+			the executable which is used to load the reference hash
+			list. SHA1 hash is given as 40 character hexadecimal
+			string. Example:
+			vhash=0123456789ABCDEF0123456789ABCDEF12345678
+
 	vmalloc=nn[KMG]	[KNL,BOOT] Forces the vmalloc area to have an exact
 			size of <nn>. This can be used to increase the
 			minimum size (128MB on x86). It can also be used to

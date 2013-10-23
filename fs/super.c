@@ -43,6 +43,7 @@
 
 LIST_HEAD(super_blocks);
 DEFINE_SPINLOCK(sb_lock);
+DEFINE_MUTEX(umount_mutex);
 
 /**
  *	alloc_super	-	create new superblock
@@ -298,6 +299,7 @@ void generic_shutdown_super(struct super_block *sb)
 	const struct super_operations *sop = sb->s_op;
 
 
+	mutex_lock(&umount_mutex);
 	if (sb->s_root) {
 		shrink_dcache_for_umount(sb);
 		sync_filesystem(sb);
@@ -324,6 +326,7 @@ void generic_shutdown_super(struct super_block *sb)
 	list_del(&sb->s_instances);
 	spin_unlock(&sb_lock);
 	up_write(&sb->s_umount);
+	mutex_unlock(&umount_mutex);
 }
 
 EXPORT_SYMBOL(generic_shutdown_super);
@@ -412,12 +415,12 @@ void sync_supers(void)
 	spin_lock(&sb_lock);
 restart:
 	list_for_each_entry(sb, &super_blocks, s_list) {
-		if (sb->s_op->write_super && sb->s_dirt) {
+		if (sb->s_op->write_super && sb_is_dirty(sb)) {
 			sb->s_count++;
 			spin_unlock(&sb_lock);
 
 			down_read(&sb->s_umount);
-			if (sb->s_root && sb->s_dirt)
+			if (sb->s_root && sb_is_dirty(sb))
 				sb->s_op->write_super(sb);
 			up_read(&sb->s_umount);
 

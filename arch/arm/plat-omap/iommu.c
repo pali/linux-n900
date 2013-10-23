@@ -1,7 +1,7 @@
 /*
  * omap iommu: tlb and pagetable primitives
  *
- * Copyright (C) 2008-2009 Nokia Corporation
+ * Copyright (C) 2008-2010 Nokia Corporation
  *
  * Written by Hiroshi DOYU <Hiroshi.DOYU@nokia.com>,
  *		Paul Mundt and Toshihiro Kobayashi
@@ -20,7 +20,7 @@
 
 #include <asm/cacheflush.h>
 
-#include <mach/iommu.h>
+#include <plat/iommu.h>
 
 #include "iopgtable.h"
 
@@ -646,7 +646,7 @@ static size_t iopgtable_clear_entry_core(struct iommu *obj, u32 da)
 		if (*iopte & IOPTE_LARGE) {
 			nent *= 16;
 			/* rewind to the 1st entry */
-			iopte = (u32 *)((u32)iopte & IOLARGE_MASK);
+			iopte = iopte_offset(iopgd, (da & IOLARGE_MASK));
 		}
 		bytes *= nent;
 		memset(iopte, 0, nent * sizeof(*iopte));
@@ -667,7 +667,7 @@ static size_t iopgtable_clear_entry_core(struct iommu *obj, u32 da)
 		if ((*iopgd & IOPGD_SUPER) == IOPGD_SUPER) {
 			nent *= 16;
 			/* rewind to the 1st entry */
-			iopgd = (u32 *)((u32)iopgd & IOSUPER_MASK);
+			iopgd = iopgd_offset(obj, (da & IOSUPER_MASK));
 		}
 		bytes *= nent;
 	}
@@ -827,7 +827,7 @@ EXPORT_SYMBOL_GPL(iommu_get);
  **/
 void iommu_put(struct iommu *obj)
 {
-	if (!obj && IS_ERR(obj))
+	if (!obj || IS_ERR(obj))
 		return;
 
 	mutex_lock(&obj->iommu_lock);
@@ -838,6 +838,8 @@ void iommu_put(struct iommu *obj)
 	module_put(obj->owner);
 
 	mutex_unlock(&obj->iommu_lock);
+
+	put_device(obj->dev);
 
 	dev_dbg(obj->dev, "%s: %s\n", __func__, obj->name);
 }

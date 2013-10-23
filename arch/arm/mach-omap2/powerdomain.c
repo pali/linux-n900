@@ -31,9 +31,9 @@
 #include "prm.h"
 #include "prm-regbits-34xx.h"
 
-#include <mach/cpu.h>
-#include <mach/powerdomain.h>
-#include <mach/clockdomain.h>
+#include <plat/cpu.h>
+#include <plat/powerdomain.h>
+#include <plat/clockdomain.h>
 
 #include "pm.h"
 
@@ -143,24 +143,11 @@ static int _pwrdm_state_switch(struct powerdomain *pwrdm, int flag)
 	return 0;
 }
 
-static int _pwrdm_pre_transition_cb(struct powerdomain *pwrdm, void *unused)
-{
-	pwrdm_clear_all_prev_pwrst(pwrdm);
-	_pwrdm_state_switch(pwrdm, PWRDM_STATE_NOW);
-	return 0;
-}
-
-static int _pwrdm_post_transition_cb(struct powerdomain *pwrdm, void *unused)
-{
-	_pwrdm_state_switch(pwrdm, PWRDM_STATE_PREV);
-	return 0;
-}
-
 static __init void _pwrdm_setup(struct powerdomain *pwrdm)
 {
 	int i;
 
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < PWRDM_MAX_PWRSTS; i++)
 		pwrdm->state_counter[i] = 0;
 
 	pwrdm_wait_transition(pwrdm);
@@ -480,7 +467,7 @@ int pwrdm_add_wkdep(struct powerdomain *pwrdm1, struct powerdomain *pwrdm2)
 	if (IS_ERR(p)) {
 		pr_debug("powerdomain: hardware cannot set/clear wake up of "
 			 "%s when %s wakes up\n", pwrdm1->name, pwrdm2->name);
-		return IS_ERR(p);
+		return PTR_ERR(p);
 	}
 
 	pr_debug("powerdomain: hardware will wake up %s when %s wakes up\n",
@@ -513,7 +500,7 @@ int pwrdm_del_wkdep(struct powerdomain *pwrdm1, struct powerdomain *pwrdm2)
 	if (IS_ERR(p)) {
 		pr_debug("powerdomain: hardware cannot set/clear wake up of "
 			 "%s when %s wakes up\n", pwrdm1->name, pwrdm2->name);
-		return IS_ERR(p);
+		return PTR_ERR(p);
 	}
 
 	pr_debug("powerdomain: hardware will no longer wake up %s after %s "
@@ -550,7 +537,7 @@ int pwrdm_read_wkdep(struct powerdomain *pwrdm1, struct powerdomain *pwrdm2)
 	if (IS_ERR(p)) {
 		pr_debug("powerdomain: hardware cannot set/clear wake up of "
 			 "%s when %s wakes up\n", pwrdm1->name, pwrdm2->name);
-		return IS_ERR(p);
+		return PTR_ERR(p);
 	}
 
 	return prm_read_mod_bits_shift(pwrdm1->prcm_offs, PM_WKDEP,
@@ -584,7 +571,7 @@ int pwrdm_add_sleepdep(struct powerdomain *pwrdm1, struct powerdomain *pwrdm2)
 		pr_debug("powerdomain: hardware cannot set/clear sleep "
 			 "dependency affecting %s from %s\n", pwrdm1->name,
 			 pwrdm2->name);
-		return IS_ERR(p);
+		return PTR_ERR(p);
 	}
 
 	pr_debug("powerdomain: will prevent %s from sleeping if %s is active\n",
@@ -623,7 +610,7 @@ int pwrdm_del_sleepdep(struct powerdomain *pwrdm1, struct powerdomain *pwrdm2)
 		pr_debug("powerdomain: hardware cannot set/clear sleep "
 			 "dependency affecting %s from %s\n", pwrdm1->name,
 			 pwrdm2->name);
-		return IS_ERR(p);
+		return PTR_ERR(p);
 	}
 
 	pr_debug("powerdomain: will no longer prevent %s from sleeping if "
@@ -666,7 +653,7 @@ int pwrdm_read_sleepdep(struct powerdomain *pwrdm1, struct powerdomain *pwrdm2)
 		pr_debug("powerdomain: hardware cannot set/clear sleep "
 			 "dependency affecting %s from %s\n", pwrdm1->name,
 			 pwrdm2->name);
-		return IS_ERR(p);
+		return PTR_ERR(p);
 	}
 
 	return prm_read_mod_bits_shift(pwrdm1->prcm_offs, OMAP3430_CM_SLEEPDEP,
@@ -1032,6 +1019,12 @@ int pwrdm_read_prev_mem_pwrst(struct powerdomain *pwrdm, u8 bank)
 	if (pwrdm->banks < (bank + 1))
 		return -EEXIST;
 
+	if (pwrdm->flags & PWRDM_HAS_MPU_QUIRK)
+		bank = 1;
+
+	if (pwrdm->flags & PWRDM_HAS_MPU_QUIRK)
+		bank = 1;
+
 	/*
 	 * The register bit names below may not correspond to the
 	 * actual names of the bits in each powerdomain's register,
@@ -1195,6 +1188,31 @@ int pwrdm_wait_transition(struct powerdomain *pwrdm)
 	return 0;
 }
 
+/**
+ * pwrdm_can_idle - check if the powerdomain can enter idle
+ * @pwrdm: struct powerdomain * the powerdomain to check status of
+ *
+ * Checks all associated clockdomains if they can idle or not.
+ * Returns 1 if the powerdomain can idle, 0 if not.
+ */
+int pwrdm_can_idle(struct powerdomain *pwrdm)
+{
+	unsigned long flags;
+	int i;
+	int ret = 1;
+
+	read_lock_irqsave(&pwrdm_rwlock, flags);
+
+	for (i = 0; i < PWRDM_MAX_CLKDMS; i++)
+		if (pwrdm->pwrdm_clkdms[i] &&
+		    !omap2_clkdm_can_idle(pwrdm->pwrdm_clkdms[i]))
+			ret = 0;
+
+	read_unlock_irqrestore(&pwrdm_rwlock, flags);
+
+	return ret;
+}
+
 int pwrdm_state_switch(struct powerdomain *pwrdm)
 {
 	return _pwrdm_state_switch(pwrdm, PWRDM_STATE_NOW);
@@ -1216,15 +1234,15 @@ int pwrdm_clk_state_switch(struct clk *clk)
 	return -EINVAL;
 }
 
-int pwrdm_pre_transition(void)
+int pwrdm_pre_transition(struct powerdomain *pwrdm)
 {
-	pwrdm_for_each(_pwrdm_pre_transition_cb, NULL);
+	_pwrdm_state_switch(pwrdm, PWRDM_STATE_NOW);
 	return 0;
 }
 
-int pwrdm_post_transition(void)
+int pwrdm_post_transition(struct powerdomain *pwrdm)
 {
-	pwrdm_for_each(_pwrdm_post_transition_cb, NULL);
+	_pwrdm_state_switch(pwrdm, PWRDM_STATE_PREV);
 	return 0;
 }
 

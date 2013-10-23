@@ -21,6 +21,7 @@
 #ifndef _V4L2_DEVICE_H
 #define _V4L2_DEVICE_H
 
+#include <media/media-device.h>
 #include <media/v4l2-subdev.h>
 
 /* Each instance of a V4L2 device should create the v4l2_device struct,
@@ -32,11 +33,14 @@
 
 #define V4L2_DEVICE_NAME_SIZE (20 + 16)
 
+struct v4l2_ctrl_handler;
+
 struct v4l2_device {
 	/* dev->driver_data points to this struct.
 	   Note: dev might be NULL if there is no parent device
 	   as is the case with e.g. ISA devices. */
 	struct device *dev;
+	struct media_device *mdev;
 	/* used to keep track of the registered subdevs */
 	struct list_head subdevs;
 	/* lock this struct; can be used by the driver as well if this
@@ -47,6 +51,8 @@ struct v4l2_device {
 	/* notify callback called by some sub-devices. */
 	void (*notify)(struct v4l2_subdev *sd,
 			unsigned int notification, void *arg);
+	/* The control handler. May be NULL. */
+	struct v4l2_ctrl_handler *ctrl_handler;
 };
 
 /* Initialize v4l2_dev and make dev->driver_data point to v4l2_dev.
@@ -89,6 +95,12 @@ int __must_check v4l2_device_register_subdev(struct v4l2_device *v4l2_dev,
 /* Unregister a subdev with a v4l2 device. Can also be called if the subdev
    wasn't registered. In that case it will do nothing. */
 void v4l2_device_unregister_subdev(struct v4l2_subdev *sd);
+
+/* Register device nodes for all subdev of the v4l2 device that are marked with
+ * the V4L2_SUBDEV_FL_HAS_DEVNODE flag.
+ */
+int __must_check
+v4l2_device_register_subdev_nodes(struct v4l2_device *v4l2_dev);
 
 /* Iterate over all subdevs. */
 #define v4l2_device_for_each_subdev(sd, v4l2_dev)			\

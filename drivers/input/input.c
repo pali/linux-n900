@@ -217,7 +217,8 @@ static void input_handle_event(struct input_dev *dev,
 	case EV_ABS:
 		if (is_event_supported(code, dev->absbit, ABS_MAX)) {
 
-			if (test_bit(code, input_abs_bypass)) {
+			if ((test_bit(code, input_abs_bypass) ||
+					dev->always_report)) {
 				disposition = INPUT_PASS_TO_HANDLERS;
 				break;
 			}

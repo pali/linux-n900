@@ -14,6 +14,7 @@
 #include <linux/sched.h>
 
 #include <linux/mmc/core.h>
+#include <linux/mmc/pm.h>
 
 struct mmc_ios {
 	unsigned int	clock;			/* clock rate */
@@ -105,6 +106,7 @@ struct mmc_host_ops {
 	void	(*set_ios)(struct mmc_host *host, struct mmc_ios *ios);
 	int	(*get_ro)(struct mmc_host *host);
 	int	(*get_cd)(struct mmc_host *host);
+	void	(*hw_reset)(struct mmc_host *host, int high);
 
 	void	(*enable_sdio_irq)(struct mmc_host *host, int enable);
 };
@@ -151,6 +153,10 @@ struct mmc_host {
 #define MMC_CAP_DISABLE		(1 << 7)	/* Can the host be disabled */
 #define MMC_CAP_NONREMOVABLE	(1 << 8)	/* Nonremovable e.g. eMMC */
 #define MMC_CAP_WAIT_WHILE_BUSY	(1 << 9)	/* Waits while card is busy */
+#define MMC_CAP_ERASE		(1 << 10)	/* Allow erase/trim commands */
+#define MMC_CAP_MMC_ONLY	(1 << 11)	/* Do not scan for SD or SDIO */
+
+	mmc_pm_flag_t		pm_caps;	/* supported pm features */
 
 	/* host specific block data */
 	unsigned int		max_seg_size;	/* see blk_queue_max_segment_size */
@@ -174,6 +180,7 @@ struct mmc_host {
 #ifdef CONFIG_MMC_DEBUG
 	unsigned int		removed:1;	/* host is being removed */
 #endif
+	unsigned int		hw_reset_connected:1; /* reset is connected */
 
 	/* Only used with MMC_CAP_DISABLE */
 	int			enabled;	/* host is enabled */
@@ -196,6 +203,8 @@ struct mmc_host {
 	unsigned int		sdio_irqs;
 	struct task_struct	*sdio_irq_thread;
 	atomic_t		sdio_irq_thread_abort;
+
+	mmc_pm_flag_t		pm_flags;	/* requested pm features */
 
 #ifdef CONFIG_LEDS_TRIGGERS
 	struct led_trigger	*led;		/* activity led */
@@ -224,6 +233,8 @@ static inline void *mmc_priv(struct mmc_host *host)
 
 extern int mmc_suspend_host(struct mmc_host *, pm_message_t);
 extern int mmc_resume_host(struct mmc_host *);
+extern int mmc_release_power(struct mmc_host *);
+extern int mmc_claim_power(struct mmc_host *);
 
 extern void mmc_power_save_host(struct mmc_host *host);
 extern void mmc_power_restore_host(struct mmc_host *host);

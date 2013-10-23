@@ -226,6 +226,7 @@ int __filemap_fdatawrite_range(struct address_space *mapping, loff_t start,
 	ret = do_writepages(mapping, &wbc);
 	return ret;
 }
+EXPORT_SYMBOL(__filemap_fdatawrite_range);
 
 static inline int __filemap_fdatawrite(struct address_space *mapping,
 	int sync_mode)
@@ -1147,7 +1148,7 @@ readpage:
 			if (!PageUptodate(page)) {
 				if (page->mapping == NULL) {
 					/*
-					 * invalidate_inode_pages got it
+					 * invalidate_mapping_pages got it
 					 */
 					unlock_page(page);
 					page_cache_release(page);

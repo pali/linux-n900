@@ -28,6 +28,10 @@
 #include <linux/prctl.h>
 #include <linux/securebits.h>
 
+#ifdef CONFIG_SECURITY_AEGIS_CREDP
+#include <linux/aegis/credp.h>
+#endif
+
 /*
  * If a non-root user executes a setuid-root binary in
  * !secure(SECURE_NOROOT) mode, then we raise capabilities.
@@ -483,8 +487,17 @@ int cap_bprm_set_creds(struct linux_binprm *bprm)
 	ret = get_file_caps(bprm, &effective);
 	if (ret < 0)
 		return ret;
-
-	if (!issecure(SECURE_NOROOT)) {
+#ifdef CONFIG_SECURITY_AEGIS_CREDP
+	ret = credp_apply(bprm, &effective);
+	if (ret < 0)
+		return ret;
+	/* CREDP may change SECURE_NOROOT, the 'issecure' checks need
+	 * to be based on the new credentials, not the current! If not
+	 * changed, the secure bits in new cred is just a copy of the
+	 * current.
+	 */
+#endif
+	if ((issecure_mask(SECURE_NOROOT) & new->securebits) == 0) {
 		/*
 		 * If the legacy file capability is set, then don't set privs
 		 * for a setuid root binary run by a non-root user.  Do set it
@@ -531,6 +544,15 @@ skip:
 	new->suid = new->fsuid = new->euid;
 	new->sgid = new->fsgid = new->egid;
 
+#ifdef CONFIG_SECURITY_CREDENTIALS_POLICY
+	if (bprm->hard_setuid) {
+		ret = kernel_setuid(new, new->euid);
+		if (ret < 0)
+			return ret;
+	}
+	if (bprm->hard_setgid)
+		new->gid = new->egid;
+#endif
 	/* For init, we want to retain the capabilities set in the initial
 	 * task.  Thus we skip the usual capability rules
 	 */
@@ -962,6 +984,8 @@ error:
  */
 int cap_syslog(int type)
 {
+	if (dmesg_restrict && !capable(CAP_SYS_ADMIN))
+		return -EPERM;
 	if ((type != 3 && type != 10) && !capable(CAP_SYS_ADMIN))
 		return -EPERM;
 	return 0;

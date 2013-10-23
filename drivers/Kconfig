@@ -52,6 +52,8 @@ source "drivers/i2c/Kconfig"
 
 source "drivers/spi/Kconfig"
 
+source "drivers/hsi/Kconfig"
+
 source "drivers/pps/Kconfig"
 
 source "drivers/gpio/Kconfig"
@@ -113,4 +115,8 @@ source "drivers/xen/Kconfig"
 source "drivers/staging/Kconfig"
 
 source "drivers/platform/Kconfig"
+
+source "drivers/dsp/bridge/Kconfig"
+
+source "drivers/ramzswap/Kconfig"
 endmenu

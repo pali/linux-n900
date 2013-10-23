@@ -46,6 +46,8 @@ module_param(nowayout, int, 0);
 MODULE_PARM_DESC(nowayout, "Watchdog cannot be stopped once started "
 	"(default=" __MODULE_STRING(WATCHDOG_NOWAYOUT) ")");
 
+#include "twl4030_wdt_hack.c"
+
 static int twl4030_wdt_write(unsigned char val)
 {
 	return twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, val,
@@ -136,6 +138,8 @@ static int twl4030_wdt_open(struct inode *inode, struct file *file)
 	if (test_and_set_bit(0, &wdt->state))
 		return -EBUSY;
 
+	hack_twl4030_remove_bad_wd_handler();
+
 	wdt->state |= TWL4030_WDT_STATE_ACTIVE;
 	file->private_data = (void *) wdt;
 
@@ -146,6 +150,9 @@ static int twl4030_wdt_open(struct inode *inode, struct file *file)
 static int twl4030_wdt_release(struct inode *inode, struct file *file)
 {
 	struct twl4030_wdt *wdt = file->private_data;
+
+	hack_twl4030_remove_bad_wd_handler();
+
 	if (nowayout) {
 		dev_alert(wdt->miscdev.parent,
 		       "Unexpected close, watchdog still running!\n");
@@ -182,8 +189,19 @@ static int __devinit twl4030_wdt_probe(struct platform_device *pdev)
 	wdt->timer_margin	= 30;
 	wdt->miscdev.parent	= &pdev->dev;
 	wdt->miscdev.fops	= &twl4030_wdt_fops;
+/*
+ * HACK: We have two watchdogs. As we cannot
+ * have two devices with the same major & minor number, change this
+ * watchdog to use different minor and name.
+ */
+#if defined(CONFIG_MACH_NOKIA_RX71) \
+	|| defined(CONFIG_MACH_NOKIA_RM680) || defined(CONFIG_MACH_NOKIA_RM696)
+	wdt->miscdev.minor	= 142;
+	wdt->miscdev.name	= "twl4030_wdt";
+#else
 	wdt->miscdev.minor	= WATCHDOG_MINOR;
 	wdt->miscdev.name	= "watchdog";
+#endif
 
 	platform_set_drvdata(pdev, wdt);
 
@@ -198,12 +216,17 @@ static int __devinit twl4030_wdt_probe(struct platform_device *pdev)
 		twl4030_wdt_dev = NULL;
 		return ret;
 	}
+
+	hack_twl4030_init_bad_wd_handler();
+
 	return 0;
 }
 
 static int __devexit twl4030_wdt_remove(struct platform_device *pdev)
 {
 	struct twl4030_wdt *wdt = platform_get_drvdata(pdev);
+
+	hack_twl4030_remove_bad_wd_handler();
 
 	if (wdt->state & TWL4030_WDT_STATE_ACTIVE)
 		if (twl4030_wdt_disable(wdt))
@@ -223,6 +246,9 @@ static int __devexit twl4030_wdt_remove(struct platform_device *pdev)
 static int twl4030_wdt_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	struct twl4030_wdt *wdt = platform_get_drvdata(pdev);
+
+	hack_twl4030_bad_wd_suspend();
+
 	if (wdt->state & TWL4030_WDT_STATE_ACTIVE)
 		return twl4030_wdt_disable(wdt);
 

@@ -251,6 +251,25 @@
 									\
 	TRACEDATA							\
 									\
+	/* Kernel ELF hash symbol table: Normal symbols */		\
+	__ksymtab.htable : AT(ADDR(__ksymtab.htable) - LOAD_OFFSET) {	\
+		VMLINUX_SYMBOL(__start___ksymtab_htable) = .;		\
+		*(__ksymtab.htable)					\
+	}								\
+									\
+	/* Kernel ELF hash symbol table: GPL-only symbols */		\
+	__ksymtab_gpl.htable : AT(ADDR(__ksymtab_gpl.htable) - LOAD_OFFSET) { \
+		VMLINUX_SYMBOL(__start___ksymtab_gpl_htable) = .;	\
+		*(__ksymtab_gpl.htable)					\
+	}								\
+									\
+	/* Kernel ELF hash symbol table: GPL-future-only symbols */	\
+	__ksymtab_gpl_future.htable : 					\
+		AT(ADDR(__ksymtab_gpl_future.htable) - LOAD_OFFSET) {	\
+		VMLINUX_SYMBOL(__start___ksymtab_gpl_future_htable) = .;\
+		*(__ksymtab_gpl_future.htable)				\
+	}								\
+									\
 	/* Kernel symbol table: Normal symbols */			\
 	__ksymtab         : AT(ADDR(__ksymtab) - LOAD_OFFSET) {		\
 		VMLINUX_SYMBOL(__start___ksymtab) = .;			\

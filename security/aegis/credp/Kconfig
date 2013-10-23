@@ -1,0 +1,10 @@
+config SECURITY_AEGIS_CREDP
+	bool "Credentials policy manager"
+	depends on SECURITY_CREDENTIALS_POLICY
+	depends on SECURITY_AEGIS
+	default n
+	help
+	  This selects the Credentials Policy Manager module.
+	  This is part of Maemo Aegis Security framework.
+	  If you are unsure how to answer this question, answer N.
+

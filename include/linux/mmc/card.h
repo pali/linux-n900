@@ -11,6 +11,7 @@
 #define LINUX_MMC_CARD_H
 
 #include <linux/mmc/core.h>
+#include <asm/atomic.h>
 
 struct mmc_cid {
 	unsigned int		manfid;
@@ -30,6 +31,7 @@ struct mmc_csd {
 	unsigned int		tacc_ns;
 	unsigned int		r2w_factor;
 	unsigned int		max_dtr;
+	unsigned int		erase_size;		/* In sectors */
 	unsigned int		read_blkbits;
 	unsigned int		write_blkbits;
 	unsigned int		capacity;
@@ -41,9 +43,17 @@ struct mmc_csd {
 
 struct mmc_ext_csd {
 	u8			rev;
+	u8			erase_group_def;
+	u8			sec_feature_support;
+	u8			rst_n_function;
 	unsigned int		sa_timeout;		/* Units: 100ns */
 	unsigned int		hs_max_dtr;
 	unsigned int		sectors;
+	unsigned int		hc_erase_size;		/* In sectors */
+	unsigned int		hc_erase_timeout;	/* In milliseconds */
+	unsigned int		sec_trim_mult;	/* Secure trim multiplier  */
+	unsigned int		sec_erase_mult;	/* Secure erase multiplier */
+	unsigned int		trim_timeout;		/* In milliseconds */
 };
 
 struct sd_scr {
@@ -51,6 +61,12 @@ struct sd_scr {
 	unsigned char		bus_widths;
 #define SD_SCR_BUS_WIDTH_1	(1<<0)
 #define SD_SCR_BUS_WIDTH_4	(1<<2)
+};
+
+struct sd_ssr {
+	unsigned int		au;			/* In sectors */
+	unsigned int		erase_timeout;		/* In milliseconds */
+	unsigned int		erase_offset;		/* In milliseconds */
 };
 
 struct sd_switch_caps {
@@ -99,6 +115,13 @@ struct mmc_card {
 #define MMC_STATE_BLOCKADDR	(1<<3)		/* card uses block-addressing */
 	unsigned int		quirks; 	/* card quirks */
 #define MMC_QUIRK_LENIENT_FN0	(1<<0)		/* allow SDIO FN0 writes outside of the VS CCCR range */
+#define MMC_QUIRK_BLKSZ_FOR_BYTE_MODE (1<<1)	/* use func->cur_blksize */
+						/* for byte mode */
+
+	unsigned int		erase_size;	/* erase size in sectors */
+	unsigned int		erase_shift;	/* if erase unit is power 2 */
+	unsigned int		pref_erase;	/* in sectors */
+	u8			erased_byte;	/* value of erased bytes */
 
 	u32			raw_cid[4];	/* raw card CID */
 	u32			raw_csd[4];	/* raw card CSD */
@@ -107,6 +130,7 @@ struct mmc_card {
 	struct mmc_csd		csd;		/* card specific */
 	struct mmc_ext_csd	ext_csd;	/* mmc v4 extended card specific */
 	struct sd_scr		scr;		/* extra SD information */
+	struct sd_ssr		ssr;		/* yet more SD information */
 	struct sd_switch_caps	sw_caps;	/* switch (CMD6) caps */
 
 	unsigned int		sdio_funcs;	/* number of SDIO functions */
@@ -118,6 +142,7 @@ struct mmc_card {
 	struct sdio_func_tuple	*tuples;	/* unknown common tuples */
 
 	struct dentry		*debugfs_root;
+	atomic_t		power_claims;	/* ref count of power requests */
 };
 
 #define mmc_card_mmc(c)		((c)->type == MMC_TYPE_MMC)
@@ -139,8 +164,15 @@ static inline int mmc_card_lenient_fn0(const struct mmc_card *c)
 	return c->quirks & MMC_QUIRK_LENIENT_FN0;
 }
 
+static inline int mmc_blksz_for_byte_mode(const struct mmc_card *c)
+{
+	return c->quirks & MMC_QUIRK_BLKSZ_FOR_BYTE_MODE;
+}
+
 #define mmc_card_name(c)	((c)->cid.prod_name)
 #define mmc_card_id(c)		(dev_name(&(c)->dev))
+
+#define mmc_dev_to_card(d)	container_of(d, struct mmc_card, dev)
 
 #define mmc_list_to_card(l)	container_of(l, struct mmc_card, node)
 #define mmc_get_drvdata(c)	dev_get_drvdata(&(c)->dev)

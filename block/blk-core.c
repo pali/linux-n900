@@ -1125,6 +1125,8 @@ void init_request_from_bio(struct request *req, struct bio *bio)
 		req->cmd_flags |= REQ_DISCARD;
 		if (bio_rw_flagged(bio, BIO_RW_BARRIER))
 			req->cmd_flags |= REQ_SOFTBARRIER;
+		if (bio_rw_flagged(bio, BIO_RW_SECURE))
+			req->cmd_flags |= REQ_SECURE;
 	} else if (unlikely(bio_rw_flagged(bio, BIO_RW_BARRIER)))
 		req->cmd_flags |= REQ_HARDBARRIER;
 
@@ -1471,7 +1473,9 @@ static inline void __generic_make_request(struct bio *bio)
 			goto end_io;
 
 		if (bio_rw_flagged(bio, BIO_RW_DISCARD) &&
-		    !blk_queue_discard(q)) {
+		    (!blk_queue_discard(q) ||
+		     (bio_rw_flagged(bio, BIO_RW_SECURE) &&
+		      !blk_queue_secdiscard(q)))) {
 			err = -EOPNOTSUPP;
 			goto end_io;
 		}
@@ -1981,7 +1985,7 @@ bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)
 	while ((bio = req->bio) != NULL) {
 		int nbytes;
 
-		if (nr_bytes >= bio->bi_size) {
+		if (nr_bytes >= bio->bi_size || blk_discard_rq(req)) {
 			req->bio = bio->bi_next;
 			nbytes = bio->bi_size;
 			req_bio_endio(req, bio, nbytes, error);

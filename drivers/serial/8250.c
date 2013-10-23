@@ -225,9 +225,9 @@ static const struct serial8250_config uart_config[] = {
 	[PORT_16750] = {
 		.name		= "TI16750",
 		.fifo_size	= 64,
-		.tx_loadsz	= 64,
-		.fcr		= UART_FCR_ENABLE_FIFO | UART_FCR_R_TRIG_10 |
-				  UART_FCR7_64BYTE,
+		.tx_loadsz	= 56,
+		.fcr		= UART_FCR_ENABLE_FIFO | UART_FCR_R_TRIG_01 |
+				  UART_FCR_T_TRIG_11,
 		.flags		= UART_CAP_FIFO | UART_CAP_SLEEP | UART_CAP_AFE,
 	},
 	[PORT_STARTECH] = {
@@ -943,6 +943,15 @@ static void autoconfig_16550a(struct uart_8250_port *up)
 
 	up->port.type = PORT_16550A;
 	up->capabilities |= UART_CAP_FIFO;
+
+#ifdef CONFIG_ARCH_OMAP
+	if (cpu_is_omap34xx()) {
+		up->port.type = PORT_16750;
+		up->capabilities |= UART_CAP_AFE | UART_CAP_SLEEP |
+			UART_CAP_FIFO;
+		return;
+	}
+#endif
 
 	/*
 	 * Check for presence of the EFR when DLAB is set.
@@ -1854,6 +1863,21 @@ static void serial8250_break_ctl(struct uart_port *port, int break_state)
 	spin_unlock_irqrestore(&up->port.lock, flags);
 }
 
+#ifdef CONFIG_ARCH_OMAP
+static void wait_for_xmitr_fifo(struct uart_8250_port *up, int bits)
+{
+	unsigned int status, tmout = 10000;
+
+	/* Wait up to 10ms for the character(s) to be sent. */
+	do {
+		status = serial_in(up, UART_OMAP_SSR);
+		if (--tmout == 0)
+			break;
+		udelay(1);
+	} while ((status & bits) == bits);
+}
+#endif
+
 /*
  *	Wait for transmitter & holding register to empty
  */
@@ -2404,6 +2428,8 @@ serial8250_set_termios(struct uart_port *port, struct ktermios *termios,
 		if (fcr & UART_FCR_ENABLE_FIFO) {
 			/* emulated UARTs (Lucent Venus 167x) need two steps */
 			serial_outp(up, UART_FCR, UART_FCR_ENABLE_FIFO);
+			serial_outp(up, UART_FCR, UART_FCR_ENABLE_FIFO |
+				    UART_FCR_CLEAR_RCVR | UART_FCR_CLEAR_XMIT);
 		}
 		serial_outp(up, UART_FCR, fcr);		/* set fcr */
 	}
@@ -2714,6 +2740,13 @@ static void serial8250_console_putchar(struct uart_port *port, int ch)
 {
 	struct uart_8250_port *up = (struct uart_8250_port *)port;
 
+#ifdef CONFIG_ARCH_OMAP
+	if (cpu_is_omap34xx()) {
+		wait_for_xmitr_fifo(up, OMAP_SSR_FIFO_FULL);
+		serial_out(up, UART_TX, ch);
+		return;
+	}
+#endif
 	wait_for_xmitr(up, UART_LSR_THRE);
 	serial_out(up, UART_TX, ch);
 }
@@ -2759,7 +2792,12 @@ serial8250_console_write(struct console *co, const char *s, unsigned int count)
 	 *	Finally, wait for transmitter to become empty
 	 *	and restore the IER
 	 */
+#ifdef CONFIG_ARCH_OMAP
+	if (cpu_is_omap34xx())
+		goto skip_wait;
+#endif
 	wait_for_xmitr(up, BOTH_EMPTY);
+skip_wait:
 	serial_out(up, UART_IER, ier);
 
 	/*

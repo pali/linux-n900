@@ -411,7 +411,7 @@ static int serial_write_room(struct tty_struct *tty)
 static int serial_chars_in_buffer(struct tty_struct *tty)
 {
 	struct usb_serial_port *port = tty->driver_data;
-	dbg("%s = port %d", __func__, port->number);
+	dbg("%s - port %d", __func__, port->number);
 
 	/* if the device was unplugged then any remaining characters
 	   fell out of the connector ;) */
@@ -559,6 +559,18 @@ static int serial_tiocmset(struct tty_struct *tty, struct file *file,
 	WARN_ON(!port->port.count);
 	if (port->serial->type->tiocmset)
 		return port->serial->type->tiocmset(tty, file, set, clear);
+	return -EINVAL;
+}
+
+static int serial_get_icount(struct tty_struct *tty,
+				struct serial_icounter_struct *icount)
+{
+	struct usb_serial_port *port = tty->driver_data;
+
+	dbg("%s - port %d", __func__, port->number);
+
+	if (port->serial->type->get_icount)
+		return port->serial->type->get_icount(tty, icount);
 	return -EINVAL;
 }
 
@@ -966,9 +978,7 @@ int usb_serial_probe(struct usb_interface *interface,
 			dev_err(&interface->dev, "No free urbs available\n");
 			goto probe_error;
 		}
-		port->write_fifo = kfifo_alloc(PAGE_SIZE, GFP_KERNEL,
-			&port->lock);
-		if (IS_ERR(port->write_fifo))
+		if (kfifo_alloc(port->write_fifo, PAGE_SIZE, GFP_KERNEL))
 			goto probe_error;
 		buffer_size = le16_to_cpu(endpoint->wMaxPacketSize);
 		port->bulk_out_size = buffer_size;
@@ -1214,6 +1224,7 @@ static const struct tty_operations serial_ops = {
 	.chars_in_buffer =	serial_chars_in_buffer,
 	.tiocmget =		serial_tiocmget,
 	.tiocmset =		serial_tiocmset,
+	.get_icount = 		serial_get_icount,
 	.cleanup = 		serial_cleanup,
 	.install = 		serial_install,
 	.proc_fops =		&serial_proc_fops,

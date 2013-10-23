@@ -845,8 +845,10 @@ static void rx_tkip_phase1_write(struct b43_wldev *dev, u8 index, u32 iv32,
 }
 
 static void b43_op_update_tkip_key(struct ieee80211_hw *hw,
-			struct ieee80211_key_conf *keyconf, const u8 *addr,
-			u32 iv32, u16 *phase1key)
+				   struct ieee80211_vif *vif,
+				   struct ieee80211_key_conf *keyconf,
+				   struct ieee80211_sta *sta,
+				   u32 iv32, u16 *phase1key)
 {
 	struct b43_wl *wl = hw_to_b43_wl(hw);
 	struct b43_wldev *dev;
@@ -864,7 +866,13 @@ static void b43_op_update_tkip_key(struct ieee80211_hw *hw,
 	keymac_write(dev, index, NULL);	/* First zero out mac to avoid race */
 
 	rx_tkip_phase1_write(dev, index, iv32, phase1key);
-	keymac_write(dev, index, addr);
+	/* only pairwise TKIP keys are supported right now */
+	if (WARN_ON(!sta))
+		goto out_unlock;
+	keymac_write(dev, index, sta->addr);
+
+out_unlock:
+	mutex_unlock(&wl->mutex);
 }
 
 static void do_key_write(struct b43_wldev *dev,
@@ -4395,7 +4403,7 @@ err_busdown:
 }
 
 static int b43_op_add_interface(struct ieee80211_hw *hw,
-				struct ieee80211_if_init_conf *conf)
+				struct ieee80211_vif *vif)
 {
 	struct b43_wl *wl = hw_to_b43_wl(hw);
 	struct b43_wldev *dev;
@@ -4403,24 +4411,24 @@ static int b43_op_add_interface(struct ieee80211_hw *hw,
 
 	/* TODO: allow WDS/AP devices to coexist */
 
-	if (conf->type != NL80211_IFTYPE_AP &&
-	    conf->type != NL80211_IFTYPE_MESH_POINT &&
-	    conf->type != NL80211_IFTYPE_STATION &&
-	    conf->type != NL80211_IFTYPE_WDS &&
-	    conf->type != NL80211_IFTYPE_ADHOC)
+	if (vif->type != NL80211_IFTYPE_AP &&
+	    vif->type != NL80211_IFTYPE_MESH_POINT &&
+	    vif->type != NL80211_IFTYPE_STATION &&
+	    vif->type != NL80211_IFTYPE_WDS &&
+	    vif->type != NL80211_IFTYPE_ADHOC)
 		return -EOPNOTSUPP;
 
 	mutex_lock(&wl->mutex);
 	if (wl->operating)
 		goto out_mutex_unlock;
 
-	b43dbg(wl, "Adding Interface type %d\n", conf->type);
+	b43dbg(wl, "Adding Interface type %d\n", vif->type);
 
 	dev = wl->current_dev;
 	wl->operating = 1;
-	wl->vif = conf->vif;
-	wl->if_type = conf->type;
-	memcpy(wl->mac_addr, conf->mac_addr, ETH_ALEN);
+	wl->vif = vif;
+	wl->if_type = vif->type;
+	memcpy(wl->mac_addr, vif->addr, ETH_ALEN);
 
 	b43_adjust_opmode(dev);
 	b43_set_pretbtt(dev);
@@ -4435,17 +4443,17 @@ static int b43_op_add_interface(struct ieee80211_hw *hw,
 }
 
 static void b43_op_remove_interface(struct ieee80211_hw *hw,
-				    struct ieee80211_if_init_conf *conf)
+				    struct ieee80211_vif *vif)
 {
 	struct b43_wl *wl = hw_to_b43_wl(hw);
 	struct b43_wldev *dev = wl->current_dev;
 
-	b43dbg(wl, "Removing Interface type %d\n", conf->type);
+	b43dbg(wl, "Removing Interface type %d\n", vif->type);
 
 	mutex_lock(&wl->mutex);
 
 	B43_WARN_ON(!wl->operating);
-	B43_WARN_ON(wl->vif != conf->vif);
+	B43_WARN_ON(wl->vif != vif);
 	wl->vif = NULL;
 
 	wl->operating = 0;

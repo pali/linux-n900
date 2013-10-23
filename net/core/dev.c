@@ -4654,59 +4654,76 @@ static void net_set_todo(struct net_device *dev)
 	list_add_tail(&dev->todo_list, &net_todo_list);
 }
 
-static void rollback_registered(struct net_device *dev)
+static void rollback_registered_many(struct list_head *head)
 {
+	struct net_device *dev;
+
 	BUG_ON(dev_boot_phase);
 	ASSERT_RTNL();
 
-	/* Some devices call without registering for initialization unwind. */
-	if (dev->reg_state == NETREG_UNINITIALIZED) {
-		printk(KERN_DEBUG "unregister_netdevice: device %s/%p never "
-				  "was registered\n", dev->name, dev);
+	list_for_each_entry(dev, head, unreg_list) {
+		/* Some devices call without registering
+		 * for initialization unwind.
+		 */
+		if (dev->reg_state == NETREG_UNINITIALIZED) {
+			pr_debug("unregister_netdevice: device %s/%p never "
+				 "was registered\n", dev->name, dev);
 
-		WARN_ON(1);
-		return;
+			WARN_ON(1);
+			return;
+		}
+
+		BUG_ON(dev->reg_state != NETREG_REGISTERED);
+
+		/* If device is running, close it first. */
+		dev_close(dev);
+
+		/* And unlink it from device chain. */
+		unlist_netdevice(dev);
+
+		dev->reg_state = NETREG_UNREGISTERING;
 	}
 
-	BUG_ON(dev->reg_state != NETREG_REGISTERED);
+	synchronize_net();
 
-	/* If device is running, close it first. */
-	dev_close(dev);
+	list_for_each_entry(dev, head, unreg_list) {
+		/* Shutdown queueing discipline. */
+		dev_shutdown(dev);
 
-	/* And unlink it from device chain. */
-	unlist_netdevice(dev);
 
-	dev->reg_state = NETREG_UNREGISTERING;
+		/* Notify protocols, that we are about to destroy
+		   this device. They should clean all the things.
+		*/
+		call_netdevice_notifiers(NETDEV_UNREGISTER, dev);
+
+		/*
+		 *	Flush the unicast and multicast chains
+		 */
+		dev_unicast_flush(dev);
+		dev_addr_discard(dev);
+
+		if (dev->netdev_ops->ndo_uninit)
+			dev->netdev_ops->ndo_uninit(dev);
+
+		/* Notifier chain MUST detach us from master device. */
+		WARN_ON(dev->master);
+
+		/* Remove entries from kobject tree */
+		netdev_unregister_kobject(dev);
+	}
 
 	synchronize_net();
 
-	/* Shutdown queueing discipline. */
-	dev_shutdown(dev);
+	list_for_each_entry(dev, head, unreg_list)
+		dev_put(dev);
+}
 
+static void rollback_registered(struct net_device *dev)
+{
+	LIST_HEAD(single);
 
-	/* Notify protocols, that we are about to destroy
-	   this device. They should clean all the things.
-	*/
-	call_netdevice_notifiers(NETDEV_UNREGISTER, dev);
-
-	/*
-	 *	Flush the unicast and multicast chains
-	 */
-	dev_unicast_flush(dev);
-	dev_addr_discard(dev);
-
-	if (dev->netdev_ops->ndo_uninit)
-		dev->netdev_ops->ndo_uninit(dev);
-
-	/* Notifier chain MUST detach us from master device. */
-	WARN_ON(dev->master);
-
-	/* Remove entries from kobject tree */
-	netdev_unregister_kobject(dev);
-
-	synchronize_net();
-
-	dev_put(dev);
+	list_add(&dev->unreg_list, &single);
+	rollback_registered_many(&single);
 }
 
 static void __netdev_init_queue_locks_one(struct net_device *dev,
@@ -4855,6 +4872,12 @@ int register_netdevice(struct net_device *dev)
 		dev->features |= NETIF_F_GSO;
 
 	netdev_initialize_kobject(dev);
+
+	ret = call_netdevice_notifiers(NETDEV_POST_INIT, dev);
+	ret = notifier_to_errno(ret);
+	if (ret)
+		goto err_uninit;
+
 	ret = netdev_register_kobject(dev);
 	if (ret)
 		goto err_uninit;
@@ -5261,25 +5284,48 @@ void synchronize_net(void)
 EXPORT_SYMBOL(synchronize_net);
 
 /**
- *	unregister_netdevice - remove device from the kernel
+ *	unregister_netdevice_queue - remove device from the kernel
  *	@dev: device
- *
+ *	@head: list
+
  *	This function shuts down a device interface and removes it
  *	from the kernel tables.
+ *	If head not NULL, device is queued to be unregistered later.
  *
  *	Callers must hold the rtnl semaphore.  You may want
  *	unregister_netdev() instead of this.
  */
 
-void unregister_netdevice(struct net_device *dev)
+void unregister_netdevice_queue(struct net_device *dev, struct list_head *head)
 {
 	ASSERT_RTNL();
 
-	rollback_registered(dev);
-	/* Finish processing unregister after unlock */
-	net_set_todo(dev);
+	if (head) {
+		list_add_tail(&dev->unreg_list, head);
+	} else {
+		rollback_registered(dev);
+		/* Finish processing unregister after unlock */
+		net_set_todo(dev);
+	}
 }
-EXPORT_SYMBOL(unregister_netdevice);
+EXPORT_SYMBOL(unregister_netdevice_queue);
+
+/**
+ *	unregister_netdevice_many - unregister many devices
+ *	@head: list of devices
+ *
+ */
+void unregister_netdevice_many(struct list_head *head)
+{
+	struct net_device *dev;
+
+	if (!list_empty(head)) {
+		rollback_registered_many(head);
+		list_for_each_entry(dev, head, unreg_list)
+			net_set_todo(dev);
+	}
+}
+EXPORT_SYMBOL(unregister_netdevice_many);
 
 /**
  *	unregister_netdev - remove device from the kernel

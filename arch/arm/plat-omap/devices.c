@@ -14,20 +14,21 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
+#include <linux/memblock.h>
 
 #include <mach/hardware.h>
 #include <asm/mach-types.h>
 #include <asm/mach/map.h>
 
-#include <mach/tc.h>
-#include <mach/control.h>
-#include <mach/board.h>
-#include <mach/mmc.h>
-#include <mach/mux.h>
+#include <plat/tc.h>
+#include <plat/control.h>
+#include <plat/board.h>
+#include <plat/mmc.h>
+#include <plat/mux.h>
 #include <mach/gpio.h>
-#include <mach/menelaus.h>
-#include <mach/mcbsp.h>
-#include <mach/dsp_common.h>
+#include <plat/menelaus.h>
+#include <plat/mcbsp.h>
+#include <plat/dsp_common.h>
 
 #if	defined(CONFIG_OMAP_DSP) || defined(CONFIG_OMAP_DSP_MODULE)
 
@@ -90,6 +91,36 @@ EXPORT_SYMBOL(dsp_kfunc_device_register);
 static inline void omap_init_dsp(void) { }
 #endif	/* CONFIG_OMAP_DSP */
 
+#if defined(CONFIG_MPU_BRIDGE) ||  defined(CONFIG_MPU_BRIDGE_MODULE)
+
+static unsigned long dspbridge_phys_mempool_base;
+
+void dspbridge_reserve_sdram(void)
+{
+	phys_addr_t paddr;
+	phys_addr_t size = ALIGN(CONFIG_BRIDGE_MEMPOOL_SIZE, SZ_2M);
+
+	if (!size)
+		return;
+
+	paddr = memblock_alloc(size, SZ_2M);
+	if (!paddr) {
+		pr_err("%s: Failed to bootmem allocation(%lu bytes)\n",
+		       __func__, size);
+		return;
+	}
+	memblock_free(paddr, size);
+	memblock_remove(paddr, size);
+
+	dspbridge_phys_mempool_base = paddr;
+}
+
+unsigned long dspbridge_get_mempool_base(void)
+{
+	return dspbridge_phys_mempool_base;
+}
+EXPORT_SYMBOL(dspbridge_get_mempool_base);
+#endif
 /*-------------------------------------------------------------------------*/
 #if	defined(CONFIG_KEYBOARD_OMAP) || defined(CONFIG_KEYBOARD_OMAP_MODULE)
 
@@ -113,17 +144,17 @@ static void omap_init_kp(void)
 		omap_cfg_reg(E19_1610_KBR4);
 		omap_cfg_reg(N19_1610_KBR5);
 	} else if (machine_is_omap_perseus2() || machine_is_omap_fsample()) {
-		omap_cfg_reg(E2_730_KBR0);
-		omap_cfg_reg(J7_730_KBR1);
-		omap_cfg_reg(E1_730_KBR2);
-		omap_cfg_reg(F3_730_KBR3);
-		omap_cfg_reg(D2_730_KBR4);
+		omap_cfg_reg(E2_7XX_KBR0);
+		omap_cfg_reg(J7_7XX_KBR1);
+		omap_cfg_reg(E1_7XX_KBR2);
+		omap_cfg_reg(F3_7XX_KBR3);
+		omap_cfg_reg(D2_7XX_KBR4);
 
-		omap_cfg_reg(C2_730_KBC0);
-		omap_cfg_reg(D3_730_KBC1);
-		omap_cfg_reg(E4_730_KBC2);
-		omap_cfg_reg(F4_730_KBC3);
-		omap_cfg_reg(E3_730_KBC4);
+		omap_cfg_reg(C2_7XX_KBC0);
+		omap_cfg_reg(D3_7XX_KBC1);
+		omap_cfg_reg(E4_7XX_KBC2);
+		omap_cfg_reg(F4_7XX_KBC3);
+		omap_cfg_reg(E3_7XX_KBC4);
 	} else if (machine_is_omap_h4()) {
 		omap_cfg_reg(T19_24XX_KBR0);
 		omap_cfg_reg(R19_24XX_KBR1);

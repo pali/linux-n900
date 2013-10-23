@@ -14,6 +14,7 @@
 
 #include <linux/spinlock.h>
 #include <linux/completion.h>
+#include <linux/mtd/flashchip.h>
 #include <linux/mtd/onenand_regs.h>
 #include <linux/mtd/bbm.h>
 
@@ -24,22 +25,6 @@
 extern int onenand_scan(struct mtd_info *mtd, int max_chips);
 /* Free resources held by the OneNAND device */
 extern void onenand_release(struct mtd_info *mtd);
-
-/*
- * onenand_state_t - chip states
- * Enumeration for OneNAND flash chip state
- */
-typedef enum {
-	FL_READY,
-	FL_READING,
-	FL_WRITING,
-	FL_ERASING,
-	FL_SYNCING,
-	FL_LOCKING,
-	FL_RESETING,
-	FL_OTPING,
-	FL_PM_SUSPENDED,
-} onenand_state_t;
 
 /**
  * struct onenand_bufferram - OneNAND BufferRAM Data
@@ -83,6 +68,7 @@ struct onenand_bufferram {
  * @write_word:		[REPLACEABLE] hardware specific function for write
  *			register of OneNAND
  * @mmcontrol:		sync burst read function
+ * @chip_probe:		[REPLACEABLE] hardware specific function for chip probe
  * @block_markbad:	function to mark a block as bad
  * @scan_bbt:		[REPLACEALBE] hardware specific function for scanning
  *			Bad block Table
@@ -129,17 +115,23 @@ struct onenand_chip {
 	unsigned short (*read_word)(void __iomem *addr);
 	void (*write_word)(unsigned short value, void __iomem *addr);
 	void (*mmcontrol)(struct mtd_info *mtd, int sync_read);
+	int (*chip_probe)(struct mtd_info *mtd);
 	int (*block_markbad)(struct mtd_info *mtd, loff_t ofs);
 	int (*scan_bbt)(struct mtd_info *mtd);
+	int (*enable)(struct mtd_info *mtd);
+	int (*disable)(struct mtd_info *mtd);
 
 	struct completion	complete;
 	int			irq;
 
 	spinlock_t		chip_lock;
 	wait_queue_head_t	wq;
-	onenand_state_t		state;
+	flstate_t		state;
 	unsigned char		*page_buf;
 	unsigned char		*oob_buf;
+#ifdef CONFIG_MTD_ONENAND_VERIFY_WRITE
+	unsigned char		*verify_buf;
+#endif
 
 	int			subpagesize;
 	struct nand_ecclayout	*ecclayout;
@@ -188,9 +180,14 @@ struct onenand_chip {
 #define ONENAND_HAS_CONT_LOCK		(0x0001)
 #define ONENAND_HAS_UNLOCK_ALL		(0x0002)
 #define ONENAND_HAS_2PLANE		(0x0004)
+#define ONENAND_HAS_4KB_PAGE		(0x0008)
 #define ONENAND_SKIP_UNLOCK_CHECK	(0x0100)
 #define ONENAND_PAGEBUF_ALLOC		(0x1000)
 #define ONENAND_OOBBUF_ALLOC		(0x2000)
+#define ONENAND_SKIP_INITIAL_UNLOCKING	(0x4000)
+
+#define ONENAND_IS_4KB_PAGE(this)					\
+	(this->options & ONENAND_HAS_4KB_PAGE)
 
 /*
  * OneNAND Flash Manufacturer ID Codes
@@ -218,6 +215,8 @@ struct mtd_partition;
 
 struct onenand_platform_data {
 	void		(*mmcontrol)(struct mtd_info *mtd, int sync_read);
+	int		(*read_bufferram)(struct mtd_info *mtd, int area,
+			unsigned char *buffer, int offset, size_t count);
 	struct mtd_partition *parts;
 	unsigned int	nr_parts;
 };

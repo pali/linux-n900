@@ -2016,6 +2016,10 @@ extern struct task_struct *find_task_by_pid_ns(pid_t nr,
 
 extern void __set_special_pids(struct pid *pid);
 
+#ifdef CONFIG_SECURITY_CREDENTIALS_POLICY
+extern int kernel_setuid(struct cred *new, uid_t uid);
+#endif
+
 /* per-UID process charging. */
 extern struct user_struct * alloc_uid(struct user_namespace *, uid_t);
 static inline struct user_struct *get_uid(struct user_struct *u)

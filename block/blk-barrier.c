@@ -383,6 +383,12 @@ int blkdev_issue_discard(struct block_device *bdev, sector_t sector,
 	if (!blk_queue_discard(q))
 		return -EOPNOTSUPP;
 
+	if (flags & DISCARD_FL_SECURE) {
+		if (!blk_queue_secdiscard(q))
+			return -EOPNOTSUPP;
+		type |= DISCARD_SECURE;
+	}
+
 	while (nr_sects && !ret) {
 		unsigned int sector_size = q->limits.logical_block_size;
 		unsigned int max_discard_sectors =

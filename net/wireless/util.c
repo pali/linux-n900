@@ -152,12 +152,15 @@ int cfg80211_validate_key_settings(struct cfg80211_registered_device *rdev,
 
 	/*
 	 * Disallow pairwise keys with non-zero index unless it's WEP
-	 * (because current deployments use pairwise WEP keys with
-	 * non-zero indizes but 802.11i clearly specifies to use zero)
+	 * or a vendor specific cipher (because current deployments use
+	 * pairwise WEP keys with non-zero indices and for vendor specific
+	 * ciphers this should be validated in the driver or hardware level
+	 * - but 802.11i clearly specifies to use zero)
 	 */
 	if (mac_addr && key_idx &&
-	    params->cipher != WLAN_CIPHER_SUITE_WEP40 &&
-	    params->cipher != WLAN_CIPHER_SUITE_WEP104)
+	    ((params->cipher == WLAN_CIPHER_SUITE_TKIP) ||
+	     (params->cipher == WLAN_CIPHER_SUITE_CCMP) ||
+	     (params->cipher == WLAN_CIPHER_SUITE_AES_CMAC)))
 		return -EINVAL;
 
 	switch (params->cipher) {
@@ -182,7 +185,14 @@ int cfg80211_validate_key_settings(struct cfg80211_registered_device *rdev,
 			return -EINVAL;
 		break;
 	default:
-		return -EINVAL;
+		/*
+		 * We don't know anything about this algorithm,
+		 * allow using it -- but the driver must check
+		 * all parameters! We still check below whether
+		 * or not the driver supports this algorithm,
+		 * of course.
+		 */
+		break;
 	}
 
 	if (params->seq) {
@@ -227,8 +237,11 @@ unsigned int ieee80211_hdrlen(__le16 fc)
 	if (ieee80211_is_data(fc)) {
 		if (ieee80211_has_a4(fc))
 			hdrlen = 30;
-		if (ieee80211_is_data_qos(fc))
+		if (ieee80211_is_data_qos(fc)) {
 			hdrlen += IEEE80211_QOS_CTL_LEN;
+			if (ieee80211_has_order(fc))
+				hdrlen += IEEE80211_HT_CTL_LEN;
+		}
 		goto out;
 	}
 
@@ -285,7 +298,7 @@ static int ieee80211_get_mesh_hdrlen(struct ieee80211s_hdr *meshhdr)
 	}
 }
 
-int ieee80211_data_to_8023(struct sk_buff *skb, u8 *addr,
+int ieee80211_data_to_8023(struct sk_buff *skb, const u8 *addr,
 			   enum nl80211_iftype iftype)
 {
 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *) skb->data;
@@ -320,16 +333,25 @@ int ieee80211_data_to_8023(struct sk_buff *skb, u8 *addr,
 		break;
 	case cpu_to_le16(IEEE80211_FCTL_TODS | IEEE80211_FCTL_FROMDS):
 		if (unlikely(iftype != NL80211_IFTYPE_WDS &&
-			     iftype != NL80211_IFTYPE_MESH_POINT))
+			     iftype != NL80211_IFTYPE_MESH_POINT &&
+			     iftype != NL80211_IFTYPE_AP_VLAN &&
+			     iftype != NL80211_IFTYPE_STATION))
 			return -1;
 		if (iftype == NL80211_IFTYPE_MESH_POINT) {
 			struct ieee80211s_hdr *meshdr =
 				(struct ieee80211s_hdr *) (skb->data + hdrlen);
-			hdrlen += ieee80211_get_mesh_hdrlen(meshdr);
+			/* make sure meshdr->flags is on the linear part */
+			if (!pskb_may_pull(skb, hdrlen + 1))
+				return -1;
 			if (meshdr->flags & MESH_FLAGS_AE_A5_A6) {
-				memcpy(dst, meshdr->eaddr1, ETH_ALEN);
-				memcpy(src, meshdr->eaddr2, ETH_ALEN);
+				skb_copy_bits(skb, hdrlen +
+					offsetof(struct ieee80211s_hdr, eaddr1),
+				       	dst, ETH_ALEN);
+				skb_copy_bits(skb, hdrlen +
+					offsetof(struct ieee80211s_hdr, eaddr2),
+				        src, ETH_ALEN);
 			}
+			hdrlen += ieee80211_get_mesh_hdrlen(meshdr);
 		}
 		break;
 	case cpu_to_le16(IEEE80211_FCTL_FROMDS):
@@ -341,9 +363,14 @@ int ieee80211_data_to_8023(struct sk_buff *skb, u8 *addr,
 		if (iftype == NL80211_IFTYPE_MESH_POINT) {
 			struct ieee80211s_hdr *meshdr =
 				(struct ieee80211s_hdr *) (skb->data + hdrlen);
-			hdrlen += ieee80211_get_mesh_hdrlen(meshdr);
+			/* make sure meshdr->flags is on the linear part */
+			if (!pskb_may_pull(skb, hdrlen + 1))
+				return -1;
 			if (meshdr->flags & MESH_FLAGS_AE_A4)
-				memcpy(src, meshdr->eaddr1, ETH_ALEN);
+				skb_copy_bits(skb, hdrlen +
+					offsetof(struct ieee80211s_hdr, eaddr1),
+					src, ETH_ALEN);
+			hdrlen += ieee80211_get_mesh_hdrlen(meshdr);
 		}
 		break;
 	case cpu_to_le16(0):
@@ -352,7 +379,7 @@ int ieee80211_data_to_8023(struct sk_buff *skb, u8 *addr,
 		break;
 	}
 
-	if (unlikely(skb->len - hdrlen < 8))
+	if (!pskb_may_pull(skb, hdrlen + 8))
 		return -1;
 
 	payload = skb->data + hdrlen;
@@ -381,7 +408,7 @@ int ieee80211_data_to_8023(struct sk_buff *skb, u8 *addr,
 }
 EXPORT_SYMBOL(ieee80211_data_to_8023);
 
-int ieee80211_data_from_8023(struct sk_buff *skb, u8 *addr,
+int ieee80211_data_from_8023(struct sk_buff *skb, const u8 *addr,
 			     enum nl80211_iftype iftype, u8 *bssid, bool qos)
 {
 	struct ieee80211_hdr hdr;
@@ -494,6 +521,101 @@ int ieee80211_data_from_8023(struct sk_buff *skb, u8 *addr,
 	return 0;
 }
 EXPORT_SYMBOL(ieee80211_data_from_8023);
+
+
+void ieee80211_amsdu_to_8023s(struct sk_buff *skb, struct sk_buff_head *list,
+			      const u8 *addr, enum nl80211_iftype iftype,
+			      const unsigned int extra_headroom)
+{
+	struct sk_buff *frame = NULL;
+	u16 ethertype;
+	u8 *payload;
+	const struct ethhdr *eth;
+	int remaining, err;
+	u8 dst[ETH_ALEN], src[ETH_ALEN];
+
+	err = ieee80211_data_to_8023(skb, addr, iftype);
+	if (err)
+		goto out;
+
+	/* skip the wrapping header */
+	eth = (struct ethhdr *) skb_pull(skb, sizeof(struct ethhdr));
+	if (!eth)
+		goto out;
+
+	while (skb != frame) {
+		u8 padding;
+		__be16 len = eth->h_proto;
+		unsigned int subframe_len = sizeof(struct ethhdr) + ntohs(len);
+
+		remaining = skb->len;
+		memcpy(dst, eth->h_dest, ETH_ALEN);
+		memcpy(src, eth->h_source, ETH_ALEN);
+
+		padding = (4 - subframe_len) & 0x3;
+		/* the last MSDU has no padding */
+		if (subframe_len > remaining)
+			goto purge;
+
+		skb_pull(skb, sizeof(struct ethhdr));
+		/* reuse skb for the last subframe */
+		if (remaining <= subframe_len + padding)
+			frame = skb;
+		else {
+			unsigned int hlen = ALIGN(extra_headroom, 4);
+			/*
+			 * Allocate and reserve two bytes more for payload
+			 * alignment since sizeof(struct ethhdr) is 14.
+			 */
+			frame = dev_alloc_skb(hlen + subframe_len + 2);
+			if (!frame)
+				goto purge;
+
+			skb_reserve(frame, hlen + sizeof(struct ethhdr) + 2);
+			memcpy(skb_put(frame, ntohs(len)), skb->data,
+				ntohs(len));
+
+			eth = (struct ethhdr *)skb_pull(skb, ntohs(len) +
+							padding);
+			if (!eth) {
+				dev_kfree_skb(frame);
+				goto purge;
+			}
+		}
+
+		skb_reset_network_header(frame);
+		frame->dev = skb->dev;
+		frame->priority = skb->priority;
+
+		payload = frame->data;
+		ethertype = (payload[6] << 8) | payload[7];
+
+		if (likely((compare_ether_addr(payload, rfc1042_header) == 0 &&
+			    ethertype != ETH_P_AARP && ethertype != ETH_P_IPX) ||
+			   compare_ether_addr(payload,
+					      bridge_tunnel_header) == 0)) {
+			/* remove RFC1042 or Bridge-Tunnel
+			 * encapsulation and replace EtherType */
+			skb_pull(frame, 6);
+			memcpy(skb_push(frame, ETH_ALEN), src, ETH_ALEN);
+			memcpy(skb_push(frame, ETH_ALEN), dst, ETH_ALEN);
+		} else {
+			memcpy(skb_push(frame, sizeof(__be16)), &len,
+				sizeof(__be16));
+			memcpy(skb_push(frame, ETH_ALEN), src, ETH_ALEN);
+			memcpy(skb_push(frame, ETH_ALEN), dst, ETH_ALEN);
+		}
+		__skb_queue_tail(list, frame);
+	}
+
+	return;
+
+ purge:
+	__skb_queue_purge(list);
+ out:
+	dev_kfree_skb(skb);
+}
+EXPORT_SYMBOL(ieee80211_amsdu_to_8023s);
 
 /* Given a data frame determine the 802.1p/1d tag to use. */
 unsigned int cfg80211_classify8021d(struct sk_buff *skb)
@@ -656,7 +778,14 @@ int cfg80211_change_iface(struct cfg80211_registered_device *rdev,
 	    !(rdev->wiphy.interface_modes & (1 << ntype)))
 		return -EOPNOTSUPP;
 
+	/* if it's part of a bridge, reject changing type to station/ibss */
+	if (dev->br_port && (ntype == NL80211_IFTYPE_ADHOC ||
+			     ntype == NL80211_IFTYPE_STATION))
+		return -EBUSY;
+
 	if (ntype != otype) {
+		dev->ieee80211_ptr->use_4addr = false;
+
 		switch (otype) {
 		case NL80211_IFTYPE_ADHOC:
 			cfg80211_leave_ibss(rdev, dev, false);
@@ -679,6 +808,35 @@ int cfg80211_change_iface(struct cfg80211_registered_device *rdev,
 					     ntype, flags, params);
 
 	WARN_ON(!err && dev->ieee80211_ptr->iftype != ntype);
+
+	if (!err && params && params->use_4addr != -1)
+		dev->ieee80211_ptr->use_4addr = params->use_4addr;
+
+	if (!err) {
+		dev->priv_flags &= ~IFF_DONT_BRIDGE;
+		switch (ntype) {
+		case NL80211_IFTYPE_STATION:
+			if (dev->ieee80211_ptr->use_4addr)
+				break;
+			/* fall through */
+		case NL80211_IFTYPE_ADHOC:
+			dev->priv_flags |= IFF_DONT_BRIDGE;
+			break;
+		case NL80211_IFTYPE_AP:
+		case NL80211_IFTYPE_AP_VLAN:
+		case NL80211_IFTYPE_WDS:
+		case NL80211_IFTYPE_MESH_POINT:
+			/* bridging OK */
+			break;
+		case NL80211_IFTYPE_MONITOR:
+			/* monitor can't bridge anyway */
+			break;
+		case NL80211_IFTYPE_UNSPECIFIED:
+		case __NL80211_IFTYPE_AFTER_LAST:
+			/* not happening */
+			break;
+		}
+	}
 
 	return err;
 }

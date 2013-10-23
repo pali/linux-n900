@@ -3584,7 +3584,7 @@ F:	include/linux/isicom.h
 MUSB MULTIPOINT HIGH SPEED DUAL-ROLE CONTROLLER
 M:	Felipe Balbi <felipe.balbi@nokia.com>
 L:	linux-usb@vger.kernel.org
-T:	git git://gitorious.org/musb/mainline.git
+T:	git git://gitorious.org/usb/usb.git
 S:	Maintained
 F:	drivers/usb/musb/
 
@@ -3848,6 +3848,23 @@ L:	linux-fbdev@vger.kernel.org
 L:	linux-omap@vger.kernel.org
 S:	Maintained
 F:	drivers/video/omap/
+
+OMAP DISPLAY SUBSYSTEM SUPPORT (DSS2)
+M:	Tomi Valkeinen <tomi.valkeinen@nokia.com>
+L:	linux-fbdev-devel@lists.sourceforge.net (moderated for non-subscribers)
+L:	linux-omap@vger.kernel.org
+S:	Maintained
+F:	drivers/video/omap2/dss/
+F:	drivers/video/omap2/vrfb.c
+F:	drivers/video/omap2/vram.c
+F:	Documentation/arm/OMAP/DSS
+
+OMAP FRAMEBUFFER SUPPORT (FOR DSS2)
+M:	Tomi Valkeinen <tomi.valkeinen@nokia.com>
+L:	linux-fbdev-devel@lists.sourceforge.net (moderated for non-subscribers)
+L:	linux-omap@vger.kernel.org
+S:	Maintained
+F:	drivers/video/omap2/omapfb/
 
 OMAP MMC SUPPORT
 M:	Jarkko Lavinen <jarkko.lavinen@nokia.com>
@@ -5271,7 +5288,7 @@ S:	Maintained
 F:	drivers/scsi/u14-34f.c
 
 UBI FILE SYSTEM (UBIFS)
-M:	Artem Bityutskiy <dedekind@infradead.org>
+M:	Artem Bityutskiy <dedekind1@gmail.com>
 M:	Adrian Hunter <adrian.hunter@nokia.com>
 L:	linux-mtd@lists.infradead.org
 T:	git git://git.infradead.org/ubifs-2.6.git
@@ -5322,7 +5339,7 @@ F:	drivers/cdrom/cdrom.c
 F:	include/linux/cdrom.h
 
 UNSORTED BLOCK IMAGES (UBI)
-M:	Artem Bityutskiy <dedekind@infradead.org>
+M:	Artem Bityutskiy <dedekind1@gmail.com>
 W:	http://www.linux-mtd.infradead.org/
 L:	linux-mtd@lists.infradead.org
 T:	git git://git.infradead.org/ubi-2.6.git
@@ -5834,6 +5851,7 @@ W:	http://wireless.kernel.org
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/linville/wireless-testing.git
 S:	Maintained
 F:	drivers/net/wireless/wl12xx/wl1271*
+F:	include/linux/wl12xx.h
 
 WL3501 WIRELESS PCMCIA CARD DRIVER
 M:	Arnaldo Carvalho de Melo <acme@ghostprotocols.net>

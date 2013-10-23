@@ -23,6 +23,7 @@
 #include <linux/err.h>
 #include <linux/clk.h>
 #include <linux/io.h>
+#include <linux/usb/musb.h>
 
 #include <mach/hardware.h>
 #include <asm/mach-types.h>
@@ -31,14 +32,14 @@
 #include <asm/mach/flash.h>
 
 #include <mach/gpio.h>
-#include <mach/mux.h>
-#include <mach/board.h>
-#include <mach/common.h>
-#include <mach/gpmc.h>
-#include <mach/usb.h>
-#include <mach/gpmc-smc91x.h>
+#include <plat/mux.h>
+#include <plat/board.h>
+#include <plat/common.h>
+#include <plat/gpmc.h>
+#include <plat/usb.h>
+#include <plat/gpmc-smc91x.h>
 
-#include "mmc-twl4030.h"
+#include "hsmmc.h"
 
 #define SDP2430_CS0_BASE	0x04000000
 #define SECONDARY_LCD_GPIO		147
@@ -183,7 +184,7 @@ static int __init omap2430_i2c_init(void)
 	return 0;
 }
 
-static struct twl4030_hsmmc_info mmc[] __initdata = {
+static struct omap2_hsmmc_info mmc[] __initdata = {
 	{
 		.mmc		= 1,
 		.wires		= 4,
@@ -202,8 +203,8 @@ static void __init omap_2430sdp_init(void)
 
 	platform_add_devices(sdp2430_devices, ARRAY_SIZE(sdp2430_devices));
 	omap_serial_init();
-	twl4030_mmc_init(mmc);
-	usb_musb_init();
+	omap2_hsmmc_init(mmc);
+	usb_musb_init(NULL, MUSB_OTG, 100);
 	board_smc91x_init();
 
 	/* Turn off secondary LCD backlight */
@@ -221,7 +222,7 @@ static void __init omap_2430sdp_map_io(void)
 MACHINE_START(OMAP_2430SDP, "OMAP2430 sdp2430 board")
 	/* Maintainer: Syed Khasim - Texas Instruments Inc */
 	.phys_io	= 0x48000000,
-	.io_pg_offst	= ((0xd8000000) >> 18) & 0xfffc,
+	.io_pg_offst	= ((0xfa000000) >> 18) & 0xfffc,
 	.boot_params	= 0x80000100,
 	.map_io		= omap_2430sdp_map_io,
 	.init_irq	= omap_2430sdp_init_irq,

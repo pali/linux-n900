@@ -23,15 +23,88 @@
 
 #define MMC_QUEUE_SUSPENDED	(1 << 0)
 
+static int mmc_queue_do_make_request(struct request_queue *q, struct bio *bio)
+{
+	struct mmc_queue *mq = q->queuedata;
+	int nr_sectors = bio_sectors(bio);
+
+	if (bio->bi_sector == 0 && nr_sectors > 0) {
+		char *op = bio_rw_flagged(bio, BIO_RW_DISCARD) ? "discard" :
+			((bio->bi_rw & WRITE) ? "write" : "read");
+
+		printk(KERN_CONT "mmc_queue_do_make_request process %.*s (pid "
+			"%u), %s to sector 0, sectors %u\n",
+			TASK_COMM_LEN, current->comm, task_pid_nr(current),
+			op, nr_sectors);
+	}
+
+	/* Note that saved_make_request_fn is __make_request */
+	return mq->saved_make_request_fn(q, bio);
+}
+
+static int mmc_queue_align_bio(struct request_queue *q, struct bio *bio)
+{
+	unsigned int sectors, mask = q->limits.align_mask, imask = ~mask;
+	struct bio_pair *bp;
+
+	if ((bio->bi_sector & imask) ==
+	    ((bio->bi_sector + bio_sectors(bio) - 1) & imask))
+		return mmc_queue_do_make_request(q, bio);
+
+	sectors = (mask + 1) - (bio->bi_sector & mask);
+	bp = bio_split(bio, sectors);
+	mmc_queue_do_make_request(q, &bp->bio1);
+	mmc_queue_align_bio(q, &bp->bio2);
+	bio_pair_release(bp);
+	return 0;
+}
+
+static int mmc_queue_make_request(struct request_queue *q, struct bio *bio)
+{
+	if (bio->bi_vcnt != 1 || !(bio->bi_rw & WRITE) ||
+	    bio_rw_flagged(bio, BIO_RW_DISCARD))
+		return mmc_queue_do_make_request(q, bio);
+
+	return mmc_queue_align_bio(q, bio);
+}
+
+static unsigned int mmc_queue_remap_sector(struct bvec_merge_data *bvm)
+{
+	struct block_device *bdev = bvm->bi_bdev;
+
+	if (bdev != bdev->bd_contains)
+		return bvm->bi_sector + bdev->bd_part->start_sect;
+
+	return bvm->bi_sector;
+}
+
+static int mmc_queue_merge_bvec(struct request_queue *q,
+				struct bvec_merge_data *bvm,
+				struct bio_vec *bvec)
+{
+	unsigned int sector, end_sector, mask = q->limits.align_mask;
+	unsigned int imask = ~mask;
+
+	if (bvm->bi_size == 0)
+		return bvec->bv_len;
+
+	/* MMC sectors numbers are 32-bit */
+	sector = mmc_queue_remap_sector(bvm);
+	end_sector = sector + (bvm->bi_size >> 9);
+	if ((sector & imask) != (end_sector & imask))
+		return 0;
+	return (mask + 1 - (end_sector & mask)) << 9;
+}
+
 /*
  * Prepare a MMC request. This just filters out odd stuff.
  */
 static int mmc_prep_request(struct request_queue *q, struct request *req)
 {
 	/*
-	 * We only like normal block requests.
+	 * We only like normal block requests and discards.
 	 */
-	if (!blk_fs_request(req)) {
+	if (!blk_fs_request(req) && !blk_discard_rq(req)) {
 		blk_dump_rq_flags(req, "MMC bad request");
 		return BLKPREP_KILL;
 	}
@@ -124,11 +197,24 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card, spinlock_t *lock
 		return -ENOMEM;
 
 	mq->queue->queuedata = mq;
+	mq->queue->backing_dev_info.ra_pages = 512 >> (PAGE_CACHE_SHIFT - 10);
 	mq->req = NULL;
 
 	blk_queue_prep_rq(mq->queue, mmc_prep_request);
 	blk_queue_ordered(mq->queue, QUEUE_ORDERED_DRAIN, NULL);
 	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, mq->queue);
+	if (mmc_can_erase(card)) {
+		unsigned int u = card->pref_erase;
+
+		queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, mq->queue);
+		mq->queue->limits.max_discard_sectors =
+						(UINT_MAX / (u << 9)) * u;
+		if (card->erased_byte == 0)
+			mq->queue->limits.discard_zeroes_data = 1;
+		if (mmc_can_secure_erase_trim(card))
+			queue_flag_set_unlocked(QUEUE_FLAG_SECDISCARD,
+						mq->queue);
+	}
 
 #ifdef CONFIG_MMC_BLOCK_BOUNCE
 	if (host->max_hw_segs == 1) {
@@ -193,6 +279,16 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card, spinlock_t *lock
 			goto cleanup_queue;
 		}
 		sg_init_table(mq->sg, host->max_phys_segs);
+	}
+
+	if (is_power_of_2(queue_max_sectors(mq->queue)) &&
+	    is_power_of_2(card->erase_size) &&
+	    queue_max_sectors(mq->queue) >= PAGE_SIZE >> 9) {
+		blk_queue_align_mask(mq->queue,
+				     queue_max_sectors(mq->queue) - 1);
+		blk_queue_merge_bvec(mq->queue, mmc_queue_merge_bvec);
+		mq->saved_make_request_fn = mq->queue->make_request_fn;
+		mq->queue->make_request_fn = mmc_queue_make_request;
 	}
 
 	init_MUTEX(&mq->thread_sem);

@@ -383,6 +383,8 @@ and discussions on the V4L mailing list.</revremark>
     <section id="ttx"> &sub-dev-teletext; </section>
     <section id="radio"> &sub-dev-radio; </section>
     <section id="rds"> &sub-dev-rds; </section>
+    <section id="event"> &sub-dev-event; </section>
+    <section id="subdev"> &sub-dev-subdev; </section>
   </chapter>
 
   <chapter id="driver">
@@ -408,6 +410,7 @@ and discussions on the V4L mailing list.</revremark>
     &sub-cropcap;
     &sub-dbg-g-chip-ident;
     &sub-dbg-g-register;
+    &sub-dqevent;
     &sub-encoder-cmd;
     &sub-enumaudio;
     &sub-enumaudioout;
@@ -445,6 +448,13 @@ and discussions on the V4L mailing list.</revremark>
     &sub-reqbufs;
     &sub-s-hw-freq-seek;
     &sub-streamon;
+    &sub-subdev-enum-frame-interval;
+    &sub-subdev-enum-frame-size;
+    &sub-subdev-enum-mbus-code;
+    &sub-subdev-g-crop;
+    &sub-subdev-g-fmt;
+    &sub-subdev-g-frame-interval;
+    &sub-subscribe-event;
     <!-- End of ioctls. -->
     &sub-mmap;
     &sub-munmap;

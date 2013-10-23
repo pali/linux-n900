@@ -1,7 +1,7 @@
 /*
  * Wireless configuration interface internals.
  *
- * Copyright 2006-2009	Johannes Berg <johannes@sipsolutions.net>
+ * Copyright 2006-2010	Johannes Berg <johannes@sipsolutions.net>
  */
 #ifndef __NET_WIRELESS_CORE_H
 #define __NET_WIRELESS_CORE_H
@@ -48,6 +48,7 @@ struct cfg80211_registered_device {
 
 	/* associate netdev list */
 	struct mutex devlist_mtx;
+	/* protected by devlist_mtx or RCU */
 	struct list_head netdev_list;
 	int devlist_generation;
 	int opencount; /* also protected by devlist_mtx */
@@ -69,20 +70,6 @@ struct cfg80211_registered_device {
 	struct work_struct conn_work;
 	struct work_struct event_work;
 
-	/* current channel */
-	struct ieee80211_channel *channel;
-
-#ifdef CONFIG_CFG80211_DEBUGFS
-	/* Debugfs entries */
-	struct wiphy_debugfsdentries {
-		struct dentry *rts_threshold;
-		struct dentry *fragmentation_threshold;
-		struct dentry *short_retry_limit;
-		struct dentry *long_retry_limit;
-		struct dentry *ht40allow_map;
-	} debugfs;
-#endif
-
 	/* must be last because of the way we do wiphy_priv(),
 	 * and it should at least be aligned to NETDEV_ALIGN */
 	struct wiphy wiphy __attribute__((__aligned__(NETDEV_ALIGN)));
@@ -102,6 +89,8 @@ bool wiphy_idx_valid(int wiphy_idx)
 	return (wiphy_idx >= 0);
 }
 
+
+extern struct workqueue_struct *cfg80211_wq;
 extern struct mutex cfg80211_mutex;
 extern struct list_head cfg80211_rdev_list;
 extern int cfg80211_rdev_list_generation;
@@ -120,7 +109,8 @@ struct cfg80211_internal_bss {
 	unsigned long ts;
 	struct kref ref;
 	atomic_t hold;
-	bool ies_allocated;
+	bool beacon_ies_allocated;
+	bool proberesp_ies_allocated;
 
 	/* must be last because of priv member */
 	struct cfg80211_bss pub;
@@ -284,6 +274,8 @@ int cfg80211_join_ibss(struct cfg80211_registered_device *rdev,
 		       struct cfg80211_ibss_params *params,
 		       struct cfg80211_cached_keys *connkeys);
 void cfg80211_clear_ibss(struct net_device *dev, bool nowext);
+int __cfg80211_leave_ibss(struct cfg80211_registered_device *rdev,
+			  struct net_device *dev, bool nowext);
 int cfg80211_leave_ibss(struct cfg80211_registered_device *rdev,
 			struct net_device *dev, bool nowext);
 void __cfg80211_ibss_joined(struct net_device *dev, const u8 *bssid);
@@ -334,6 +326,15 @@ void __cfg80211_connect_result(struct net_device *dev, const u8 *bssid,
 			       const u8 *resp_ie, size_t resp_ie_len,
 			       u16 status, bool wextev,
 			       struct cfg80211_bss *bss);
+int cfg80211_mlme_register_action(struct wireless_dev *wdev, u32 snd_pid,
+				  const u8 *match_data, int match_len);
+void cfg80211_mlme_unregister_actions(struct wireless_dev *wdev, u32 nlpid);
+void cfg80211_mlme_purge_actions(struct wireless_dev *wdev);
+int cfg80211_mlme_action(struct cfg80211_registered_device *rdev,
+			 struct net_device *dev,
+			 struct ieee80211_channel *chan,
+			 enum nl80211_channel_type channel_type,
+			 const u8 *buf, size_t len, u64 *cookie);
 
 /* SME */
 int __cfg80211_connect(struct cfg80211_registered_device *rdev,
@@ -379,11 +380,11 @@ int cfg80211_change_iface(struct cfg80211_registered_device *rdev,
 void cfg80211_process_rdev_events(struct cfg80211_registered_device *rdev);
 
 struct ieee80211_channel *
-rdev_fixed_channel(struct cfg80211_registered_device *rdev,
-		   struct wireless_dev *for_wdev);
-int rdev_set_freq(struct cfg80211_registered_device *rdev,
-		  struct wireless_dev *for_wdev,
+rdev_freq_to_chan(struct cfg80211_registered_device *rdev,
 		  int freq, enum nl80211_channel_type channel_type);
+int cfg80211_set_freq(struct cfg80211_registered_device *rdev,
+		      struct wireless_dev *wdev, int freq,
+		      enum nl80211_channel_type channel_type);
 
 u16 cfg80211_calculate_bitrate(struct rate_info *rate);
 

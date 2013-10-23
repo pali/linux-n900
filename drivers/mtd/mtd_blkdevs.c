@@ -76,11 +76,23 @@ static int do_blktrans_request(struct mtd_blktrans_ops *tr,
 	}
 }
 
+int mtd_blktrans_cease_background(struct mtd_blktrans_dev *dev)
+{
+	struct request_queue *rq = dev->tr->blkcore_priv->rq;
+
+	if (kthread_should_stop())
+		return 1;
+
+	return !elv_queue_empty(rq);
+}
+EXPORT_SYMBOL_GPL(mtd_blktrans_cease_background);
+
 static int mtd_blktrans_thread(void *arg)
 {
 	struct mtd_blktrans_ops *tr = arg;
 	struct request_queue *rq = tr->blkcore_priv->rq;
 	struct request *req = NULL;
+	int background_done = 0;
 
 	/* we might get involved when memory gets low, so use PF_MEMALLOC */
 	current->flags |= PF_MEMALLOC;
@@ -92,6 +104,23 @@ static int mtd_blktrans_thread(void *arg)
 		int res;
 
 		if (!req && !(req = blk_fetch_request(rq))) {
+			if (tr->background && !background_done &&
+				!list_empty(&tr->devs)) {
+				/* HACK: assume just one dev */
+				dev = list_entry(tr->devs.next,
+						struct mtd_blktrans_dev, list);
+				spin_unlock_irq(rq->queue_lock);
+				mutex_lock(&dev->lock);
+				tr->background(dev);
+				mutex_unlock(&dev->lock);
+				spin_lock_irq(rq->queue_lock);
+				/*
+				 * Do background processing just once per idle
+				 * period.
+				 */
+				background_done = 1;
+				continue;
+			}
 			set_current_state(TASK_INTERRUPTIBLE);
 			spin_unlock_irq(rq->queue_lock);
 			schedule();
@@ -112,6 +141,8 @@ static int mtd_blktrans_thread(void *arg)
 
 		if (!__blk_end_request_cur(req, res))
 			req = NULL;
+
+		background_done = 0;
 	}
 
 	if (req)
@@ -212,6 +243,7 @@ static const struct block_device_operations mtd_blktrans_ops = {
 int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 {
 	struct mtd_blktrans_ops *tr = new->tr;
+	struct request_queue *rq = tr->blkcore_priv->rq;
 	struct mtd_blktrans_dev *d;
 	int last_devnum = -1;
 	struct gendisk *gd;
@@ -221,6 +253,8 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 		BUG();
 	}
 
+	mutex_init(&new->lock);
+	spin_lock_irq(rq->queue_lock);
 	list_for_each_entry(d, &tr->devs, list) {
 		if (new->devnum == -1) {
 			/* Use first free number */
@@ -232,6 +266,7 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 			}
 		} else if (d->devnum == new->devnum) {
 			/* Required number taken */
+			spin_unlock_irq(rq->queue_lock);
 			return -EBUSY;
 		} else if (d->devnum > new->devnum) {
 			/* Required number was free */
@@ -249,7 +284,7 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 
 	list_add_tail(&new->list, &tr->devs);
  added:
-	mutex_init(&new->lock);
+	spin_unlock_irq(rq->queue_lock);
 	if (!tr->writesect)
 		new->readonly = 1;
 
@@ -291,6 +326,12 @@ int add_mtd_blktrans_dev(struct mtd_blktrans_dev *new)
 
 	return 0;
 }
+
+struct gendisk *get_mtd_blktrans_gendisk(struct mtd_blktrans_dev *dev)
+{
+	return dev->blkcore_priv;
+}
+EXPORT_SYMBOL_GPL(get_mtd_blktrans_gendisk);
 
 int del_mtd_blktrans_dev(struct mtd_blktrans_dev *old)
 {
@@ -351,13 +392,16 @@ int register_mtd_blktrans(struct mtd_blktrans_ops *tr)
 	mutex_lock(&mtd_table_mutex);
 
 	ret = register_blkdev(tr->major, tr->name);
-	if (ret) {
+	if (ret < 0) {
 		printk(KERN_WARNING "Unable to register %s block device on major %d: %d\n",
 		       tr->name, tr->major, ret);
 		kfree(tr->blkcore_priv);
 		mutex_unlock(&mtd_table_mutex);
 		return ret;
 	}
+	if (!tr->major)
+		tr->major = ret;
+
 	spin_lock_init(&tr->blkcore_priv->queue_lock);
 
 	tr->blkcore_priv->rq = blk_init_queue(mtd_blktrans_request, &tr->blkcore_priv->queue_lock);
@@ -368,13 +412,20 @@ int register_mtd_blktrans(struct mtd_blktrans_ops *tr)
 		return -ENOMEM;
 	}
 
+	blk_queue_ordered(tr->blkcore_priv->rq, QUEUE_ORDERED_DRAIN, NULL);
 	tr->blkcore_priv->rq->queuedata = tr;
 	blk_queue_logical_block_size(tr->blkcore_priv->rq, tr->blksize);
-	if (tr->discard)
+	if (tr->discard) {
 		queue_flag_set_unlocked(QUEUE_FLAG_DISCARD,
 					tr->blkcore_priv->rq);
+		queue_flag_set_unlocked(QUEUE_FLAG_NONROT,
+					tr->blkcore_priv->rq);
+		tr->blkcore_priv->rq->limits.max_discard_sectors = UINT_MAX;
+	}
 
 	tr->blkshift = ffs(tr->blksize) - 1;
+
+	INIT_LIST_HEAD(&tr->devs);
 
 	tr->blkcore_priv->thread = kthread_run(mtd_blktrans_thread, tr,
 			"%sd", tr->name);
@@ -386,8 +437,6 @@ int register_mtd_blktrans(struct mtd_blktrans_ops *tr)
 		mutex_unlock(&mtd_table_mutex);
 		return ret;
 	}
-
-	INIT_LIST_HEAD(&tr->devs);
 	list_add(&tr->list, &blktrans_majors);
 
 	for (i=0; i<MAX_MTD_DEVICES; i++) {

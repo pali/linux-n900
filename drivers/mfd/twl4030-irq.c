@@ -74,6 +74,8 @@ struct sih {
 	u8	edr_offset;
 	u8	bytes_edr;		/* bytelen of EDR */
 
+	u8	irq_lines;		/* number of supported irq lines */
+
 	/* SIR ignored -- set interrupt, for testing only */
 	struct irq_data {
 		u8	isr_offset;
@@ -82,6 +84,9 @@ struct sih {
 	/* + 2 bytes padding */
 };
 
+static const struct sih *sih_modules;
+static int nr_sih_modules;
+
 #define SIH_INITIALIZER(modname, nbits) \
 	.module		= TWL4030_MODULE_ ## modname, \
 	.control_offset = TWL4030_ ## modname ## _SIH_CTRL, \
@@ -89,6 +94,7 @@ struct sih {
 	.bytes_ixr	= DIV_ROUND_UP(nbits, 8), \
 	.edr_offset	= TWL4030_ ## modname ## _EDR, \
 	.bytes_edr	= DIV_ROUND_UP((2*(nbits)), 8), \
+	.irq_lines	= 2, \
 	.mask = { { \
 		.isr_offset	= TWL4030_ ## modname ## _ISR1, \
 		.imr_offset	= TWL4030_ ## modname ## _IMR1, \
@@ -107,7 +113,8 @@ struct sih {
 /* Order in this table matches order in PIH_ISR.  That is,
  * BIT(n) in PIH_ISR is sih_modules[n].
  */
-static const struct sih sih_modules[6] = {
+/* sih_modules_twl4030 is used both in twl4030 and twl5030 */
+static const struct sih sih_modules_twl4030[6] = {
 	[0] = {
 		.name		= "gpio",
 		.module		= TWL4030_MODULE_GPIO,
@@ -118,6 +125,7 @@ static const struct sih sih_modules[6] = {
 		/* Note: *all* of these IRQs default to no-trigger */
 		.edr_offset	= REG_GPIO_EDR1,
 		.bytes_edr	= 5,
+		.irq_lines	= 2,
 		.mask = { {
 			.isr_offset	= REG_GPIO_ISR1A,
 			.imr_offset	= REG_GPIO_IMR1A,
@@ -140,6 +148,7 @@ static const struct sih sih_modules[6] = {
 		.edr_offset	= TWL4030_INTERRUPTS_BCIEDR1,
 		/* Note: most of these IRQs default to no-trigger */
 		.bytes_edr	= 3,
+		.irq_lines	= 2,
 		.mask = { {
 			.isr_offset	= TWL4030_INTERRUPTS_BCIISR1A,
 			.imr_offset	= TWL4030_INTERRUPTS_BCIIMR1A,
@@ -164,6 +173,99 @@ static const struct sih sih_modules[6] = {
 		/* there are no SIH modules #6 or #7 ... */
 };
 
+static const struct sih sih_modules_twl5031[8] = {
+	[0] = {
+		.name		= "gpio",
+		.module		= TWL4030_MODULE_GPIO,
+		.control_offset	= REG_GPIO_SIH_CTRL,
+		.set_cor	= true,
+		.bits		= TWL4030_GPIO_MAX,
+		.bytes_ixr	= 3,
+		/* Note: *all* of these IRQs default to no-trigger */
+		.edr_offset	= REG_GPIO_EDR1,
+		.bytes_edr	= 5,
+		.irq_lines	= 2,
+		.mask = { {
+			.isr_offset	= REG_GPIO_ISR1A,
+			.imr_offset	= REG_GPIO_IMR1A,
+		}, {
+			.isr_offset	= REG_GPIO_ISR1B,
+			.imr_offset	= REG_GPIO_IMR1B,
+		}, },
+	},
+	[1] = {
+		.name		= "keypad",
+		.set_cor	= true,
+		SIH_INITIALIZER(KEYPAD_KEYP, 4)
+	},
+	[2] = {
+		.name		= "bci",
+		.module		= TWL5031_MODULE_INTERRUPTS,
+		.control_offset	= TWL5031_INTERRUPTS_BCISIHCTRL,
+		.bits		= 7,
+		.bytes_ixr	= 1,
+		.edr_offset	= TWL5031_INTERRUPTS_BCIEDR1,
+		/* Note: most of these IRQs default to no-trigger */
+		.bytes_edr	= 2,
+		.irq_lines	= 2,
+		.mask = { {
+			.isr_offset	= TWL5031_INTERRUPTS_BCIISR1,
+			.imr_offset	= TWL5031_INTERRUPTS_BCIIMR1,
+		}, {
+			.isr_offset	= TWL5031_INTERRUPTS_BCIISR2,
+			.imr_offset	= TWL5031_INTERRUPTS_BCIIMR2,
+		}, },
+	},
+	[3] = {
+		.name		= "madc",
+		SIH_INITIALIZER(MADC, 4)
+	},
+	[4] = {
+		/* USB doesn't use the same SIH organization */
+		.name		= "usb",
+	},
+	[5] = {
+		.name		= "power",
+		.set_cor	= true,
+		SIH_INITIALIZER(INT_PWR, 8)
+	},
+	[6] = {
+		/*
+		 * ACI doesn't use the same SIH organization.
+		 * For example, it supports only one interrupt line
+		 */
+		.name		= "aci",
+		.module		= TWL5031_MODULE_ACCESSORY,
+		.bits		= 9,
+		.bytes_ixr	= 2,
+		.irq_lines	= 1,
+		.mask = { {
+			.isr_offset	= TWL5031_ACIIDR_LSB,
+			.imr_offset	= TWL5031_ACIIMR_LSB,
+		}, },
+
+	},
+	[7] = {
+		/* Accessory */
+		.name		= "acc",
+		.module		= TWL5031_MODULE_ACCESSORY,
+		.control_offset	= TWL5031_ACCSIHCTRL,
+		.bits		= 2,
+		.bytes_ixr	= 1,
+		.edr_offset	= TWL5031_ACCEDR1,
+		/* Note: most of these IRQs default to no-trigger */
+		.bytes_edr	= 1,
+		.irq_lines	= 2,
+		.mask = { {
+			.isr_offset	= TWL5031_ACCISR1,
+			.imr_offset	= TWL5031_ACCIMR1,
+		}, {
+			.isr_offset	= TWL5031_ACCISR2,
+			.imr_offset	= TWL5031_ACCIMR2,
+		}, },
+	},
+};
+
 #undef TWL4030_MODULE_KEYPAD_KEYP
 #undef TWL4030_MODULE_INT_PWR
 #undef TWL4030_INT_PWR_EDR
@@ -172,73 +274,62 @@ static const struct sih sih_modules[6] = {
 
 static unsigned twl4030_irq_base;
 
-static struct completion irq_event;
+static int twl4030_init_sih_module(unsigned line, const struct sih *sih);
 
 /*
  * This thread processes interrupts reported by the Primary Interrupt Handler.
  */
-static int twl4030_irq_thread(void *data)
+static irqreturn_t twl4030_irq_thread(int irq, void *data)
 {
-	long irq = (long)data;
 	static unsigned i2c_errors;
 	static const unsigned max_i2c_errors = 100;
+	int ret;
+	int module_irq;
+	u8 pih_isr;
 
-
-	current->flags |= PF_NOFREEZE;
-
-	while (!kthread_should_stop()) {
-		int ret;
-		int module_irq;
-		u8 pih_isr;
-
-		/* Wait for IRQ, then read PIH irq status (also blocking) */
-		wait_for_completion_interruptible(&irq_event);
-
-		ret = twl4030_i2c_read_u8(TWL4030_MODULE_PIH, &pih_isr,
-					  REG_PIH_ISR_P1);
-		if (ret) {
-			pr_warning("twl4030: I2C error %d reading PIH ISR\n",
-					ret);
-			if (++i2c_errors >= max_i2c_errors) {
-				printk(KERN_ERR "Maximum I2C error count"
-						" exceeded.  Terminating %s.\n",
-						__func__);
-				break;
-			}
-			complete(&irq_event);
-			continue;
+	ret = twl4030_i2c_read_u8(TWL4030_MODULE_PIH, &pih_isr,
+				  REG_PIH_ISR_P1);
+	if (ret) {
+		pr_warning("twl4030: I2C error %d reading PIH ISR\n", ret);
+		if (++i2c_errors >= max_i2c_errors) {
+			printk(KERN_ERR "Maximum I2C error count"
+			       " exceeded.  Terminating %s.\n",
+			       __func__);
+			disable_irq(irq);
 		}
-
-		/* these handlers deal with the relevant SIH irq status */
-		local_irq_disable();
-		for (module_irq = twl4030_irq_base;
-				pih_isr;
-				pih_isr >>= 1, module_irq++) {
-			if (pih_isr & 0x1) {
-				struct irq_desc *d = irq_to_desc(module_irq);
-
-				if (!d) {
-					pr_err("twl4030: Invalid SIH IRQ: %d\n",
-					       module_irq);
-					return -EINVAL;
-				}
-
-				/* These can't be masked ... always warn
-				 * if we get any surprises.
-				 */
-				if (d->status & IRQ_DISABLED)
-					note_interrupt(module_irq, d,
-							IRQ_NONE);
-				else
-					d->handle_irq(module_irq, d);
-			}
-		}
-		local_irq_enable();
-
-		enable_irq(irq);
+		return IRQ_HANDLED;
 	}
 
-	return 0;
+	/* these handlers deal with the relevant SIH irq status */
+	local_irq_disable();
+	for (module_irq = twl4030_irq_base;
+	     pih_isr;
+	     pih_isr >>= 1, module_irq++) {
+		if (pih_isr & 0x1) {
+			struct irq_desc *d = irq_to_desc(module_irq);
+
+			if (!d) {
+				pr_err("twl4030: Invalid SIH IRQ: %d\n",
+				       module_irq);
+				return -EINVAL;
+			}
+
+			/* These can't be masked on top level... Try to mask
+			 * with subsystem ISR and always warn.
+			 */
+			if (d->status & IRQ_DISABLED) {
+				local_irq_enable();
+				twl4030_init_sih_module(irq_line,
+				 &sih_modules[module_irq - twl4030_irq_base]);
+				local_irq_disable();
+				note_interrupt(module_irq, d, IRQ_NONE);
+			} else
+				d->handle_irq(module_irq, d);
+		}
+	}
+	local_irq_enable();
+
+	return IRQ_HANDLED;
 }
 
 /*
@@ -252,10 +343,8 @@ static int twl4030_irq_thread(void *data)
  */
 static irqreturn_t handle_twl4030_pih(int irq, void *devid)
 {
-	/* Acknowledge, clear *AND* mask the interrupt... */
-	disable_irq_nosync(irq);
-	complete(devid);
-	return IRQ_HANDLED;
+	/* This function is now obsolete. */
+	return IRQ_WAKE_THREAD;
 }
 /*----------------------------------------------------------------------*/
 
@@ -271,9 +360,7 @@ static irqreturn_t handle_twl4030_pih(int irq, void *devid)
 static int twl4030_init_sih_modules(unsigned line)
 {
 	const struct sih *sih;
-	u8 buf[4];
 	int i;
-	int status;
 
 	/* line 0 == int1_n signal; line 1 == int2_n signal */
 	if (line > 1)
@@ -281,67 +368,82 @@ static int twl4030_init_sih_modules(unsigned line)
 
 	irq_line = line;
 
+	sih = sih_modules;
+	for (i = 0; i < nr_sih_modules; i++, sih++)
+		twl4030_init_sih_module(line, sih);
+
+	return 0;
+}
+
+static int twl4030_init_sih_module(unsigned line, const struct sih *sih)
+{
+	u8 buf[4];
+	u8 rxbuf[4];
+	int j;
+	int status;
+
 	/* disable all interrupts on our line */
 	memset(buf, 0xff, sizeof buf);
-	sih = sih_modules;
-	for (i = 0; i < ARRAY_SIZE(sih_modules); i++, sih++) {
 
-		/* skip USB -- it's funky */
-		if (!sih->bytes_ixr)
-			continue;
+	/* skip USB -- it's funky */
+	if (!sih->bytes_ixr)
+		return 0;
 
+	/* Not all the SIH modules support multiple interrupt lines */
+	if (sih->irq_lines <= line)
+		return 0;
+
+	status = twl4030_i2c_write(sih->module, buf,
+				   sih->mask[line].imr_offset, sih->bytes_ixr);
+	if (status < 0)
+		pr_err("twl4030: err %d initializing %s IMR\n",
+		       status, sih->name);
+
+	/* Both IRQ outputs are enabled by default for the INT_PWR module. Mask the
+	   IRQs for the output we don't use. */
+
+	if (sih->module == TWL4030_MODULE_INT) {
 		status = twl4030_i2c_write(sih->module, buf,
-				sih->mask[line].imr_offset, sih->bytes_ixr);
+				sih->mask[!line].imr_offset, sih->bytes_ixr);
 		if (status < 0)
-			pr_err("twl4030: err %d initializing %s %s\n",
-					status, sih->name, "IMR");
-
-		/* Maybe disable "exclusive" mode; buffer second pending irq;
-		 * set Clear-On-Read (COR) bit.
-		 *
-		 * NOTE that sometimes COR polarity is documented as being
-		 * inverted:  for MADC and BCI, COR=1 means "clear on write".
-		 * And for PWR_INT it's not documented...
-		 */
-		if (sih->set_cor) {
-			status = twl4030_i2c_write_u8(sih->module,
-					TWL4030_SIH_CTRL_COR_MASK,
-					sih->control_offset);
-			if (status < 0)
-				pr_err("twl4030: err %d initializing %s %s\n",
-						status, sih->name, "SIH_CTRL");
-		}
+			pr_err("twl4030: err %d initializing %s IMR2\n",
+				 status, sih->name);
 	}
 
-	sih = sih_modules;
-	for (i = 0; i < ARRAY_SIZE(sih_modules); i++, sih++) {
-		u8 rxbuf[4];
-		int j;
+	/* Maybe disable "exclusive" mode; buffer second pending irq;
+	 * set Clear-On-Read (COR) bit.
+	 *
+	 * NOTE that sometimes COR polarity is documented as being
+	 * inverted:  for MADC and BCI, COR=1 means "clear on write".
+	 * And for PWR_INT it's not documented...
+	 */
+	if (sih->set_cor) {
+		status = twl4030_i2c_write_u8(sih->module,
+					      TWL4030_SIH_CTRL_COR_MASK,
+					      sih->control_offset);
+		if (status < 0)
+			pr_err("twl4030: err %d initializing %s SIH_CTRL\n",
+			       status, sih->name);
+	}
 
-		/* skip USB */
-		if (!sih->bytes_ixr)
-			continue;
+	/* Clear pending interrupt status.  Either the read is
+	 * enough, or we need to write those bits.  Repeat, in
+	 * case an IRQ is pending (PENDDIS=0) ... that's not
+	 * uncommon with PWR_INT.PWRON.
+	 */
+	for (j = 0; j < 2; j++) {
+		status = twl4030_i2c_read(sih->module, rxbuf,
+					  sih->mask[line].isr_offset,
+					  sih->bytes_ixr);
+		if (status < 0)
+			pr_err("twl4030: err %d reading %s ISR\n",
+			       status, sih->name);
 
-		/* Clear pending interrupt status.  Either the read was
-		 * enough, or we need to write those bits.  Repeat, in
-		 * case an IRQ is pending (PENDDIS=0) ... that's not
-		 * uncommon with PWR_INT.PWRON.
-		 */
-		for (j = 0; j < 2; j++) {
-			status = twl4030_i2c_read(sih->module, rxbuf,
-				sih->mask[line].isr_offset, sih->bytes_ixr);
-			if (status < 0)
-				pr_err("twl4030: err %d initializing %s %s\n",
-					status, sih->name, "ISR");
-
-			if (!sih->set_cor)
-				status = twl4030_i2c_write(sih->module, buf,
-					sih->mask[line].isr_offset,
-					sih->bytes_ixr);
-			/* else COR=1 means read sufficed.
-			 * (for most SIH modules...)
-			 */
-		}
+		if (!sih->set_cor)
+			status = twl4030_i2c_write(sih->module, buf,
+						   sih->mask[line].isr_offset,
+						   sih->bytes_ixr);
+		/* else COR=1 means read sufficed. */
 	}
 
 	return 0;
@@ -611,7 +713,7 @@ int twl4030_sih_setup(int module)
 
 	/* only support modules with standard clear-on-read for now */
 	for (sih_mod = 0, sih = sih_modules;
-			sih_mod < ARRAY_SIZE(sih_modules);
+			sih_mod < nr_sih_modules;
 			sih_mod++, sih++) {
 		if (sih->module == module && sih->set_cor) {
 			if (!WARN((irq_base + sih->bits) > NR_IRQS,
@@ -674,7 +776,6 @@ int twl_init_irq(int irq_num, unsigned irq_base, unsigned irq_end)
 
 	int			status;
 	int			i;
-	struct task_struct	*task;
 
 	/*
 	 * Mask and clear all TWL4030 interrupts since initially we do
@@ -719,24 +820,17 @@ int twl_init_irq(int irq_num, unsigned irq_base, unsigned irq_end)
 	/* install an irq handler to demultiplex the TWL4030 interrupt */
 
 
-	init_completion(&irq_event);
-
-	status = request_irq(irq_num, handle_twl4030_pih, IRQF_DISABLED,
-				"TWL4030-PIH", &irq_event);
+	status = request_threaded_irq(irq_num, handle_twl4030_pih,
+				      twl4030_irq_thread,
+				      IRQF_DISABLED | IRQF_ONESHOT,
+				      "TWL4030-PIH", NULL);
 	if (status < 0) {
 		pr_err("twl4030: could not claim irq%d: %d\n", irq_num, status);
 		goto fail_rqirq;
 	}
 
-	task = kthread_run(twl4030_irq_thread, (void *)irq_num, "twl4030-irq");
-	if (IS_ERR(task)) {
-		pr_err("twl4030: could not create irq %d thread!\n", irq_num);
-		status = PTR_ERR(task);
-		goto fail_kthread;
-	}
 	return status;
-fail_kthread:
-	free_irq(irq_num, &irq_event);
+
 fail_rqirq:
 	/* clean up twl4030_sih_setup */
 fail:
@@ -754,5 +848,18 @@ int twl_exit_irq(void)
 		pr_err("twl4030: can't yet clean up IRQs?\n");
 		return -ENOSYS;
 	}
+	return 0;
+}
+
+int twl_init_chip_irq(const char *chip)
+{
+	if (!strcmp(chip, "twl5031")) {
+		sih_modules = sih_modules_twl5031;
+		nr_sih_modules = ARRAY_SIZE(sih_modules_twl5031);
+	} else {
+		sih_modules = sih_modules_twl4030;
+		nr_sih_modules = ARRAY_SIZE(sih_modules_twl4030);
+	}
+
 	return 0;
 }

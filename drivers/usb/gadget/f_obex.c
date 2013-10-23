@@ -48,7 +48,6 @@ struct f_obex {
 	u8				ctrl_id;
 	u8				data_id;
 	u8				port_num;
-	u8				can_activate;
 
 	struct obex_ep_descs		fs;
 	struct obex_ep_descs		hs;
@@ -68,10 +67,14 @@ static inline struct f_obex *port_to_obex(struct gserial *p)
 
 #define OBEX_CTRL_IDX	0
 #define OBEX_DATA_IDX	1
+#define OBEX_CTRL0_IDX	2
+#define OBEX_CTRL1_IDX	3
 
 static struct usb_string obex_string_defs[] = {
 	[OBEX_CTRL_IDX].s	= "CDC Object Exchange (OBEX)",
 	[OBEX_DATA_IDX].s	= "CDC OBEX Data",
+	[OBEX_CTRL0_IDX].s	= "PC Suite Services",
+	[OBEX_CTRL1_IDX].s	= "SYNCML-SYNC",
 	{  },	/* end of list */
 };
 
@@ -269,38 +272,6 @@ static void obex_disable(struct usb_function *f)
 
 /*-------------------------------------------------------------------------*/
 
-static void obex_connect(struct gserial *g)
-{
-	struct f_obex		*obex = port_to_obex(g);
-	struct usb_composite_dev *cdev = g->func.config->cdev;
-	int			status;
-
-	if (!obex->can_activate)
-		return;
-
-	status = usb_function_activate(&g->func);
-	if (status)
-		DBG(cdev, "obex ttyGS%d function activate --> %d\n",
-			obex->port_num, status);
-}
-
-static void obex_disconnect(struct gserial *g)
-{
-	struct f_obex		*obex = port_to_obex(g);
-	struct usb_composite_dev *cdev = g->func.config->cdev;
-	int			status;
-
-	if (!obex->can_activate)
-		return;
-
-	status = usb_function_deactivate(&g->func);
-	if (status)
-		DBG(cdev, "obex ttyGS%d function deactivate --> %d\n",
-			obex->port_num, status);
-}
-
-/*-------------------------------------------------------------------------*/
-
 static int __init
 obex_bind(struct usb_configuration *c, struct usb_function *f)
 {
@@ -369,16 +340,6 @@ obex_bind(struct usb_configuration *c, struct usb_function *f)
 		obex->hs.obex_out = usb_find_endpoint(hs_function,
 				f->hs_descriptors, &obex_hs_ep_out_desc);
 	}
-
-	/* Avoid letting this gadget enumerate until the userspace
-	 * OBEX server is active.
-	 */
-	status = usb_function_deactivate(f);
-	if (status < 0)
-		WARNING(cdev, "obex ttyGS%d: can't prevent enumeration, %d\n",
-			obex->port_num, status);
-	else
-		obex->can_activate = true;
 
 
 	DBG(cdev, "obex ttyGS%d: %s speed IN/%s OUT/%s\n",
@@ -451,15 +412,35 @@ int __init obex_bind_config(struct usb_configuration *c, u8 port_num)
 			return status;
 		obex_string_defs[OBEX_CTRL_IDX].id = status;
 
-		obex_control_intf.iInterface = status;
-
 		status = usb_string_id(c->cdev);
 		if (status < 0)
 			return status;
 		obex_string_defs[OBEX_DATA_IDX].id = status;
 
-		obex_data_nop_intf.iInterface =
-			obex_data_intf.iInterface = status;
+		status = usb_string_id(c->cdev);
+		if (status < 0)
+			return status;
+		obex_string_defs[OBEX_CTRL0_IDX].id = status;
+
+		status = usb_string_id(c->cdev);
+		if (status < 0)
+			return status;
+		obex_string_defs[OBEX_CTRL1_IDX].id = status;
+	}
+
+	obex_data_nop_intf.iInterface = obex_string_defs[OBEX_DATA_IDX].id;
+	obex_data_intf.iInterface = obex_string_defs[OBEX_DATA_IDX].id;
+
+	switch (port_num) {
+	case 0:
+		obex_control_intf.iInterface = obex_string_defs[OBEX_CTRL0_IDX].id;
+		break;
+	case 1:
+		obex_control_intf.iInterface = obex_string_defs[OBEX_CTRL1_IDX].id;
+		break;
+	default:
+		obex_control_intf.iInterface = obex_string_defs[OBEX_CTRL_IDX].id;
+		break;
 	}
 
 	/* allocate and initialize one new instance */
@@ -468,9 +449,6 @@ int __init obex_bind_config(struct usb_configuration *c, u8 port_num)
 		return -ENOMEM;
 
 	obex->port_num = port_num;
-
-	obex->port.connect = obex_connect;
-	obex->port.disconnect = obex_disconnect;
 
 	obex->port.func.name = "obex";
 	obex->port.func.strings = obex_strings;

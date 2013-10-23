@@ -25,7 +25,7 @@ static int affs_statfs(struct dentry *dentry, struct kstatfs *buf);
 static int affs_remount (struct super_block *sb, int *flags, char *data);
 
 static void
-affs_commit_super(struct super_block *sb, int clean)
+affs_commit_super(struct super_block *sb, int wait, int clean)
 {
 	struct affs_sb_info *sbi = AFFS_SB(sb);
 	struct buffer_head *bh = sbi->s_root_bh;
@@ -35,6 +35,8 @@ affs_commit_super(struct super_block *sb, int clean)
 	secs_to_datestamp(get_seconds(), &tail->disk_change);
 	affs_fix_checksum(sb, bh);
 	mark_buffer_dirty(bh);
+	if (wait)
+		sync_dirty_buffer(bh);
 }
 
 static void
@@ -45,8 +47,8 @@ affs_put_super(struct super_block *sb)
 
 	lock_kernel();
 
-	if (!(sb->s_flags & MS_RDONLY))
-		affs_commit_super(sb, 1);
+	if (!(sb->s_flags & MS_RDONLY) && sb_is_dirty(sb))
+		affs_commit_super(sb, 1, 1);
 
 	kfree(sbi->s_prefix);
 	affs_free_bitmap(sb);
@@ -60,28 +62,21 @@ affs_put_super(struct super_block *sb)
 static void
 affs_write_super(struct super_block *sb)
 {
-	int clean = 2;
-
 	lock_super(sb);
-	if (!(sb->s_flags & MS_RDONLY)) {
-		//	if (sbi->s_bitmap[i].bm_bh) {
-		//		if (buffer_dirty(sbi->s_bitmap[i].bm_bh)) {
-		//			clean = 0;
-		affs_commit_super(sb, clean);
-		sb->s_dirt = !clean;	/* redo until bitmap synced */
-	} else
-		sb->s_dirt = 0;
+	if (!(sb->s_flags & MS_RDONLY))
+		affs_commit_super(sb, 1, 2);
+	sb_mark_clean(sb);
 	unlock_super(sb);
 
-	pr_debug("AFFS: write_super() at %lu, clean=%d\n", get_seconds(), clean);
+	pr_debug("AFFS: write_super() at %lu, clean=2\n", get_seconds());
 }
 
 static int
 affs_sync_fs(struct super_block *sb, int wait)
 {
 	lock_super(sb);
-	affs_commit_super(sb, 2);
-	sb->s_dirt = 0;
+	affs_commit_super(sb, wait, 2);
+	sb_mark_clean(sb);
 	unlock_super(sb);
 	return 0;
 }
@@ -553,9 +548,7 @@ affs_remount(struct super_block *sb, int *flags, char *data)
 		return 0;
 	}
 	if (*flags & MS_RDONLY) {
-		sb->s_dirt = 1;
-		while (sb->s_dirt)
-			affs_write_super(sb);
+		affs_write_super(sb);
 		affs_free_bitmap(sb);
 	} else
 		res = affs_init_bitmap(sb, flags);

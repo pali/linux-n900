@@ -1228,6 +1228,7 @@ no_page_table:
 		return ERR_PTR(-EFAULT);
 	return page;
 }
+EXPORT_SYMBOL_GPL(follow_page);
 
 int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 		     unsigned long start, int nr_pages, unsigned int gup_flags,

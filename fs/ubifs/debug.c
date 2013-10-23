@@ -42,8 +42,8 @@ DEFINE_SPINLOCK(dbg_lock);
 static char dbg_key_buf0[128];
 static char dbg_key_buf1[128];
 
-unsigned int ubifs_msg_flags = UBIFS_MSG_FLAGS_DEFAULT;
-unsigned int ubifs_chk_flags = UBIFS_CHK_FLAGS_DEFAULT;
+unsigned int ubifs_msg_flags;
+unsigned int ubifs_chk_flags;
 unsigned int ubifs_tst_flags;
 
 module_param_named(debug_msgs, ubifs_msg_flags, uint, S_IRUGO | S_IWUSR);
@@ -814,16 +814,24 @@ void dbg_dump_leb(const struct ubifs_info *c, int lnum)
 {
 	struct ubifs_scan_leb *sleb;
 	struct ubifs_scan_node *snod;
+	void *buf;
 
 	if (dbg_failure_mode)
 		return;
 
 	printk(KERN_DEBUG "(pid %d) start dumping LEB %d\n",
 	       current->pid, lnum);
-	sleb = ubifs_scan(c, lnum, 0, c->dbg->buf, 0);
+
+	buf = __vmalloc(c->leb_size, GFP_NOFS, PAGE_KERNEL);
+	if (!buf) {
+		ubifs_err("cannot allocate memory for dumping LEB %d", lnum);
+		return;
+	}
+
+	sleb = ubifs_scan(c, lnum, 0, buf, 0);
 	if (IS_ERR(sleb)) {
 		ubifs_err("scan error %d", (int)PTR_ERR(sleb));
-		return;
+		goto out;
 	}
 
 	printk(KERN_DEBUG "LEB %d has %d nodes ending at %d\n", lnum,
@@ -839,6 +847,9 @@ void dbg_dump_leb(const struct ubifs_info *c, int lnum)
 	printk(KERN_DEBUG "(pid %d) finish dumping LEB %d\n",
 	       current->pid, lnum);
 	ubifs_scan_destroy(sleb);
+
+out:
+	vfree(buf);
 	return;
 }
 
@@ -2045,7 +2056,7 @@ static int check_leaf(struct ubifs_info *c, struct ubifs_zbranch *zbr,
 		inum = key_inum_flash(c, &dent->key);
 		fscki1 = read_add_inode(c, priv, inum);
 		if (IS_ERR(fscki1)) {
-			err = PTR_ERR(fscki);
+			err = PTR_ERR(fscki1);
 			ubifs_err("error %d while processing entry node and "
 				  "trying to find parent inode node %lu",
 				  err, (unsigned long)inum);
@@ -2272,6 +2283,163 @@ out_free:
 	dump_stack();
 	free_inodes(&fsckd);
 	return err;
+}
+
+/**
+ * dbg_check_data_nodes_order - check that list of data nodes is sorted.
+ * @c: UBIFS file-system description object
+ * @head: the list of nodes ('struct ubifs_scan_node' objects)
+ *
+ * This function returns zero if the list of data nodes is sorted correctly,
+ * and %-EINVAL if not.
+ */
+int dbg_check_data_nodes_order(struct ubifs_info *c, struct list_head *head)
+{
+	struct list_head *cur;
+	struct ubifs_scan_node *sa, *sb;
+
+	if (!(ubifs_chk_flags & UBIFS_CHK_GEN))
+		return 0;
+
+	for (cur = head->next; cur->next != head; cur = cur->next) {
+		ino_t inuma, inumb;
+		uint32_t blka, blkb;
+
+		cond_resched();
+		sa = container_of(cur, struct ubifs_scan_node, list);
+		sb = container_of(cur->next, struct ubifs_scan_node, list);
+
+		if (sa->type != UBIFS_DATA_NODE) {
+			ubifs_err("bad node type %d", sa->type);
+			dbg_dump_node(c, sa->node);
+			return -EINVAL;
+		}
+		if (sb->type != UBIFS_DATA_NODE) {
+			ubifs_err("bad node type %d", sb->type);
+			dbg_dump_node(c, sb->node);
+			return -EINVAL;
+		}
+
+		inuma = key_inum(c, &sa->key);
+		inumb = key_inum(c, &sb->key);
+
+		if (inuma < inumb)
+			continue;
+		if (inuma > inumb) {
+			ubifs_err("larger inum %lu goes before inum %lu",
+				  (unsigned long)inuma, (unsigned long)inumb);
+			goto error_dump;
+		}
+
+		blka = key_block(c, &sa->key);
+		blkb = key_block(c, &sb->key);
+
+		if (blka > blkb) {
+			ubifs_err("larger block %u goes before %u", blka, blkb);
+			goto error_dump;
+		}
+		if (blka == blkb) {
+			ubifs_err("two data nodes for the same block");
+			goto error_dump;
+		}
+	}
+
+	return 0;
+
+error_dump:
+	dbg_dump_node(c, sa->node);
+	dbg_dump_node(c, sb->node);
+	return -EINVAL;
+}
+
+/**
+ * dbg_check_nondata_nodes_order - check that list of data nodes is sorted.
+ * @c: UBIFS file-system description object
+ * @head: the list of nodes ('struct ubifs_scan_node' objects)
+ *
+ * This function returns zero if the list of non-data nodes is sorted correctly,
+ * and %-EINVAL if not.
+ */
+int dbg_check_nondata_nodes_order(struct ubifs_info *c, struct list_head *head)
+{
+	struct list_head *cur;
+	struct ubifs_scan_node *sa, *sb;
+
+	if (!(ubifs_chk_flags & UBIFS_CHK_GEN))
+		return 0;
+
+	for (cur = head->next; cur->next != head; cur = cur->next) {
+		ino_t inuma, inumb;
+		uint32_t hasha, hashb;
+
+		cond_resched();
+		sa = container_of(cur, struct ubifs_scan_node, list);
+		sb = container_of(cur->next, struct ubifs_scan_node, list);
+
+		if (sa->type != UBIFS_INO_NODE && sa->type != UBIFS_DENT_NODE &&
+		    sa->type != UBIFS_XENT_NODE) {
+			ubifs_err("bad node type %d", sa->type);
+			dbg_dump_node(c, sa->node);
+			return -EINVAL;
+		}
+		if (sa->type != UBIFS_INO_NODE && sa->type != UBIFS_DENT_NODE &&
+		    sa->type != UBIFS_XENT_NODE) {
+			ubifs_err("bad node type %d", sb->type);
+			dbg_dump_node(c, sb->node);
+			return -EINVAL;
+		}
+
+		if (sa->type != UBIFS_INO_NODE && sb->type == UBIFS_INO_NODE) {
+			ubifs_err("non-inode node goes before inode node");
+			goto error_dump;
+		}
+
+		if (sa->type == UBIFS_INO_NODE && sb->type != UBIFS_INO_NODE)
+			continue;
+
+		if (sa->type == UBIFS_INO_NODE && sb->type == UBIFS_INO_NODE) {
+			/* Inode nodes are sorted in descending size order */
+			if (sa->len < sb->len) {
+				ubifs_err("smaller inode node goes first");
+				goto error_dump;
+			}
+			continue;
+		}
+
+		/*
+		 * This is either a dentry or xentry, which should be sorted in
+		 * ascending (parent ino, hash) order.
+		 */
+		inuma = key_inum(c, &sa->key);
+		inumb = key_inum(c, &sb->key);
+
+		if (inuma < inumb)
+			continue;
+		if (inuma > inumb) {
+			ubifs_err("larger inum %lu goes before inum %lu",
+				  (unsigned long)inuma, (unsigned long)inumb);
+			goto error_dump;
+		}
+
+		hasha = key_block(c, &sa->key);
+		hashb = key_block(c, &sb->key);
+
+		if (hasha > hashb) {
+			ubifs_err("larger hash %u goes before %u",
+				  hasha, hashb);
+			goto error_dump;
+		}
+	}
+
+	return 0;
+
+error_dump:
+	ubifs_msg("dumping first node");
+	dbg_dump_node(c, sa->node);
+	ubifs_msg("dumping second node");
+	dbg_dump_node(c, sb->node);
+	return -EINVAL;
+	return 0;
 }
 
 static int invocation_cnt;
@@ -2569,16 +2737,8 @@ int ubifs_debugging_init(struct ubifs_info *c)
 	if (!c->dbg)
 		return -ENOMEM;
 
-	c->dbg->buf = vmalloc(c->leb_size);
-	if (!c->dbg->buf)
-		goto out;
-
 	failure_mode_init(c);
 	return 0;
-
-out:
-	kfree(c->dbg);
-	return -ENOMEM;
 }
 
 /**
@@ -2588,7 +2748,6 @@ out:
 void ubifs_debugging_exit(struct ubifs_info *c)
 {
 	failure_mode_exit(c);
-	vfree(c->dbg->buf);
 	kfree(c->dbg);
 }
 
@@ -2630,7 +2789,7 @@ void dbg_debugfs_exit(void)
 static int open_debugfs_file(struct inode *inode, struct file *file)
 {
 	file->private_data = inode->i_private;
-	return 0;
+	return nonseekable_open(inode, file);
 }
 
 static ssize_t write_debugfs_file(struct file *file, const char __user *buf,
@@ -2660,6 +2819,7 @@ static const struct file_operations dfs_fops = {
 	.open = open_debugfs_file,
 	.write = write_debugfs_file,
 	.owner = THIS_MODULE,
+	.llseek = no_llseek,
 };
 
 /**
@@ -2682,40 +2842,38 @@ int dbg_debugfs_init_fs(struct ubifs_info *c)
 	struct ubifs_debug_info *d = c->dbg;
 
 	sprintf(d->dfs_dir_name, "ubi%d_%d", c->vi.ubi_num, c->vi.vol_id);
-	d->dfs_dir = debugfs_create_dir(d->dfs_dir_name, dfs_rootdir);
-	if (IS_ERR(d->dfs_dir)) {
-		err = PTR_ERR(d->dfs_dir);
-		ubifs_err("cannot create \"%s\" debugfs directory, error %d\n",
-			  d->dfs_dir_name, err);
+	fname = d->dfs_dir_name;
+	dent = debugfs_create_dir(fname, dfs_rootdir);
+	if (IS_ERR_OR_NULL(dent))
 		goto out;
-	}
+	d->dfs_dir = dent;
 
 	fname = "dump_lprops";
 	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, c, &dfs_fops);
-	if (IS_ERR(dent))
+	if (IS_ERR_OR_NULL(dent))
 		goto out_remove;
 	d->dfs_dump_lprops = dent;
 
 	fname = "dump_budg";
 	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, c, &dfs_fops);
-	if (IS_ERR(dent))
+	if (IS_ERR_OR_NULL(dent))
 		goto out_remove;
 	d->dfs_dump_budg = dent;
 
 	fname = "dump_tnc";
 	dent = debugfs_create_file(fname, S_IWUSR, d->dfs_dir, c, &dfs_fops);
-	if (IS_ERR(dent))
+	if (IS_ERR_OR_NULL(dent))
 		goto out_remove;
 	d->dfs_dump_tnc = dent;
 
 	return 0;
 
 out_remove:
-	err = PTR_ERR(dent);
-	ubifs_err("cannot create \"%s\" debugfs directory, error %d\n",
-		  fname, err);
 	debugfs_remove_recursive(d->dfs_dir);
 out:
+	err = dent ? PTR_ERR(dent) : -ENODEV;
+	ubifs_err("cannot create \"%s\" debugfs directory, error %d\n",
+		  fname, err);
 	return err;
 }
 

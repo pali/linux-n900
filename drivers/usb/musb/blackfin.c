@@ -29,6 +29,7 @@ void musb_write_fifo(struct musb_hw_ep *hw_ep, u16 len, const u8 *src)
 {
 	void __iomem *fifo = hw_ep->fifo;
 	void __iomem *epio = hw_ep->regs;
+	u8 epnum = hw_ep->epnum;
 
 	prefetch((u8 *)src);
 
@@ -39,14 +40,51 @@ void musb_write_fifo(struct musb_hw_ep *hw_ep, u16 len, const u8 *src)
 
 	dump_fifo_data(src, len);
 
-	if (unlikely((unsigned long)src & 0x01))
-		outsw_8((unsigned long)fifo, src,
-			len & 0x01 ? (len >> 1) + 1 : len >> 1);
-	else
-		outsw((unsigned long)fifo, src,
-			len & 0x01 ? (len >> 1) + 1 : len >> 1);
-}
+	if (!ANOMALY_05000380 && epnum != 0) {
+		u16 dma_reg;
 
+		flush_dcache_range((unsigned long)src,
+			(unsigned long)(src + len));
+
+		/* Setup DMA address register */
+		dma_reg = (u32)src;
+		bfin_write16(USB_DMA_REG(epnum, USB_DMAx_ADDR_LOW), dma_reg);
+		SSYNC();
+
+		dma_reg = (u32)src >> 16;
+		bfin_write16(USB_DMA_REG(epnum, USB_DMAx_ADDR_HIGH), dma_reg);
+		SSYNC();
+
+		/* Setup DMA count register */
+		bfin_write16(USB_DMA_REG(epnum, USB_DMAx_COUNT_LOW), len);
+		bfin_write16(USB_DMA_REG(epnum, USB_DMAx_COUNT_HIGH), 0);
+		SSYNC();
+
+		/* Enable the DMA */
+		dma_reg = (epnum << 4) | DMA_ENA | INT_ENA | DIRECTION;
+		bfin_write16(USB_DMA_REG(epnum, USB_DMAx_CTRL), dma_reg);
+		SSYNC();
+
+		/* Wait for compelete */
+		while (!(bfin_read_USB_DMA_INTERRUPT() & (1 << epnum)))
+			cpu_relax();
+
+		/* acknowledge dma interrupt */
+		bfin_write_USB_DMA_INTERRUPT(1 << epnum);
+		SSYNC();
+
+		/* Reset DMA */
+		bfin_write16(USB_DMA_REG(epnum, USB_DMAx_CTRL), 0);
+		SSYNC();
+	} else {
+		SSYNC();
+
+		if (unlikely((unsigned long)src & 0x01))
+			outsw_8((unsigned long)fifo, src, (len + 1) >> 1);
+		else
+			outsw((unsigned long)fifo, src, (len + 1) >> 1);
+	}
+}
 /*
  * Unload an endpoint's FIFO
  */
@@ -54,53 +92,62 @@ void musb_read_fifo(struct musb_hw_ep *hw_ep, u16 len, u8 *dst)
 {
 	void __iomem *fifo = hw_ep->fifo;
 	u8 epnum = hw_ep->epnum;
-	u16 dma_reg = 0;
 
+	if (ANOMALY_05000467 && epnum != 0) {
+		u16 dma_reg;
+
+		invalidate_dcache_range((unsigned long)dst,
+			(unsigned long)(dst + len));
+
+		/* Setup DMA address register */
+		dma_reg = (u32)dst;
+		bfin_write16(USB_DMA_REG(epnum, USB_DMAx_ADDR_LOW), dma_reg);
+		SSYNC();
+
+		dma_reg = (u32)dst >> 16;
+		bfin_write16(USB_DMA_REG(epnum, USB_DMAx_ADDR_HIGH), dma_reg);
+		SSYNC();
+
+		/* Setup DMA count register */
+		bfin_write16(USB_DMA_REG(epnum, USB_DMAx_COUNT_LOW), len);
+		bfin_write16(USB_DMA_REG(epnum, USB_DMAx_COUNT_HIGH), 0);
+		SSYNC();
+
+		/* Enable the DMA */
+		dma_reg = (epnum << 4) | DMA_ENA | INT_ENA;
+		bfin_write16(USB_DMA_REG(epnum, USB_DMAx_CTRL), dma_reg);
+		SSYNC();
+
+		/* Wait for compelete */
+		while (!(bfin_read_USB_DMA_INTERRUPT() & (1 << epnum)))
+			cpu_relax();
+
+		/* acknowledge dma interrupt */
+		bfin_write_USB_DMA_INTERRUPT(1 << epnum);
+		SSYNC();
+
+		/* Reset DMA */
+		bfin_write16(USB_DMA_REG(epnum, USB_DMAx_CTRL), 0);
+		SSYNC();
+	} else {
+		SSYNC();
+		/* Read the last byte of packet with odd size from address fifo + 4
+		 * to trigger 1 byte access to EP0 FIFO.
+		 */
+		if (len == 1)
+			*dst = (u8)inw((unsigned long)fifo + 4);
+		else {
+			if (unlikely((unsigned long)dst & 0x01))
+				insw_8((unsigned long)fifo, dst, len >> 1);
+			else
+				insw((unsigned long)fifo, dst, len >> 1);
+
+			if (len & 0x01)
+				*(dst + len - 1) = (u8)inw((unsigned long)fifo + 4);
+		}
+	}
 	DBG(4, "%cX ep%d fifo %p count %d buf %p\n",
 			'R', hw_ep->epnum, fifo, len, dst);
-
-#ifdef CONFIG_BF52x
-	invalidate_dcache_range((unsigned int)dst,
-		(unsigned int)(dst + len));
-
-	/* Setup DMA address register */
-	dma_reg = (u16) ((u32) dst & 0xFFFF);
-	bfin_write16(USB_DMA_REG(epnum, USB_DMAx_ADDR_LOW), dma_reg);
-	SSYNC();
-
-	dma_reg = (u16) (((u32) dst >> 16) & 0xFFFF);
-	bfin_write16(USB_DMA_REG(epnum, USB_DMAx_ADDR_HIGH), dma_reg);
-	SSYNC();
-
-	/* Setup DMA count register */
-	bfin_write16(USB_DMA_REG(epnum, USB_DMAx_COUNT_LOW), len);
-	bfin_write16(USB_DMA_REG(epnum, USB_DMAx_COUNT_HIGH), 0);
-	SSYNC();
-
-	/* Enable the DMA */
-	dma_reg = (epnum << 4) | DMA_ENA | INT_ENA;
-	bfin_write16(USB_DMA_REG(epnum, USB_DMAx_CTRL), dma_reg);
-	SSYNC();
-
-	/* Wait for compelete */
-	while (!(bfin_read_USB_DMA_INTERRUPT() & (1 << epnum)))
-		cpu_relax();
-
-	/* acknowledge dma interrupt */
-	bfin_write_USB_DMA_INTERRUPT(1 << epnum);
-	SSYNC();
-
-	/* Reset DMA */
-	bfin_write16(USB_DMA_REG(epnum, USB_DMAx_CTRL), 0);
-	SSYNC();
-#else
-	if (unlikely((unsigned long)dst & 0x01))
-		insw_8((unsigned long)fifo, dst,
-			len & 0x01 ? (len >> 1) + 1 : len >> 1);
-	else
-		insw((unsigned long)fifo, dst,
-			len & 0x01 ? (len >> 1) + 1 : len >> 1);
-#endif
 
 	dump_fifo_data(dst, len);
 }
@@ -180,6 +227,15 @@ static void musb_conn_timer_handler(unsigned long _musb)
 	DBG(4, "state is %s\n", otg_state_string(musb));
 }
 
+#ifdef CONFIG_PM
+void musb_platform_power_on(struct musb *musb)
+{
+}
+void musb_platform_power_off(struct musb *musb)
+{
+}
+#endif
+
 void musb_platform_enable(struct musb *musb)
 {
 	if (is_host_enabled(musb)) {
@@ -225,8 +281,9 @@ int musb_platform_get_vbus_status(struct musb *musb)
 	return 0;
 }
 
-void musb_platform_set_mode(struct musb *musb, u8 musb_mode)
+int musb_platform_set_mode(struct musb *musb, u8 musb_mode)
 {
+	return -EIO;
 }
 
 int __init musb_platform_init(struct musb *musb)
@@ -253,6 +310,8 @@ int __init musb_platform_init(struct musb *musb)
 		return -ENODEV;
 	}
 
+	musb->xceiv->can_suspendm = true;
+
 	if (ANOMALY_05000346) {
 		bfin_write_USB_APHY_CALIB(ANOMALY_05000346_value);
 		SSYNC();
@@ -262,10 +321,6 @@ int __init musb_platform_init(struct musb *musb)
 		bfin_write_USB_APHY_CNTRL(0x0);
 		SSYNC();
 	}
-
-	/* TODO
-	 * Set SIC-IVG register
-	 */
 
 	/* Configure PLL oscillator register */
 	bfin_write_USB_PLLOSC_CTRL(0x30a8);

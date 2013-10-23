@@ -1,0 +1,6 @@
+unifdef-y += restok.h
+unifdef-y += restokctl.h
+unifdef-y += creds.h
+unifdef-y += credsctl.h
+unifdef-y += credp.h
+unifdef-y += credpctl.h

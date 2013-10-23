@@ -42,9 +42,8 @@ int v4l2_device_register(struct device *dev, struct v4l2_device *v4l2_dev)
 	if (!v4l2_dev->name[0])
 		snprintf(v4l2_dev->name, sizeof(v4l2_dev->name), "%s %s",
 			dev->driver->name, dev_name(dev));
-	if (dev_get_drvdata(dev))
-		v4l2_warn(v4l2_dev, "Non-NULL drvdata on register\n");
-	dev_set_drvdata(dev, v4l2_dev);
+	if (!dev_get_drvdata(dev))
+		dev_set_drvdata(dev, v4l2_dev);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(v4l2_device_register);
@@ -67,10 +66,12 @@ EXPORT_SYMBOL_GPL(v4l2_device_set_name);
 
 void v4l2_device_disconnect(struct v4l2_device *v4l2_dev)
 {
-	if (v4l2_dev->dev) {
+	if (v4l2_dev->dev == NULL)
+		return;
+
+	if (dev_get_drvdata(v4l2_dev->dev) == v4l2_dev)
 		dev_set_drvdata(v4l2_dev->dev, NULL);
-		v4l2_dev->dev = NULL;
-	}
+	v4l2_dev->dev = NULL;
 }
 EXPORT_SYMBOL_GPL(v4l2_device_disconnect);
 
@@ -102,32 +103,101 @@ void v4l2_device_unregister(struct v4l2_device *v4l2_dev)
 EXPORT_SYMBOL_GPL(v4l2_device_unregister);
 
 int v4l2_device_register_subdev(struct v4l2_device *v4l2_dev,
-						struct v4l2_subdev *sd)
+				struct v4l2_subdev *sd)
 {
+	struct media_entity *entity = &sd->entity;
+	int err;
+
 	/* Check for valid input */
 	if (v4l2_dev == NULL || sd == NULL || !sd->name[0])
 		return -EINVAL;
+
 	/* Warn if we apparently re-register a subdev */
 	WARN_ON(sd->v4l2_dev != NULL);
+
 	if (!try_module_get(sd->owner))
 		return -ENODEV;
+
 	sd->v4l2_dev = v4l2_dev;
+	if (sd->internal_ops && sd->internal_ops->registered) {
+		err = sd->internal_ops->registered(sd);
+		if (err) {
+			module_put(sd->owner);
+			return err;
+		}
+	}
+
+	/* Register the entity. */
+	if (v4l2_dev->mdev) {
+		err = media_device_register_entity(v4l2_dev->mdev, entity);
+		if (err < 0) {
+			if (sd->internal_ops && sd->internal_ops->unregistered)
+				sd->internal_ops->unregistered(sd);
+			module_put(sd->owner);
+			return err;
+		}
+	}
+
 	spin_lock(&v4l2_dev->lock);
 	list_add_tail(&sd->list, &v4l2_dev->subdevs);
 	spin_unlock(&v4l2_dev->lock);
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(v4l2_device_register_subdev);
 
+int v4l2_device_register_subdev_nodes(struct v4l2_device *v4l2_dev)
+{
+	struct video_device *vdev;
+	struct v4l2_subdev *sd;
+	int err;
+
+	/* Register a device node for every subdev marked with the
+	 * V4L2_SUBDEV_FL_HAS_DEVNODE flag.
+	 */
+	list_for_each_entry(sd, &v4l2_dev->subdevs, list) {
+		if (!(sd->flags & V4L2_SUBDEV_FL_HAS_DEVNODE))
+			continue;
+
+		vdev = &sd->devnode;
+		strlcpy(vdev->name, sd->name, sizeof(vdev->name));
+		vdev->parent = v4l2_dev->dev;
+		vdev->fops = &v4l2_subdev_fops;
+		vdev->release = video_device_release_empty;
+		err = __video_register_device(vdev, VFL_TYPE_SUBDEV, -1, 1,
+					      sd->owner);
+		if (err < 0)
+			return err;
+
+		sd->entity.v4l.major = VIDEO_MAJOR;
+		sd->entity.v4l.minor = vdev->minor;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(v4l2_device_register_subdev_nodes);
+
 void v4l2_device_unregister_subdev(struct v4l2_subdev *sd)
 {
+	struct v4l2_device *v4l2_dev;
+
 	/* return if it isn't registered */
 	if (sd == NULL || sd->v4l2_dev == NULL)
 		return;
-	spin_lock(&sd->v4l2_dev->lock);
+
+	v4l2_dev = sd->v4l2_dev;
+
+	spin_lock(&v4l2_dev->lock);
 	list_del(&sd->list);
-	spin_unlock(&sd->v4l2_dev->lock);
+	spin_unlock(&v4l2_dev->lock);
+
+	if (sd->internal_ops && sd->internal_ops->unregistered)
+		sd->internal_ops->unregistered(sd);
 	sd->v4l2_dev = NULL;
+
+	if (v4l2_dev->mdev)
+		media_device_unregister_entity(&sd->entity);
+	video_unregister_device(&sd->devnode);
 	module_put(sd->owner);
 }
 EXPORT_SYMBOL_GPL(v4l2_device_unregister_subdev);

@@ -107,6 +107,8 @@ struct module {
 	const char *name;
 	int gpl_compatible;
 	struct symbol *unres;
+	struct symbol *list_head;
+	struct symbol *list_tail;
 	int seen;
 	int skip;
 	int has_init;

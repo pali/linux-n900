@@ -1348,7 +1348,7 @@ static void n_tty_write_wakeup(struct tty_struct *tty)
  *	calls one at a time and in order (or using flush_to_ldisc)
  */
 
-static void n_tty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
+static int n_tty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 			      char *fp, int count)
 {
 	const unsigned char *p;
@@ -1356,9 +1356,10 @@ static void n_tty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 	int	i;
 	char	buf[64];
 	unsigned long cpuflags;
+	int ret = 0;
 
 	if (!tty->read_buf)
-		return;
+		return 0;
 
 	if (tty->real_raw) {
 		spin_lock_irqsave(&tty->read_lock, cpuflags);
@@ -1370,6 +1371,7 @@ static void n_tty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 		tty->read_cnt += i;
 		cp += i;
 		count -= i;
+		ret += i;
 
 		i = min(N_TTY_BUF_SIZE - tty->read_cnt,
 			N_TTY_BUF_SIZE - tty->read_head);
@@ -1377,8 +1379,11 @@ static void n_tty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 		memcpy(tty->read_buf + tty->read_head, cp, i);
 		tty->read_head = (tty->read_head + i) & (N_TTY_BUF_SIZE-1);
 		tty->read_cnt += i;
+		ret += i;
 		spin_unlock_irqrestore(&tty->read_lock, cpuflags);
+		n_tty_set_room(tty);
 	} else {
+		ret = count;
 		for (i = count, p = cp, f = fp; i; i--, p++) {
 			if (f)
 				flags = *f++;
@@ -1404,9 +1409,8 @@ static void n_tty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 		}
 		if (tty->ops->flush_chars)
 			tty->ops->flush_chars(tty);
+		n_tty_set_room(tty);
 	}
-
-	n_tty_set_room(tty);
 
 	if (!tty->icanon && (tty->read_cnt >= tty->minimum_to_wake)) {
 		kill_fasync(&tty->fasync, SIGIO, POLL_IN);
@@ -1421,6 +1425,8 @@ static void n_tty_receive_buf(struct tty_struct *tty, const unsigned char *cp,
 	 */
 	if (tty->receive_room < TTY_THRESHOLD_THROTTLE)
 		tty_throttle(tty);
+
+	return ret;
 }
 
 int is_ignored(int sig)

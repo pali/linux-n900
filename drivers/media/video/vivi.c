@@ -1372,9 +1372,6 @@ static int __init vivi_create_instance(int inst)
 	/* Now that everything is fine, let's add it to device list */
 	list_add_tail(&dev->vivi_devlist, &vivi_devlist);
 
-	snprintf(vfd->name, sizeof(vfd->name), "%s (%i)",
-			vivi_template.name, vfd->num);
-
 	if (video_nr >= 0)
 		video_nr++;
 

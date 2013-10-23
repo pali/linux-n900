@@ -1699,11 +1699,10 @@ __alloc_pages_direct_reclaim(gfp_t gfp_mask, unsigned int order,
 	lockdep_clear_current_reclaim_state();
 	p->flags &= ~PF_MEMALLOC;
 
-	cond_resched();
-
 	if (unlikely(!(*did_some_progress)))
 		return NULL;
 
+	cond_resched();
 retry:
 	page = get_page_from_freelist(gfp_mask, nodemask, order,
 					zonelist, high_zoneidx,

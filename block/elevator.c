@@ -68,6 +68,27 @@ static int elv_iosched_allow_merge(struct request *rq, struct bio *bio)
 	return 1;
 }
 
+static int elv_merge_aligned(struct request *rq, struct bio *bio)
+{
+	struct request_queue *q = rq->q;
+
+	if (!blk_fs_request(rq) || blk_discard_rq(rq))
+		return 1;
+
+	if (!q->limits.align_mask)
+		return 1;
+
+	if (bio->bi_sector > blk_rq_pos(rq)) {
+		if (bio->bi_sector & q->limits.align_mask)
+			return 1;
+	} else {
+		if (blk_rq_pos(rq) & q->limits.align_mask)
+			return 1;
+	}
+
+	return 0;
+}
+
 /*
  * can we safely merge with this request?
  */
@@ -81,6 +102,10 @@ int elv_rq_merge_ok(struct request *rq, struct bio *bio)
 	 */
 	if (bio_rw_flagged(bio, BIO_RW_DISCARD) !=
 	    bio_rw_flagged(rq->bio, BIO_RW_DISCARD))
+		return 0;
+
+	if (bio_rw_flagged(bio, BIO_RW_SECURE) !=
+	    bio_rw_flagged(rq->bio, BIO_RW_SECURE))
 		return 0;
 
 	/*
@@ -101,6 +126,9 @@ int elv_rq_merge_ok(struct request *rq, struct bio *bio)
 	if (bio_integrity(bio) != blk_integrity_rq(rq))
 		return 0;
 
+	if (!elv_merge_aligned(rq, bio))
+		return 0;
+
 	if (!elv_iosched_allow_merge(rq, bio))
 		return 0;
 
@@ -117,9 +145,9 @@ static inline int elv_try_merge(struct request *__rq, struct bio *bio)
 	 */
 	if (elv_rq_merge_ok(__rq, bio)) {
 		if (blk_rq_pos(__rq) + blk_rq_sectors(__rq) == bio->bi_sector)
-			ret = ELEVATOR_BACK_MERGE;
+				ret = ELEVATOR_BACK_MERGE;
 		else if (blk_rq_pos(__rq) - bio_sectors(bio) == bio->bi_sector)
-			ret = ELEVATOR_FRONT_MERGE;
+				ret = ELEVATOR_FRONT_MERGE;
 	}
 
 	return ret;

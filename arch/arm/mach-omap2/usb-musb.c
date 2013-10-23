@@ -26,10 +26,74 @@
 
 #include <linux/usb/musb.h>
 
+#include <asm/sizes.h>
+
 #include <mach/hardware.h>
 #include <mach/irqs.h>
-#include <mach/mux.h>
-#include <mach/usb.h>
+#include <plat/mux.h>
+#include <plat/usb.h>
+
+#define OTG_SYSCONFIG	   0x404
+#define OTG_SYSC_SOFTRESET BIT(1)
+#define OTG_SYSSTATUS     0x408
+#define OTG_SYSS_RESETDONE BIT(0)
+
+static struct platform_device dummy_pdev = {
+	.dev = {
+		.bus = &platform_bus_type,
+	},
+};
+
+static void __iomem *otg_base;
+static struct clk *otg_clk;
+
+static void __init usb_musb_pm_init(void)
+{
+	struct device *dev = &dummy_pdev.dev;
+
+	if (!cpu_is_omap34xx())
+		return;
+
+	otg_base = ioremap(OMAP34XX_HSUSB_OTG_BASE, SZ_4K);
+	if (WARN_ON(!otg_base))
+		return;
+
+	/* Do not use SOFTRESET with 3630. See OMAP3630 Errata ID i445. */
+	if (cpu_is_omap3630())
+		return;
+
+	dev_set_name(dev, "musb_hdrc");
+	otg_clk = clk_get(dev, "ick");
+
+	if (otg_clk && clk_enable(otg_clk)) {
+		printk(KERN_WARNING
+			"%s: Unable to enable clocks for MUSB, "
+			"cannot reset.\n",  __func__);
+	} else {
+		/* Reset OTG controller. After reset, it will be in
+		 * force-idle, force-standby mode. */
+		__raw_writel(OTG_SYSC_SOFTRESET, otg_base + OTG_SYSCONFIG);
+
+		while (!(OTG_SYSS_RESETDONE &
+					__raw_readl(otg_base + OTG_SYSSTATUS)))
+			cpu_relax();
+	}
+
+	if (otg_clk)
+		clk_disable(otg_clk);
+}
+
+void usb_musb_disable_autoidle(void)
+{
+	if (otg_clk) {
+		unsigned long reg;
+
+		clk_enable(otg_clk);
+		reg = __raw_readl(otg_base + OTG_SYSCONFIG);
+		__raw_writel(reg & ~1, otg_base + OTG_SYSCONFIG);
+		clk_disable(otg_clk);
+	}
+}
 
 #ifdef CONFIG_USB_MUSB_SOC
 
@@ -47,89 +111,59 @@ static struct resource musb_resources[] = {
 	},
 };
 
-static int clk_on;
+/*
+ * REVISIT these are optimized for g_nokia and
+ * g_file_storage and should be coming from
+ * board file. Other patches should come
+ * to fix this problem
+ */
+static struct musb_fifo_cfg musb_fifo_cfg[] = {
 
-static int musb_set_clock(struct clk *clk, int state)
-{
-	if (state) {
-		if (clk_on > 0)
-			return -ENODEV;
+	/* f_mtp or mass storage */
+	MUSB_EP_FIFO_DOUBLE(1, FIFO_TX, 512),
+	MUSB_EP_FIFO_DOUBLE(1, FIFO_RX, 512),
+	MUSB_EP_FIFO_SINGLE(2, FIFO_TX, 64),
 
-		clk_enable(clk);
-		clk_on = 1;
-	} else {
-		if (clk_on == 0)
-			return -ENODEV;
+	/* phonet */
+	MUSB_EP_FIFO_DOUBLE(3, FIFO_TX, 512),
+	MUSB_EP_FIFO_DOUBLE(2, FIFO_RX, 512),
 
-		clk_disable(clk);
-		clk_on = 0;
-	}
+	/* obex 0 */
+	MUSB_EP_FIFO_DOUBLE(4, FIFO_TX, 512),
+	MUSB_EP_FIFO_DOUBLE(3, FIFO_RX, 512),
 
-	return 0;
-}
+	/* obex 1 */
+	MUSB_EP_FIFO_DOUBLE(5, FIFO_TX, 512),
+	MUSB_EP_FIFO_DOUBLE(4, FIFO_RX, 512),
 
-static struct musb_hdrc_eps_bits musb_eps[] = {
-	{	"ep1_tx", 10,	},
-	{	"ep1_rx", 10,	},
-	{	"ep2_tx", 9,	},
-	{	"ep2_rx", 9,	},
-	{	"ep3_tx", 3,	},
-	{	"ep3_rx", 3,	},
-	{	"ep4_tx", 3,	},
-	{	"ep4_rx", 3,	},
-	{	"ep5_tx", 3,	},
-	{	"ep5_rx", 3,	},
-	{	"ep6_tx", 3,	},
-	{	"ep6_rx", 3,	},
-	{	"ep7_tx", 3,	},
-	{	"ep7_rx", 3,	},
-	{	"ep8_tx", 2,	},
-	{	"ep8_rx", 2,	},
-	{	"ep9_tx", 2,	},
-	{	"ep9_rx", 2,	},
-	{	"ep10_tx", 2,	},
-	{	"ep10_rx", 2,	},
-	{	"ep11_tx", 2,	},
-	{	"ep11_rx", 2,	},
-	{	"ep12_tx", 2,	},
-	{	"ep12_rx", 2,	},
-	{	"ep13_tx", 2,	},
-	{	"ep13_rx", 2,	},
-	{	"ep14_tx", 2,	},
-	{	"ep14_rx", 2,	},
-	{	"ep15_tx", 2,	},
-	{	"ep15_rx", 2,	},
+	/* acm */
+	MUSB_EP_FIFO_DOUBLE(6, FIFO_TX, 512),
+	MUSB_EP_FIFO_DOUBLE(5, FIFO_RX, 512),
+	MUSB_EP_FIFO_SINGLE(7, FIFO_TX, 64),
+
+	/* ecm */
+	MUSB_EP_FIFO_DOUBLE(8, FIFO_TX, 512),
+	MUSB_EP_FIFO_DOUBLE(6, FIFO_RX, 512),
+	MUSB_EP_FIFO_SINGLE(9, FIFO_TX, 64),
+
+	/* CD-ROM */
+	MUSB_EP_FIFO_DOUBLE(10, FIFO_TX, 512),
+	MUSB_EP_FIFO_DOUBLE(7, FIFO_RX, 512),
+
 };
 
 static struct musb_hdrc_config musb_config = {
+	.fifo_cfg	= musb_fifo_cfg,
+	.fifo_cfg_size	= ARRAY_SIZE(musb_fifo_cfg),
 	.multipoint	= 1,
-	.dyn_fifo	= 1,
-	.soft_con	= 1,
-	.dma		= 1,
 	.num_eps	= 16,
-	.dma_channels	= 7,
-	.dma_req_chan	= (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3),
 	.ram_bits	= 12,
-	.eps_bits	= musb_eps,
 };
 
 static struct musb_hdrc_platform_data musb_plat = {
-#ifdef CONFIG_USB_MUSB_OTG
-	.mode		= MUSB_OTG,
-#elif defined(CONFIG_USB_MUSB_HDRC_HCD)
-	.mode		= MUSB_HOST,
-#elif defined(CONFIG_USB_GADGET_MUSB_HDRC)
-	.mode		= MUSB_PERIPHERAL,
-#endif
-	/* .clock is set dynamically */
-	.set_clock	= musb_set_clock,
 	.config		= &musb_config,
-
-	/* REVISIT charge pump on TWL4030 can supply up to
-	 * 100 mA ... but this value is board-specific, like
-	 * "mode", and should be passed to usb_musb_init().
-	 */
-	.power		= 50,			/* up to 100 mA */
+	/* .power	= DYNAMIC, */
+	/* .mode	= DYNAMIC, */
 };
 
 static u64 musb_dmamask = DMA_BIT_MASK(32);
@@ -146,28 +180,29 @@ static struct platform_device musb_device = {
 	.resource	= musb_resources,
 };
 
-void __init usb_musb_init(void)
+void __init usb_musb_init(struct musb_board_data *board,
+				enum musb_mode mode, unsigned power)
 {
 	if (cpu_is_omap243x())
 		musb_resources[0].start = OMAP243X_HS_BASE;
 	else
 		musb_resources[0].start = OMAP34XX_HSUSB_OTG_BASE;
-	musb_resources[0].end = musb_resources[0].start + SZ_8K - 1;
+	musb_resources[0].end = musb_resources[0].start + SZ_4K - 1;
 
-	/*
-	 * REVISIT: This line can be removed once all the platforms using
-	 * musb_core.c have been converted to use use clkdev.
-	 */
-	musb_plat.clock = "ick";
+	musb_plat.board = board;
+	musb_plat.power = power >> 1;
+	musb_plat.mode = mode;
 
-	if (platform_device_register(&musb_device) < 0) {
+	if (platform_device_register(&musb_device) < 0)
 		printk(KERN_ERR "Unable to register HS-USB (MUSB) device\n");
-		return;
-	}
+
+	usb_musb_pm_init();
 }
 
 #else
-void __init usb_musb_init(void)
+void __init usb_musb_init(struct musb_board_data *board,
+				enum musb_mode mode, unsigned power)
 {
+	usb_musb_pm_init();
 }
 #endif /* CONFIG_USB_MUSB_SOC */

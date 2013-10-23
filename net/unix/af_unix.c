@@ -316,7 +316,8 @@ static void unix_write_space(struct sock *sk)
 	read_lock(&sk->sk_callback_lock);
 	if (unix_writable(sk)) {
 		if (sk_has_sleeper(sk))
-			wake_up_interruptible_sync(sk->sk_sleep);
+			wake_up_interruptible_sync_poll(sk->sk_sleep,
+				POLLOUT | POLLWRNORM | POLLWRBAND);
 		sk_wake_async(sk, SOCK_WAKE_SPACE, POLL_OUT);
 	}
 	read_unlock(&sk->sk_callback_lock);
@@ -1681,7 +1682,8 @@ static int unix_dgram_recvmsg(struct kiocb *iocb, struct socket *sock,
 		goto out_unlock;
 	}
 
-	wake_up_interruptible_sync(&u->peer_wait);
+	wake_up_interruptible_sync_poll(&u->peer_wait,
+					POLLOUT | POLLWRNORM | POLLWRBAND);
 
 	if (msg->msg_name)
 		unix_copy_addr(msg, skb->sk);
@@ -2043,13 +2045,12 @@ static unsigned int unix_dgram_poll(struct file *file, struct socket *sock,
 	if (sk->sk_err || !skb_queue_empty(&sk->sk_error_queue))
 		mask |= POLLERR;
 	if (sk->sk_shutdown & RCV_SHUTDOWN)
-		mask |= POLLRDHUP;
+		mask |= POLLRDHUP | POLLIN | POLLRDNORM;
 	if (sk->sk_shutdown == SHUTDOWN_MASK)
 		mask |= POLLHUP;
 
 	/* readable? */
-	if (!skb_queue_empty(&sk->sk_receive_queue) ||
-	    (sk->sk_shutdown & RCV_SHUTDOWN))
+	if (!skb_queue_empty(&sk->sk_receive_queue))
 		mask |= POLLIN | POLLRDNORM;
 
 	/* Connection-based need to check for termination and startup */
@@ -2061,20 +2062,19 @@ static unsigned int unix_dgram_poll(struct file *file, struct socket *sock,
 			return mask;
 	}
 
-	/* writable? */
-	writable = unix_writable(sk);
-	if (writable) {
-		other = unix_peer_get(sk);
-		if (other) {
-			if (unix_peer(other) != sk) {
-				sock_poll_wait(file, &unix_sk(other)->peer_wait,
-					  wait);
-				if (unix_recvq_full(other))
-					writable = 0;
-			}
+	/* No write status requested, avoid expensive OUT tests. */
+	if (wait && !(wait->key & (POLLWRBAND | POLLWRNORM | POLLOUT)))
+		return mask;
 
-			sock_put(other);
+	writable = unix_writable(sk);
+	other = unix_peer_get(sk);
+	if (other) {
+		if (unix_peer(other) != sk) {
+			sock_poll_wait(file, &unix_sk(other)->peer_wait, wait);
+			if (unix_recvq_full(other))
+				writable = 0;
 		}
+		sock_put(other);
 	}
 
 	if (writable)

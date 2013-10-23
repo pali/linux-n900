@@ -105,18 +105,6 @@ menuconfig MAC80211_DEBUG_MENU
 	---help---
 	  This option collects various mac80211 debug settings.
 
-config MAC80211_DEBUG_PACKET_ALIGNMENT
-	bool "Enable packet alignment debugging"
-	depends on MAC80211_DEBUG_MENU
-	---help---
-	  This option is recommended for driver authors and strongly
-	  discouraged for everybody else, it will trigger a warning
-	  when a driver hands mac80211 a buffer that is aligned in
-	  a way that will cause problems with the IP stack on some
-	  architectures.
-
-	  Say N unless you're writing a mac80211 based driver.
-
 config MAC80211_NOINLINE
 	bool "Do not inline TX/RX handlers"
 	depends on MAC80211_DEBUG_MENU
@@ -197,6 +185,19 @@ config MAC80211_VERBOSE_MPL_DEBUG
 	---help---
 	  Selecting this option causes mac80211 to print out very
 	  verbose mesh peer link debugging messages (when mac80211
+	  is taking part in a mesh network).
+	  It should not be selected on production systems as those
+	  messages are remotely triggerable.
+
+	  Do not select this option.
+
+config MAC80211_VERBOSE_MHWMP_DEBUG
+	bool "Verbose mesh HWMP routing debugging"
+	depends on MAC80211_DEBUG_MENU
+	depends on MAC80211_MESH
+	---help---
+	  Selecting this option causes mac80211 to print out very
+	  verbose mesh routing (HWMP) debugging messages (when mac80211
 	  is taking part in a mesh network).
 	  It should not be selected on production systems as those
 	  messages are remotely triggerable.

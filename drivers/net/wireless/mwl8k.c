@@ -2509,7 +2509,7 @@ static void mwl8k_stop(struct ieee80211_hw *hw)
 }
 
 static int mwl8k_add_interface(struct ieee80211_hw *hw,
-				struct ieee80211_if_init_conf *conf)
+				struct ieee80211_vif *vif)
 {
 	struct mwl8k_priv *priv = hw->priv;
 	struct mwl8k_vif *mwl8k_vif;
@@ -2523,15 +2523,16 @@ static int mwl8k_add_interface(struct ieee80211_hw *hw,
 	/*
 	 * We only support managed interfaces for now.
 	 */
-	if (conf->type != NL80211_IFTYPE_STATION)
+	if (vif->type != NL80211_IFTYPE_STATION)
 		return -EINVAL;
 
 	/* Clean out driver private area */
-	mwl8k_vif = MWL8K_VIF(conf->vif);
+	mwl8k_vif = MWL8K_VIF(vif);
 	memset(mwl8k_vif, 0, sizeof(*mwl8k_vif));
 
-	/* Save the mac address */
-	memcpy(mwl8k_vif->mac_addr, conf->mac_addr, ETH_ALEN);
+	/* Set and save the mac address */
+	mwl8k_cmd_set_mac_addr(hw, vif->addr);
+	memcpy(mwl8k_vif->mac_addr, vif->addr, ETH_ALEN);
 
 	/* Back pointer to parent config block */
 	mwl8k_vif->priv = priv;
@@ -2544,14 +2545,14 @@ static int mwl8k_add_interface(struct ieee80211_hw *hw,
 	/* Set Initial sequence number to zero */
 	mwl8k_vif->seqno = 0;
 
-	priv->vif = conf->vif;
+	priv->vif = vif;
 	priv->current_channel = NULL;
 
 	return 0;
 }
 
 static void mwl8k_remove_interface(struct ieee80211_hw *hw,
-				   struct ieee80211_if_init_conf *conf)
+				   struct ieee80211_vif *vif)
 {
 	struct mwl8k_priv *priv = hw->priv;
 
@@ -2814,7 +2815,16 @@ static void mwl8k_finalize_join_worker(struct work_struct *work)
 	struct mwl8k_priv *priv =
 		container_of(work, struct mwl8k_priv, finalize_join_worker);
 	struct sk_buff *skb = priv->beacon_skb;
-	u8 dtim = MWL8K_VIF(priv->vif)->bss_info.dtim_period;
+	struct ieee80211_mgmt *mgmt = (void *)skb->data;
+	int len = skb->len - offsetof(struct ieee80211_mgmt, u.beacon.variable);
+	const u8 *tim = cfg80211_find_ie(WLAN_EID_TIM,
+					 mgmt->u.beacon.variable, len);
+	int dtim_period = 1;
+
+	if (tim && tim[1] >= 2)
+		dtim_period = tim[3];
+
+	mwl8k_cmd_finalize_join(priv->hw, skb->data, skb->len, dtim_period);
 
 	mwl8k_finalize_join(priv->hw, skb->data, skb->len, dtim);
 	dev_kfree_skb(skb);

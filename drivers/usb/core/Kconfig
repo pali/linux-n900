@@ -109,7 +109,7 @@ config USB_SUSPEND
 config USB_OTG
 	bool
 	depends on USB && EXPERIMENTAL
-	select USB_SUSPEND
+	select USB_SUSPEND if PM
 	default n
 
 

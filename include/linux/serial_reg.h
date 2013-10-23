@@ -325,5 +325,8 @@
 #define UART_OMAP_SYSS		0x16	/* System status register */
 #define UART_OMAP_WER		0x17	/* Wake-up enable register */
 
+/* UART_OMAP_SSR */
+#define OMAP_SSR_FIFO_FULL	0x01	/* Set when TX fifo is full */
+
 #endif /* _LINUX_SERIAL_REG_H */
 

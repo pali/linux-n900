@@ -4,8 +4,8 @@
 /*
  * OMAP2/3 Power/Reset Management (PRM) register definitions
  *
- * Copyright (C) 2007 Texas Instruments, Inc.
- * Copyright (C) 2007 Nokia Corporation
+ * Copyright (C) 2007-2009 Texas Instruments, Inc.
+ * Copyright (C) 2009 Nokia Corporation
  *
  * Written by Paul Walmsley
  *
@@ -17,11 +17,17 @@
 #include "prcm-common.h"
 
 #define OMAP2420_PRM_REGADDR(module, reg)				\
-			OMAP2_IO_ADDRESS(OMAP2420_PRM_BASE + (module) + (reg))
+		OMAP2_L4_IO_ADDRESS(OMAP2420_PRM_BASE + (module) + (reg))
 #define OMAP2430_PRM_REGADDR(module, reg)				\
-			OMAP2_IO_ADDRESS(OMAP2430_PRM_BASE + (module) + (reg))
+		OMAP2_L4_IO_ADDRESS(OMAP2430_PRM_BASE + (module) + (reg))
 #define OMAP34XX_PRM_REGADDR(module, reg)				\
-			OMAP2_IO_ADDRESS(OMAP3430_PRM_BASE + (module) + (reg))
+		OMAP2_L4_IO_ADDRESS(OMAP3430_PRM_BASE + (module) + (reg))
+#define OMAP44XX_PRM_REGADDR(module, reg)				\
+		OMAP2_L4_IO_ADDRESS(OMAP4430_PRM_BASE + (module) + (reg))
+#define OMAP44XX_CHIRONSS_REGADDR(module, reg)				\
+		OMAP2_L4_IO_ADDRESS(OMAP4430_CHIRONSS_BASE + (module) + (reg))
+
+#include "prm44xx.h"
 
 /*
  * Architecture-specific global PRM registers
@@ -154,6 +160,12 @@
 #define OMAP3430_PRM_VP2_VOLTAGE	OMAP34XX_PRM_REGADDR(OMAP3430_GR_MOD, 0x00e0)
 #define OMAP3_PRM_VP2_STATUS_OFFSET	0x00e4
 #define OMAP3430_PRM_VP2_STATUS		OMAP34XX_PRM_REGADDR(OMAP3430_GR_MOD, 0x00e4)
+#define OMAP3_PRM_LDO_ABB_SETUP_OFFSET	0X00f0
+#define OMAP3630_PRM_LDO_ABB_SETUP	OMAP34XX_PRM_REGADDR(OMAP3430_GR_MOD, \
+								0X00f0)
+#define OMAP3_PRM_LDO_ABB_CTRL_OFFSET	0X00f4
+#define OMAP3630_PRM_LDO_ABB_CTRL	OMAP34XX_PRM_REGADDR(OMAP3430_GR_MOD, \
+								0X00f4)
 
 #define OMAP3_PRM_CLKSEL_OFFSET	0x0040
 #define OMAP3430_PRM_CLKSEL		OMAP34XX_PRM_REGADDR(OMAP3430_CCR_MOD, 0x0040)

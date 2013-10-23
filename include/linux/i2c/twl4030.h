@@ -61,13 +61,17 @@
 #define TWL4030_MODULE_PWMA		0x0E
 #define TWL4030_MODULE_PWMB		0x0F
 
+#define TWL5031_MODULE_ACCESSORY	0x10
+#define TWL5031_MODULE_BCC		0x11
+#define TWL5031_MODULE_INTERRUPTS	0x12
+
 /* Slave 3 (i2c address 0x4b) */
-#define TWL4030_MODULE_BACKUP		0x10
-#define TWL4030_MODULE_INT		0x11
-#define TWL4030_MODULE_PM_MASTER	0x12
-#define TWL4030_MODULE_PM_RECEIVER	0x13
-#define TWL4030_MODULE_RTC		0x14
-#define TWL4030_MODULE_SECURED_REG	0x15
+#define TWL4030_MODULE_BACKUP		0x13
+#define TWL4030_MODULE_INT		0x14
+#define TWL4030_MODULE_PM_MASTER	0x15
+#define TWL4030_MODULE_PM_RECEIVER	0x16
+#define TWL4030_MODULE_RTC		0x17
+#define TWL4030_MODULE_SECURED_REG	0x18
 
 /*
  * Read and write single 8-bit registers
@@ -83,6 +87,19 @@ int twl4030_i2c_read_u8(u8 mod_no, u8 *val, u8 reg);
  */
 int twl4030_i2c_write(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
 int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
+
+/*Interface Bit Register (INTBR) offsets
+ *(Use TWL_4030_MODULE_INTBR)
+ */
+
+#define REG_GPPUPDCTR1			0x0F
+
+/*I2C1 and I2C4(SR) SDA/SCL pull-up control bits */
+
+#define I2C_SCL_CTRL_PU			BIT(0)
+#define I2C_SDA_CTRL_PU			BIT(2)
+#define SR_I2C_SCL_CTRL_PU		BIT(4)
+#define SR_I2C_SDA_CTRL_PU		BIT(6)
 
 /*----------------------------------------------------------------------*/
 
@@ -221,6 +238,43 @@ int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
 
 /*----------------------------------------------------------------------*/
 
+/*
+ * Accessory block register offsets (use TWL5031_MODULE_ACCESSORY)
+ */
+#define TWL5031_ACIIMR_LSB		0x5
+#define TWL5031_ACIIMR_MSB		0x6
+#define TWL5031_ACIIDR_LSB		0x7
+#define TWL5031_ACIIDR_MSB		0x8
+#define TWL5031_ACCISR1			0xF
+#define TWL5031_ACCIMR1			0x10
+#define TWL5031_ACCISR2			0x11
+#define TWL5031_ACCIMR2			0x12
+#define TWL5031_ACCEDR1			0x14
+#define TWL5031_ACCSIHCTRL		0x15
+
+/*----------------------------------------------------------------------*/
+
+/*
+ * Battery Charger Controller
+ */
+
+#define TWL5031_INTERRUPTS_BCIISR1	0x0
+#define TWL5031_INTERRUPTS_BCIIMR1	0x1
+#define TWL5031_INTERRUPTS_BCIISR2	0x2
+#define TWL5031_INTERRUPTS_BCIIMR2	0x3
+#define TWL5031_INTERRUPTS_BCISIR	0x4
+#define TWL5031_INTERRUPTS_BCIEDR1	0x5
+#define TWL5031_INTERRUPTS_BCIEDR2	0x6
+#define TWL5031_INTERRUPTS_BCISIHCTRL	0x7
+
+/*----------------------------------------------------------------------*/
+
+/*
+ * Interface Bit Registers
+ */
+
+#define TWL4030_INTBR_GPBR1		0xc
+
 /* Power bus message definitions */
 
 /* The TWL4030/5030 splits its power-management resources (the various
@@ -235,6 +289,7 @@ int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
 #define DEV_GRP_P1		0x1	/* P1: all OMAP devices */
 #define DEV_GRP_P2		0x2	/* P2: all Modem devices */
 #define DEV_GRP_P3		0x4	/* P3: all peripheral devices */
+#define DEV_GRP_ALL            0x7     /*  P1/P2/P3: all devices */
 
 /* Resource groups */
 #define RES_GRP_RES		0x0	/* Reserved */
@@ -247,9 +302,13 @@ int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
 #define RES_GRP_ALL		0x7	/* All resource groups */
 
 #define RES_TYPE2_R0		0x0
+#define RES_TYPE2_R1           0x1
+#define RES_TYPE2_R2           0x2
 
+#define RES_TYPE_R0            0x0
 #define RES_TYPE_ALL		0x7
 
+/* Resource states */
 #define RES_STATE_WRST		0xF
 #define RES_STATE_ACTIVE	0xE
 #define RES_STATE_SLEEP		0x8
@@ -310,7 +369,13 @@ int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
 #define MSG_SINGULAR(devgrp, id, state) \
 	((devgrp) << 13 | 0 << 12 | (id) << 4 | (state))
 
+#define REG_CFG_PWRANA2	0x09
+
 /*----------------------------------------------------------------------*/
+
+struct twl4030_clock_init_data {
+	bool ck32k_lowpwr_enable;
+};
 
 struct twl4030_bci_platform_data {
 	int *battery_tmp_tbl;
@@ -347,6 +412,11 @@ struct twl4030_gpio_platform_data {
 
 struct twl4030_madc_platform_data {
 	int		irq_line;
+	int		bcia_control;
+/* BCIA Control register */
+#define MESBAT_ENABLE		(1 << 0)
+#define MESVAC_ENABLE		(1 << 1)
+#define BTEMP_ENABLE		(1 << 2)
 };
 
 /* Boards have uniqe mappings of {row, col} --> keycode.
@@ -369,6 +439,7 @@ enum twl4030_usb_mode {
 
 struct twl4030_usb_data {
 	enum twl4030_usb_mode	usb_mode;
+	unsigned		can_detect_charger;
 };
 
 struct twl4030_ins {
@@ -391,24 +462,62 @@ struct twl4030_resconfig {
 	u8 devgroup;	/* Processor group that Power resource belongs to */
 	u8 type;	/* Power resource addressed, 6 / broadcast message */
 	u8 type2;	/* Power resource addressed, 3 / broadcast message */
+	u8 remap_off;	/* off state remapping */
+	u8 remap_sleep;	/* sleep state remapping */
 };
 
 struct twl4030_power_data {
 	struct twl4030_script **scripts;
 	unsigned num;
 	struct twl4030_resconfig *resource_config;
+#define TWL4030_RESCONFIG_UNDEF	((u8)-1)
 };
 
 extern void twl4030_power_init(struct twl4030_power_data *triton2_scripts);
+extern void twl4030_power_remove(void);
+
+struct twl4030_codec_audio_data {
+	unsigned int	audio_mclk;
+	unsigned int ramp_delay_value;
+	unsigned int hs_extmute:1;
+	void (*set_hs_extmute)(int mute);
+};
+
+struct twl4030_codec_vibra_data {
+	unsigned int	audio_mclk;
+	unsigned int	coexist;
+};
+
+struct twl4030_codec_data {
+	unsigned int	audio_mclk;
+	struct twl4030_codec_audio_data		*audio;
+	struct twl4030_codec_vibra_data		*vibra;
+};
+
+struct twl5031_aci_platform_data {
+	int	tvout_gpio;
+	int	jack_gpio;
+
+#define AVPLUGDET_WHEN_PLUGGED_LOW 0
+#define AVPLUGDET_WHEN_PLUGGED_HIGH 1
+	int	avplugdet_plugged;
+
+	int	(*hw_plug_set_state)(struct device *dev, bool plugged);
+	int	(*hw_plug_resource_reserve)(struct device *dev);
+	void	(*hw_plug_resource_release)(void);
+};
 
 struct twl4030_platform_data {
 	unsigned				irq_base, irq_end;
+	struct twl4030_clock_init_data		*clock;
 	struct twl4030_bci_platform_data	*bci;
 	struct twl4030_gpio_platform_data	*gpio;
 	struct twl4030_madc_platform_data	*madc;
 	struct twl4030_keypad_data		*keypad;
 	struct twl4030_usb_data			*usb;
 	struct twl4030_power_data		*power;
+	struct twl4030_codec_data		*codec;
+	struct twl5031_aci_platform_data	*aci;
 
 	/* LDO regulators */
 	struct regulator_init_data		*vdac;
@@ -421,8 +530,13 @@ struct twl4030_platform_data {
 	struct regulator_init_data		*vaux2;
 	struct regulator_init_data		*vaux3;
 	struct regulator_init_data		*vaux4;
-
-	/* REVISIT more to come ... _nothing_ should be hard-wired */
+	struct regulator_init_data		*vio;
+	struct regulator_init_data		*vdd1;
+	struct regulator_init_data		*vdd2;
+	struct regulator_init_data		*vintana1;
+	struct regulator_init_data		*vintana2;
+	struct regulator_init_data		*vintdig;
+	struct regulator_init_data		*vrrtc;
 };
 
 /*----------------------------------------------------------------------*/
@@ -433,11 +547,21 @@ int twl4030_sih_setup(int module);
 #define TWL4030_VDAC_DEV_GRP		0x3B
 #define TWL4030_VDAC_DEDICATED		0x3E
 #define TWL4030_VAUX1_DEV_GRP		0x17
+#define TWL4030_VAUX1_TYPE		0x18
+#define TWL4030_VAUX1_REMAP		0x19
 #define TWL4030_VAUX1_DEDICATED		0x1A
 #define TWL4030_VAUX2_DEV_GRP		0x1B
+#define TWL4030_VAUX2_TYPE		0x1C
+#define TWL4030_VAUX2_REMAP		0x1D
 #define TWL4030_VAUX2_DEDICATED		0x1E
 #define TWL4030_VAUX3_DEV_GRP		0x1F
+#define TWL4030_VAUX3_TYPE		0x20
+#define TWL4030_VAUX3_REMAP		0x21
 #define TWL4030_VAUX3_DEDICATED		0x22
+#define TWL4030_VAUX4_DEV_GRP		0x23
+#define TWL4030_VAUX4_TYPE		0x24
+#define TWL4030_VAUX4_REMAP		0x25
+#define TWL4030_VAUX4_DEDICATED		0x26
 
 #if defined(CONFIG_TWL4030_BCI_BATTERY) || \
 	defined(CONFIG_TWL4030_BCI_BATTERY_MODULE)
@@ -479,5 +603,14 @@ int twl4030_sih_setup(int module);
 #define TWL4030_REG_VUSB1V5	17
 #define TWL4030_REG_VUSB1V8	18
 #define TWL4030_REG_VUSB3V1	19
+#define TWL4030_REG_VRRTC	20
+
+/*----------------------------------------------------------------------*/
+
+#ifdef CONFIG_TWL5031_BCC
+extern int twl5031_bcc_usb_charger_detect(void);
+#else
+static inline int twl5031_bcc_usb_charger_detect(void) { return 0; }
+#endif
 
 #endif /* End of __TWL4030_H */

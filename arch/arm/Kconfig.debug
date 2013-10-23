@@ -2,6 +2,22 @@ menu "Kernel hacking"
 
 source "lib/Kconfig.debug"
 
+config STRICT_DEVMEM
+	bool "Filter access to /dev/mem"
+	depends on MMU
+	depends on DEVMEM
+	default n
+	---help---
+	  If this option is disabled, you allow userspace (root) access to all
+	  of memory, including kernel and userspace memory. Accidental
+	  access to this is obviously disastrous, but specific access can
+	  be used by people debugging the kernel.
+
+	  If this option is switched on, the /dev/mem file only allows
+	  userspace access to memory mapped peripherals.
+
+          If in doubt, say Y.
+
 # RMK wants arm kernels compiled with frame pointers or stack unwinding.
 # If you know what you are doing and are willing to live without stack
 # traces, you can get a slightly smaller kernel by setting this option to
@@ -71,6 +87,14 @@ config DEBUG_LL
 	  in the kernel.  This is helpful if you are debugging code that
 	  executes before the console is initialized.
 
+config EARLY_PRINTK
+       bool "Early printk"
+       depends on DEBUG_LL
+       help
+         Say Y here if you want to have an early console using the
+         kernel low-level debugging functions. Add earlyprintk to your
+         kernel parameters to enable this console.
+
 config DEBUG_ICEDCC
 	bool "Kernel low-level debugging via EmbeddedICE DCC channel"
 	depends on DEBUG_LL
@@ -82,6 +106,14 @@ config DEBUG_ICEDCC
 
 	  It does include a timeout to ensure that the system does not
 	  totally freeze when there is nothing connected to read.
+
+config OC_ETM
+	bool "On-chip ETM and ETB"
+	select ARM_AMBA
+	help
+	  Enables the on-chip embedded trace macrocell and embedded trace
+	  buffer driver that will allow you to collect traces of the
+	  kernel code.
 
 config DEBUG_DC21285_PORT
 	bool "Kernel low-level debugging messages via footbridge serial port"

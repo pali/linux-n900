@@ -401,6 +401,35 @@ config VIDEO_VPX3220
 	  To compile this driver as a module, choose M here: the
 	  module will be called vpx3220.
 
+config VIDEO_AD5807
+	tristate "AD5807 actuator driver support"
+	depends on I2C && VIDEO_V4L2
+	---help---
+	  This is a driver for the AD5807 actuator driver.
+	  It is used for example in Nokia RX-71 Camera Module
+
+config VIDEO_AD58XX
+	tristate "AD58xx lens driver support"
+	depends on I2C && VIDEO_V4L2
+	select VIDEO_SMIAPP_POWER
+	---help---
+	  This is a driver for the ADI SMIA++ VCM lens device.
+	  It is used for example in some Nokia Camera Modules
+
+config VIDEO_AS3645A
+	tristate "AS3645A flash driver support"
+	depends on I2C && VIDEO_V4L2
+	---help---
+	  This is a driver for the AS3645A flash chip.
+	  Has build in control for Flash and Torch LED's control
+
+config VIDEO_SMIAPP
+	tristate "Generic driver for SMIA++/SMIA camera modules"
+	depends on I2C && VIDEO_V4L2
+	select VIDEO_SMIAPP_POWER
+	---help---
+	  This is a generic driver for SMIA++/SMIA camera modules.
+
 comment "Video and audio decoders"
 
 source "drivers/media/video/cx25840/Kconfig"
@@ -810,6 +839,29 @@ config VIDEO_CAFE_CCIC
 	  This is a video4linux2 driver for the Marvell 88ALP01 integrated
 	  CMOS camera controller.  This is the controller found on first-
 	  generation OLPC systems.
+
+config VIDEO_OMAP3
+        tristate "OMAP 3 Camera support"
+	select OMAP_IOMMU
+	depends on VIDEO_V4L2 && ARCH_OMAP34XX
+	---help---
+	  Driver for an OMAP 3 camera controller.
+
+config VIDEO_OMAP3_DEBUG
+	bool "OMAP 3 Camera debug messages"
+	depends on VIDEO_OMAP3
+	---help---
+	  Enable debug messages on OMAP 3 camera controller driver.
+
+config VIDEO_SMIAPP_POWER
+	tristate "SMIA++ power handling helper"
+	---help---
+	  SMIA++ sensors have two components in them: the sensor itself
+	  and a voice coil driver for the lens focusing. These are driven by
+	  different drivers but are on the same power supply. There is a
+	  minimum power off time that must be ensured for the sensor to reset
+	  properly. If the sensor driver is powered off and the lens driver
+	  is powered on right away, this driver enforces a delay between them.
 
 config SOC_CAMERA
 	tristate "SoC camera support"

@@ -699,6 +699,33 @@ error:
 	return retval;
 }
 
+#ifdef CONFIG_SECURITY_CREDENTIALS_POLICY
+/**
+ * kernel_setuid - Enable 'setuid' for kernel code
+ * @new: The new credentials being prepared
+ * @uid: The new uid
+ *
+ * This function does not check CAP_SETUID by design.
+ *
+ * Returns 0 on success. The error return indicates that construction
+ * of new credentials has failed and the 'new' structure must
+ * cancelled by abort_creds.
+ */
+int kernel_setuid(struct cred *new, uid_t uid)
+{
+	const struct cred *old = current_cred();
+
+	new->suid = new->uid = uid;
+	if (uid != old->uid) {
+		const int retval = set_user(new);
+		if (retval < 0)
+			return retval;
+	}
+	new->fsuid = new->euid = uid;
+	return 0;
+}
+EXPORT_SYMBOL(kernel_setuid);
+#endif
 
 /*
  * This function implements a generic ability to update ruid, euid,

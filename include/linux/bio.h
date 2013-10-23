@@ -160,7 +160,11 @@ struct bio {
  *	for flash based storage.
  *	Don't want driver retries for any fast fail whatever the reason.
  * bit 10 -- Tell the IO scheduler not to wait for more requests after this
-	one has been submitted, even if it is a SYNC request.
+ *	one has been submitted, even if it is a SYNC request.
+ * bit 11 -- secure
+ *	Used with BIO_RW_DISCARD to indicate a secure discard, which means
+ *	all copies of the discarded sectors (perhaps created by garbage
+ *	collection) are also erased.
  */
 enum bio_rw_flags {
 	BIO_RW,
@@ -175,6 +179,7 @@ enum bio_rw_flags {
 	BIO_RW_META,
 	BIO_RW_DISCARD,
 	BIO_RW_NOIDLE,
+	BIO_RW_SECURE,
 };
 
 /*

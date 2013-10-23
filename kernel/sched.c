@@ -6291,11 +6291,10 @@ void rt_mutex_setprio(struct task_struct *p, int prio)
 
 	if (running)
 		p->sched_class->set_curr_task(rq);
-	if (on_rq) {
+	if (on_rq)
 		enqueue_task(rq, p, 0, oldprio < prio);
 
-		check_class_changed(rq, p, prev_class, oldprio, running);
-	}
+	check_class_changed(rq, p, prev_class, oldprio, running);
 	task_rq_unlock(rq, &flags);
 }
 
@@ -10031,13 +10030,15 @@ int alloc_fair_sched_group(struct task_group *tg, struct task_group *parent)
 		se = kzalloc_node(sizeof(struct sched_entity),
 				  GFP_KERNEL, cpu_to_node(i));
 		if (!se)
-			goto err;
+			goto err_free_rq;
 
 		init_tg_cfs_entry(tg, cfs_rq, se, i, 0, parent->se[i]);
 	}
 
 	return 1;
 
+ err_free_rq:
+	kfree(cfs_rq);
  err:
 	return 0;
 }
@@ -10119,13 +10120,15 @@ int alloc_rt_sched_group(struct task_group *tg, struct task_group *parent)
 		rt_se = kzalloc_node(sizeof(struct sched_rt_entity),
 				     GFP_KERNEL, cpu_to_node(i));
 		if (!rt_se)
-			goto err;
+			goto err_free_rq;
 
 		init_tg_rt_entry(tg, rt_rq, rt_se, i, 0, parent->rt_se[i]);
 	}
 
 	return 1;
 
+ err_free_rq:
+	kfree(rt_rq);
  err:
 	return 0;
 }

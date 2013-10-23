@@ -117,7 +117,7 @@ static void ext2_put_super (struct super_block * sb)
 
 	lock_kernel();
 
-	if (sb->s_dirt)
+	if (sb_is_dirty(sb))
 		ext2_write_super(sb);
 
 	ext2_xattr_put_super(sb);
@@ -1094,7 +1094,7 @@ static void ext2_commit_super (struct super_block * sb,
 {
 	es->s_wtime = cpu_to_le32(get_seconds());
 	mark_buffer_dirty(EXT2_SB(sb)->s_sbh);
-	sb->s_dirt = 0;
+	sb_mark_clean(sb);
 }
 
 static void ext2_sync_super(struct super_block *sb, struct ext2_super_block *es)
@@ -1104,7 +1104,7 @@ static void ext2_sync_super(struct super_block *sb, struct ext2_super_block *es)
 	es->s_wtime = cpu_to_le32(get_seconds());
 	mark_buffer_dirty(EXT2_SB(sb)->s_sbh);
 	sync_dirty_buffer(EXT2_SB(sb)->s_sbh);
-	sb->s_dirt = 0;
+	sb_mark_clean(sb);
 }
 
 /*
@@ -1135,7 +1135,7 @@ static int ext2_sync_fs(struct super_block *sb, int wait)
 	} else {
 		ext2_commit_super(sb, es);
 	}
-	sb->s_dirt = 0;
+	sb_mark_clean(sb);
 	unlock_kernel();
 
 	return 0;
@@ -1147,7 +1147,7 @@ void ext2_write_super(struct super_block *sb)
 	if (!(sb->s_flags & MS_RDONLY))
 		ext2_sync_fs(sb, 1);
 	else
-		sb->s_dirt = 0;
+		sb_mark_clean(sb);
 }
 
 static int ext2_remount (struct super_block * sb, int * flags, char * data)

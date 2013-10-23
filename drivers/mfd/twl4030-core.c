@@ -39,7 +39,7 @@
 #include <linux/i2c/twl4030.h>
 
 #if defined(CONFIG_ARCH_OMAP2) || defined(CONFIG_ARCH_OMAP3)
-#include <mach/cpu.h>
+#include <plat/cpu.h>
 #endif
 
 /*
@@ -62,6 +62,12 @@
 #define twl_has_bci()		true
 #else
 #define twl_has_bci()		false
+#endif
+
+#ifdef CONFIG_TWL5031_BCC
+#define twl_has_bcc()		true
+#else
+#define twl_has_bcc()		false
 #endif
 
 #if defined(CONFIG_KEYBOARD_TWL4030) || defined(CONFIG_KEYBOARD_TWL4030_MODULE)
@@ -114,6 +120,24 @@
 #define twl_has_watchdog()        false
 #endif
 
+#if defined(CONFIG_TWL4030_CODEC) || defined(CONFIG_TWL4030_CODEC_MODULE)
+#define twl_has_codec()	true
+#else
+#define twl_has_codec()	false
+#endif
+
+#if defined(CONFIG_TWL5031_ACI) || defined(CONFIG_TWL5031_ACI_MODULE)
+#define twl_has_aci()	true
+#else
+#define twl_has_aci()	false
+#endif
+
+#if defined(CONFIG_TWL5031_ACC) || defined(CONFIG_TWL5031_ACC_MODULE)
+#define twl_has_acc()	true
+#else
+#define twl_has_acc()	false
+#endif
+
 /* Triton Core internal information (BEGIN) */
 
 /* Last - for index max*/
@@ -122,7 +146,7 @@
 #define TWL4030_NUM_SLAVES		4
 
 #if defined(CONFIG_INPUT_TWL4030_PWRBUTTON) \
-	|| defined(CONFIG_INPUT_TWL4030_PWBUTTON_MODULE)
+	|| defined(CONFIG_INPUT_TWL4030_PWRBUTTON_MODULE)
 #define twl_has_pwrbutton()	true
 #else
 #define twl_has_pwrbutton()	false
@@ -152,6 +176,11 @@
 #define TWL4030_BASEADD_PWMB		0x00F1
 #define TWL4030_BASEADD_KEYPAD		0x00D2
 
+#define TWL5031_BASEADD_ACCESSORY	0x0074 /* Replaces Main Charge */
+#define TWL5031_BASEADD_BCC		0x00AA /* Changed from TWL4030 */
+#define TWL5031_BASEADD_INTERRUPTS	0x00B9 /* Different than TWL4030's
+						  one */
+
 /* subchip/slave 3 - POWER ID */
 #define TWL4030_BASEADD_BACKUP		0x0014
 #define TWL4030_BASEADD_INT		0x002E
@@ -177,11 +206,13 @@
 #define HFCLK_FREQ_26_MHZ		(2 << 0)
 #define HFCLK_FREQ_38p4_MHZ		(3 << 0)
 #define HIGH_PERF_SQ			(1 << 3)
+#define CK32K_LOWPWR_EN			(1 << 7)
 
 
 /* chip-specific feature flags, for i2c_device_id.driver_data */
 #define TWL4030_VAUX2		BIT(0)	/* pre-5030 voltage ranges */
 #define TPS_SUBSET		BIT(1)	/* tps659[23]0 have fewer LDOs */
+#define TWL5031			BIT(2)  /* twl5031 has different registers */
 
 /*----------------------------------------------------------------------*/
 
@@ -234,6 +265,9 @@ static struct twl4030mapping twl4030_map[TWL4030_MODULE_LAST + 1] = {
 	{ 2, TWL4030_BASEADD_PWM1 },
 	{ 2, TWL4030_BASEADD_PWMA },
 	{ 2, TWL4030_BASEADD_PWMB },
+	{ 2, TWL5031_BASEADD_ACCESSORY },
+	{ 2, TWL5031_BASEADD_BCC },
+	{ 2, TWL5031_BASEADD_INTERRUPTS },
 
 	{ 3, TWL4030_BASEADD_BACKUP },
 	{ 3, TWL4030_BASEADD_INT },
@@ -244,6 +278,54 @@ static struct twl4030mapping twl4030_map[TWL4030_MODULE_LAST + 1] = {
 };
 
 /*----------------------------------------------------------------------*/
+
+/* memory shadow for ACI/ECI register bank */
+#define TWL5031_ECI_REGISTER_NUMBER	11
+static u8 twl5031_eci_registers[TWL5031_ECI_REGISTER_NUMBER];
+static bool buggy_eci;
+
+static int twl4030_i2c_simple_write(struct twl4030_client *twl, u8 *value,
+						u8 reg, unsigned num_bytes)
+{
+	struct i2c_msg *msg;
+
+	/*
+	 * [MSG1]: fill the register address data
+	 * fill the data Tx buffer
+	 */
+	msg = &twl->xfer_msg[0];
+	msg->addr = twl->address;
+	msg->len = num_bytes + 1;
+	msg->flags = 0;
+	msg->buf = value;
+	/* over write the first byte of buffer with the register address */
+	*value = reg;
+
+	return i2c_transfer(twl->client->adapter, twl->xfer_msg, 1);
+}
+
+static int twl4030_i2c_simple_read(struct twl4030_client *twl, u8 *value,
+						u8 reg, unsigned num_bytes)
+{
+	u8 val;
+	struct i2c_msg *msg;
+
+	/* [MSG1] fill the register address data */
+	msg = &twl->xfer_msg[0];
+	msg->addr = twl->address;
+	msg->len = 1;
+	msg->flags = 0;	/* Read the register value */
+	val = reg;
+	msg->buf = &val;
+	/* [MSG2] fill the data rx buffer */
+	msg = &twl->xfer_msg[1];
+	msg->addr = twl->address;
+	msg->flags = I2C_M_RD;	/* Read the register value */
+	msg->len = num_bytes;	/* only n bytes */
+	msg->buf = value;
+
+	return i2c_transfer(twl->client->adapter, twl->xfer_msg, 2);
+}
 
 /* Exported Functions */
 
@@ -261,35 +343,77 @@ static struct twl4030mapping twl4030_map[TWL4030_MODULE_LAST + 1] = {
  */
 int twl4030_i2c_write(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes)
 {
-	int ret;
+	int ret = 0;
 	int sid;
-	struct twl4030_client *twl;
-	struct i2c_msg *msg;
+	u8 address;
+	bool buggy_regs;
+	struct twl4030_client *twl, *aci;
 
 	if (unlikely(mod_no > TWL4030_MODULE_LAST)) {
 		pr_err("%s: invalid module number %d\n", DRIVER_NAME, mod_no);
 		return -EPERM;
 	}
+	sid = twl4030_map[TWL5031_MODULE_ACCESSORY].sid;
+	aci = &twl4030_modules[sid];
 	sid = twl4030_map[mod_no].sid;
 	twl = &twl4030_modules[sid];
+	address = twl4030_map[mod_no].base + reg;
+	buggy_regs = buggy_eci && ((address >= 0x74 && address <= 0x7E));
+
+	if (buggy_regs)
+		reg = address - 0x74;
 
 	if (unlikely(!inuse)) {
 		pr_err("%s: client %d is not initialized\n", DRIVER_NAME, sid);
 		return -EPERM;
 	}
 	mutex_lock(&twl->xfer_lock);
+
 	/*
-	 * [MSG1]: fill the register address data
-	 * fill the data Tx buffer
+	 * REVISIT: Workaround for hardware bug in ACI/ECI module address
+	 * decodification. Any writes on 0x74-0x7E of any address group
+	 * will affect same ACI/ECI registers.
+	 * Here it masks ACI/ECI IRQs.
 	 */
-	msg = &twl->xfer_msg[0];
-	msg->addr = twl->address;
-	msg->len = num_bytes + 1;
-	msg->flags = 0;
-	msg->buf = value;
-	/* over write the first byte of buffer with the register address */
-	*value = twl4030_map[mod_no].base + reg;
-	ret = i2c_transfer(twl->client->adapter, twl->xfer_msg, 1);
+	if (buggy_regs && (mod_no != TWL5031_MODULE_ACCESSORY)) {
+		u8 buff[5] = { 0, 0xFF, 0xFF, 0xFF, 0xFF };
+
+		/* Shadow ACI/ECI interrupts */
+		ret = twl4030_i2c_simple_write(aci, buff, 0x79, 4);
+	}
+
+	/* Perform desired write */
+	if (ret >= 0)
+		ret = twl4030_i2c_simple_write(twl, value, address, num_bytes);
+
+	/* Update our ACI/ECI bank register memory shadow if needed */
+	if (buggy_regs && (ret >= 0) && (mod_no == TWL5031_MODULE_ACCESSORY)) {
+		size_t size;
+
+		size = num_bytes;
+		if (size + reg > TWL5031_ECI_REGISTER_NUMBER)
+			size = TWL5031_ECI_REGISTER_NUMBER - reg;
+		memcpy(twl5031_eci_registers + reg, value + 1, size);
+	}
+
+	/*
+	 * REVISIT: Workaround for hardware bug in ACI/ECI module address
+	 * decodification. Any writes on 0x74-0x7E of any address group
+	 * will affect same ACI/ECI registers.
+	 * Here it restores affected ACI/ECI register.
+	 */
+	if (buggy_regs && (ret >= 0) && (mod_no != TWL5031_MODULE_ACCESSORY)) {
+		u8 buff[5] = { 0 };
+
+		/* Restore register on module 0x4A */
+		buff[1] = twl5031_eci_registers[reg];
+		ret = twl4030_i2c_simple_write(aci, buff, address, 1);
+		/* Restore interrupts flags (0x79:0x7C) in ACI/ECI module */
+		memcpy(buff + 1, twl5031_eci_registers + 5, 4);
+		if (ret >= 0)
+			ret = twl4030_i2c_simple_write(aci, buff, 0x79, 4);
+	}
+
 	mutex_unlock(&twl->xfer_lock);
 
 	/* i2cTransfer returns num messages.translate it pls.. */
@@ -306,15 +430,14 @@ EXPORT_SYMBOL(twl4030_i2c_write);
  * @reg: register address (just offset will do)
  * @num_bytes: number of bytes to transfer
  *
- * Returns result of operation - num_bytes is success else failure.
+ * Returns result of operation - 0 is success
  */
 int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes)
 {
 	int ret;
-	u8 val;
 	int sid;
+	u8 address;
 	struct twl4030_client *twl;
-	struct i2c_msg *msg;
 
 	if (unlikely(mod_no > TWL4030_MODULE_LAST)) {
 		pr_err("%s: invalid module number %d\n", DRIVER_NAME, mod_no);
@@ -322,26 +445,14 @@ int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes)
 	}
 	sid = twl4030_map[mod_no].sid;
 	twl = &twl4030_modules[sid];
+	address = twl4030_map[mod_no].base + reg;
 
 	if (unlikely(!inuse)) {
 		pr_err("%s: client %d is not initialized\n", DRIVER_NAME, sid);
 		return -EPERM;
 	}
 	mutex_lock(&twl->xfer_lock);
-	/* [MSG1] fill the register address data */
-	msg = &twl->xfer_msg[0];
-	msg->addr = twl->address;
-	msg->len = 1;
-	msg->flags = 0;	/* Read the register value */
-	val = twl4030_map[mod_no].base + reg;
-	msg->buf = &val;
-	/* [MSG2] fill the data rx buffer */
-	msg = &twl->xfer_msg[1];
-	msg->addr = twl->address;
-	msg->flags = I2C_M_RD;	/* Read the register value */
-	msg->len = num_bytes;	/* only n bytes */
-	msg->buf = value;
-	ret = i2c_transfer(twl->client->adapter, twl->xfer_msg, 2);
+	ret = twl4030_i2c_simple_read(twl, value, address, num_bytes);
 	mutex_unlock(&twl->xfer_lock);
 
 	/* i2cTransfer returns num messages.translate it pls.. */
@@ -481,9 +592,18 @@ add_children(struct twl4030_platform_data *pdata, unsigned long features)
 {
 	struct device	*child;
 
-	if (twl_has_bci() && pdata->bci && !(features & TPS_SUBSET)) {
+	if (twl_has_bci() && pdata->bci &&
+	    !(features & (TPS_SUBSET | TWL5031))) {
 		child = add_child(3, "twl4030_bci",
 				pdata->bci, sizeof(*pdata->bci),
+				false,
+				/* irq0 = CHG_PRES, irq1 = BCI */
+				pdata->irq_base + 8 + 1, pdata->irq_base + 2);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+	} else if (twl_has_bcc()) {
+		child = add_child(2, "twl5031_bcc",
+				NULL, 0,
 				false,
 				/* irq0 = CHG_PRES, irq1 = BCI */
 				pdata->irq_base + 8 + 1, pdata->irq_base + 2);
@@ -508,6 +628,8 @@ add_children(struct twl4030_platform_data *pdata, unsigned long features)
 	}
 
 	if (twl_has_madc() && pdata->madc) {
+		if (!(features & TWL5031))
+			pdata->madc->bcia_control = 0;
 		child = add_child(2, "twl4030_madc",
 				pdata->madc, sizeof(*pdata->madc),
 				true, pdata->irq_base + 3, 0);
@@ -571,6 +693,9 @@ add_children(struct twl4030_platform_data *pdata, unsigned long features)
 
 		}
 
+		if (features & TWL5031)
+			pdata->usb->can_detect_charger = true;
+
 		child = add_child(0, "twl4030_usb",
 				pdata->usb, sizeof(*pdata->usb),
 				true,
@@ -601,12 +726,46 @@ add_children(struct twl4030_platform_data *pdata, unsigned long features)
 			return PTR_ERR(child);
 	}
 
+	if (twl_has_codec() && pdata->codec) {
+		child = add_child(1, "twl4030_codec",
+				pdata->codec, sizeof(*pdata->codec),
+				false, 0, 0);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+	}
+
+	if (twl_has_aci() && (features & TWL5031)) {
+		child = add_child(2, "twl5031_aci",
+				pdata->aci, sizeof(*pdata->aci),
+				true, pdata->irq_base + 6, 0);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+	}
+
+	if (twl_has_acc() && (features & TWL5031)) {
+		child = add_child(2, "twl5031_acc",
+				  NULL, 0,
+				  false, pdata->irq_base + 7, 0);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+	}
+
 	if (twl_has_regulator()) {
-		/*
 		child = add_regulator(TWL4030_REG_VPLL1, pdata->vpll1);
 		if (IS_ERR(child))
 			return PTR_ERR(child);
-		*/
+
+		child = add_regulator(TWL4030_REG_VIO, pdata->vio);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+
+		child = add_regulator(TWL4030_REG_VDD1, pdata->vdd1);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+
+		child = add_regulator(TWL4030_REG_VDD2, pdata->vdd2);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
 
 		child = add_regulator(TWL4030_REG_VMMC1, pdata->vmmc1);
 		if (IS_ERR(child))
@@ -620,6 +779,22 @@ add_children(struct twl4030_platform_data *pdata, unsigned long features)
 					? TWL4030_REG_VAUX2_4030
 					: TWL4030_REG_VAUX2,
 				pdata->vaux2);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+
+		child = add_regulator(TWL4030_REG_VINTANA1, pdata->vintana1);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+
+		child = add_regulator(TWL4030_REG_VINTANA2, pdata->vintana2);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+
+		child = add_regulator(TWL4030_REG_VINTDIG, pdata->vintdig);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+
+		child = add_regulator(TWL4030_REG_VRRTC, pdata->vrrtc);
 		if (IS_ERR(child))
 			return PTR_ERR(child);
 	}
@@ -681,7 +856,8 @@ static inline int __init unprotect_pm_master(void)
 	return e;
 }
 
-static void clocks_init(struct device *dev)
+static void clocks_init(struct device *dev,
+			struct twl4030_clock_init_data *clock)
 {
 	int e = 0;
 	struct clk *osc;
@@ -728,6 +904,9 @@ static void clocks_init(struct device *dev)
 	}
 
 	ctrl |= HIGH_PERF_SQ;
+	if (clock && clock->ck32k_lowpwr_enable)
+		ctrl |= CK32K_LOWPWR_EN;
+
 	e |= unprotect_pm_master();
 	/* effect->MADC+USB ck en */
 	e |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, ctrl, R_CFG_BOOT);
@@ -741,6 +920,41 @@ static void clocks_init(struct device *dev)
 
 int twl_init_irq(int irq_num, unsigned irq_base, unsigned irq_end);
 int twl_exit_irq(void);
+int twl_init_chip_irq(const char *chip);
+
+static int twl5031_probe_eci_bug(void)
+{
+	int e = 0;
+	u8 buff[4];
+
+	/* Unlock it first */
+	e = twl4030_i2c_write_u8(TWL4030_MODULE_INTBR, 0x49, 0x97);
+	if (e)
+		return e;
+
+	e = twl4030_i2c_read(TWL4030_MODULE_INTBR, buff, 0x00, 4);
+	if (e)
+		return e;
+
+	/* twl5031 silicon rev. ES 1.0 and ES 1.1 have ACI/ECI bug */
+	buggy_eci = (buff[0] == 0x2f && buff[1] == 0x80 &&
+			(buff[3] == 0x1b || buff[3] == 0x0b));
+
+	if (buggy_eci) {
+		struct twl4030_client *aci;
+		int sid;
+
+		sid = twl4030_map[TWL5031_MODULE_ACCESSORY].sid;
+		aci = &twl4030_modules[sid];
+		e = twl4030_i2c_simple_read(aci,
+				twl5031_eci_registers, 0x74,
+				TWL5031_ECI_REGISTER_NUMBER);
+		if (e == 2)
+			e = 0;
+	}
+
+	return e;
+}
 
 static int twl4030_remove(struct i2c_client *client)
 {
@@ -750,6 +964,9 @@ static int twl4030_remove(struct i2c_client *client)
 	status = twl_exit_irq();
 	if (status < 0)
 		return status;
+
+	if (twl_has_power())
+		twl4030_power_remove();
 
 	for (i = 0; i < TWL4030_NUM_SLAVES; i++) {
 		struct twl4030_client	*twl = &twl4030_modules[i];
@@ -769,6 +986,7 @@ twl4030_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	int				status;
 	unsigned			i;
 	struct twl4030_platform_data	*pdata = client->dev.platform_data;
+	u8 temp;
 
 	if (!pdata) {
 		dev_dbg(&client->dev, "no platform data?\n");
@@ -802,28 +1020,43 @@ twl4030_probe(struct i2c_client *client, const struct i2c_device_id *id)
 			}
 			strlcpy(twl->client->name, id->name,
 					sizeof(twl->client->name));
+			twl->client->dev.platform_data = pdata;
 		}
 		mutex_init(&twl->xfer_lock);
 	}
 	inuse = true;
 
 	/* setup clock framework */
-	clocks_init(&client->dev);
+	clocks_init(&client->dev, pdata->clock);
 
 	/* load power event scripts */
-	if (twl_has_power() && pdata->power)
+	if (twl_has_power())
 		twl4030_power_init(pdata->power);
 
 	/* Maybe init the T2 Interrupt subsystem */
 	if (client->irq
 			&& pdata->irq_base
 			&& pdata->irq_end > pdata->irq_base) {
+		twl_init_chip_irq(id->name);
 		status = twl_init_irq(client->irq, pdata->irq_base, pdata->irq_end);
 		if (status < 0)
 			goto fail;
 	}
+	/* Disable GAIA I2C Pull-up on I2C1 and I2C4(SR) interface
+	 * program I2C_SCL_CTRL_PU(bit 0)=0, I2C_SDA_CTRL_PU (bit 2)=0,
+	 * SR_I2C_SCL_CTRL_PU(bit 4)=0 and SR_I2C_SDA_CTRL_PU(bit 6)=0.
+	 */
+
+	twl4030_i2c_read_u8(TWL4030_MODULE_INTBR, &temp, REG_GPPUPDCTR1);
+	temp &= ~(SR_I2C_SDA_CTRL_PU | SR_I2C_SCL_CTRL_PU | \
+				I2C_SDA_CTRL_PU | I2C_SCL_CTRL_PU);
+	twl4030_i2c_write_u8(TWL4030_MODULE_INTBR, temp, REG_GPPUPDCTR1);
 
 	status = add_children(pdata, id->driver_data);
+	if (status < 0)
+		goto fail;
+
+	status = twl5031_probe_eci_bug();
 fail:
 	if (status < 0)
 		twl4030_remove(client);
@@ -833,6 +1066,7 @@ fail:
 static const struct i2c_device_id twl4030_ids[] = {
 	{ "twl4030", TWL4030_VAUX2 },	/* "Triton 2" */
 	{ "twl5030", 0 },		/* T2 updated */
+	{ "twl5031", TWL5031 },		/* TWL5030 updated */
 	{ "tps65950", 0 },		/* catalog version of twl5030 */
 	{ "tps65930", TPS_SUBSET },	/* fewer LDOs and DACs; no charger */
 	{ "tps65920", TPS_SUBSET },	/* fewer LDOs; no codec or charger */

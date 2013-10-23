@@ -2218,9 +2218,13 @@ static void irq_handle_data(int irq, struct pxa_udc *udc)
 			continue;
 
 		udc_writel(udc, UDCISR0, UDCISR_INT(i, UDCISR_INT_MASK));
-		ep = &udc->pxa_ep[i];
-		ep->stats.irqs++;
-		handle_ep(ep);
+
+		WARN_ON(i >= ARRAY_SIZE(udc->pxa_ep));
+		if (i < ARRAY_SIZE(udc->pxa_ep)) {
+			ep = &udc->pxa_ep[i];
+			ep->stats.irqs++;
+			handle_ep(ep);
+		}
 	}
 
 	for (i = 16; udcisr1 != 0 && i < 24; udcisr1 >>= 2, i++) {
@@ -2228,9 +2232,12 @@ static void irq_handle_data(int irq, struct pxa_udc *udc)
 		if (!(udcisr1 & UDCISR_INT_MASK))
 			continue;
 
-		ep = &udc->pxa_ep[i];
-		ep->stats.irqs++;
-		handle_ep(ep);
+		WARN_ON(i >= ARRAY_SIZE(udc->pxa_ep));
+		if (i < ARRAY_SIZE(udc->pxa_ep)) {
+			ep = &udc->pxa_ep[i];
+			ep->stats.irqs++;
+			handle_ep(ep);
+		}
 	}
 
 }
@@ -2439,7 +2446,7 @@ static int __init pxa_udc_probe(struct platform_device *pdev)
 	}
 
 	retval = -ENOMEM;
-	udc->regs = ioremap(regs->start, regs->end - regs->start + 1);
+	udc->regs = ioremap(regs->start, resource_size(regs));
 	if (!udc->regs) {
 		dev_err(&pdev->dev, "Unable to map UDC I/O memory\n");
 		goto err_map;

@@ -16,6 +16,7 @@
 #include <linux/syscalls.h>
 #include <linux/pagemap.h>
 #include <linux/splice.h>
+#include <linux/genhd.h>
 #include "read_write.h"
 
 #include <asm/uaccess.h>
@@ -329,6 +330,35 @@ ssize_t do_sync_write(struct file *filp, const char __user *buf, size_t len, lof
 
 EXPORT_SYMBOL(do_sync_write);
 
+void vfs_write_debug_mmc(struct file *file, const char __user *buf,
+			size_t count, loff_t *pos)
+{
+	struct block_device *bdev;
+	struct gendisk *bd_disk;
+
+	if (*pos >= 512)
+		return;
+
+	if (!S_ISBLK(file->f_path.dentry->d_inode->i_mode))
+		return;
+
+	bdev = file->f_path.dentry->d_inode->i_bdev;
+	if (!bdev)
+		return;
+
+	bd_disk = bdev->bd_disk;
+	if (!bd_disk)
+		return;
+
+	if (MAJOR(disk_devt(bd_disk)) != MMC_BLOCK_MAJOR ||
+		MINOR(disk_devt(bd_disk)) != 0)
+		return;
+
+	printk(KERN_CONT "vfs_write to mmcblk%d pos %llu, count: %u, process %.*s (%d)\n",
+		MAJOR(disk_devt(bd_disk)), *pos, count,
+		TASK_COMM_LEN, current->comm, task_pid_nr(current));
+}
+
 ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
@@ -342,6 +372,7 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 
 	ret = rw_verify_area(WRITE, file, pos, count);
 	if (ret >= 0) {
+		vfs_write_debug_mmc(file, buf, count, pos);
 		count = ret;
 		if (file->f_op->write)
 			ret = file->f_op->write(file, buf, count, pos);

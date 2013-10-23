@@ -291,6 +291,11 @@ static int ll_merge_requests_fn(struct request_queue *q, struct request *req,
 	if ((blk_rq_sectors(req) + blk_rq_sectors(next)) > queue_max_sectors(q))
 		return 0;
 
+	if (q->limits.align_mask && blk_fs_request(req) &&
+	    !blk_discard_rq(req) && rq_data_dir(req) == WRITE &&
+	    !(blk_rq_pos(next) & q->limits.align_mask))
+		return 0;
+
 	total_phys_segments = req->nr_phys_segments + next->nr_phys_segments;
 	if (blk_phys_contig_segment(q, req->biotail, next->bio)) {
 		if (req->nr_phys_segments == 1)
@@ -370,6 +375,18 @@ static int attempt_merge(struct request_queue *q, struct request *req,
 	 * not contiguous
 	 */
 	if (blk_rq_pos(req) + blk_rq_sectors(req) != blk_rq_pos(next))
+		return 0;
+
+	/*
+	 * Don't merge file system requests and discard requests
+	 */
+	if ((req->cmd_flags & REQ_DISCARD) != (next->cmd_flags & REQ_DISCARD))
+		return 0;
+
+	/*
+	 * Don't merge discard requests and secure discard requests
+	 */
+	if ((req->cmd_flags & REQ_SECURE) != (next->cmd_flags & REQ_SECURE))
 		return 0;
 
 	if (rq_data_dir(req) != rq_data_dir(next)

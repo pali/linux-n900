@@ -14,3 +14,16 @@ config PHONET
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called phonet. If unsure, say N.
+
+config N_FBUS
+	tristate "FBUS line discipline"
+	depends on PHONET
+	help
+	  The Nokia FBUS provides an asynchronous point-to-point interface
+	  to exchange Phonet packets with a Nokia modem over a serial line.
+
+	  The FBUS line discipline driver can provide a Phonet network
+	  interface over any TTY device.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called n_fbus. If unsure, say N.

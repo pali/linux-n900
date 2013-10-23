@@ -55,6 +55,7 @@
 #include <linux/async.h>
 #include <linux/percpu.h>
 #include <linux/kmemleak.h>
+#include <linux/security.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/module.h>
@@ -328,6 +329,188 @@ static bool find_symbol_in_section(const struct symsearch *syms,
 	return true;
 }
 
+#ifdef CONFIG_MODULE_ELF_HASH
+/*
+ * ELF hash tables are used for fast symbol lookup. Our implementation uses one
+ * hash table per symbol table (for exported symbols only). So we have:
+ *
+ * __ksymtab.htable		- for EXPORT_SYMBOL()
+ * __ksymtab_gpl.htable 	- for EXPORT_SYMBOL_GPL()
+ * __ksymtab_gpl_future.htable	- for EXPORT_SYMBOL_GPL_FUTURE()
+ *
+ * We only have hash tables on symbols that exists. For example if given module
+ * only has EXPORT_SYMBOL() calls, there is only one hash table.
+ *
+ * Each hash table is in following format:
+ *
+ *   0 +-------------------+
+ *     |  nbucket          |
+ *     +-------------------+
+ *     |  nchain           |
+ *     +-------------------+
+ *     | bucket[0]         |
+ *     .                   .
+ *     .                   .
+ *     | bucket[nbucket-1] |
+ *     +-------------------+
+ *     | chain[0]          |
+ *     .                   .
+ *     .                   .
+ *     | chain[nchain-1]   |
+ *     +-------------------+
+ *
+ * This is also documented in
+ * 	http://www.sco.com/developers/gabi/latest/ch5.dynamic.html#hash
+ */
+extern const unsigned long __start___ksymtab_htable[];
+extern const unsigned long __start___ksymtab_gpl_htable[];
+extern const unsigned long __start___ksymtab_gpl_future_htable[];
+
+static inline unsigned long elf_hash(const char *sname)
+{
+	const unsigned char *name = (const unsigned char *)sname;
+	unsigned long h = 0, g;
+
+	while (*name != '\0') {
+		h = (h << 4) + *name++;
+		g = h & 0xf0000000;
+		if (g)
+			h ^= g >> 24;
+		h &= ~g;
+	}
+
+	return h;
+}
+
+#define STN_UNDEF	((unsigned int)-1)
+
+/**
+ * hash_find_symbol_in_section - looks up given symbol using ELF hash tables
+ * @syms: current symbol search pointer
+ * @owner: owner module
+ * @fsa: pointer to &struct find_symbol_arg
+ *
+ * Performs symbol lookup using ELF hash table.
+ *
+ * Returns %true if the symbol was found and %false otherwise.
+ */
+static bool hash_find_symbol_in_section(const struct symsearch *syms,
+					struct module *owner,
+					struct find_symbol_arg *fsa)
+{
+	const u32 *htable = (const u32 *)syms->htable;
+	const u32 *buckets, *chains;
+	unsigned int nsyms = syms->stop - syms->start;
+	unsigned int symnum;
+	u32 nbucket, nchain;
+
+	if (!nsyms || !htable)
+		return false;
+
+	nbucket = *htable++;
+	if (WARN_ON_ONCE(nbucket > nsyms))
+		return false;
+
+	nchain = *htable++;
+	if (WARN_ON_ONCE(nchain != nsyms))
+		return false;
+
+	buckets = htable;
+	chains = htable + nbucket;
+
+	/* perform lookup using the ELF hash table */
+	symnum = buckets[elf_hash(fsa->name) % nbucket];
+	while (symnum != STN_UNDEF) {
+		/*
+		 * Now check if this symbol is the one we are intested in. We
+		 * just call back to the normal finder function here.
+		 */
+		if (find_symbol_in_section(syms, owner, symnum, fsa))
+			return true;
+
+		/*
+		 * After the first try, we are going to look into the
+		 * chain array, so we must be sure that the symnum does
+		 * not cross the boundary.
+		 */
+		if (symnum >= nchain)
+			return false;
+
+		symnum = chains[symnum];
+	}
+
+	return false;
+}
+
+/**
+ * hash_find_symbol - find symbol from symbol tables
+ * @fsa: pointer to find arguments
+ *
+ * This function is similar than each_symbol() but instead of calling given
+ * function for every symbol, it just calls hash_find_symbol_in_section() for
+ * each symbol table.
+ *
+ * If symbol is not found using hash tables, caller can still use normal methods
+ * (each_symbol()) to perform linear search.
+ *
+ * Returns %true as soon as symbol is found or %false otherwise.
+ */
+static bool hash_find_symbol(struct find_symbol_arg *fsa)
+{
+	struct module *mod;
+	int i;
+
+	const struct symsearch arr[] = {
+		{ __start___ksymtab, __stop___ksymtab,
+		  __start___kcrctab,
+		  NOT_GPL_ONLY, false,
+		  __start___ksymtab_htable },
+		{ __start___ksymtab_gpl, __stop___ksymtab_gpl,
+		  __start___kcrctab_gpl,
+		  GPL_ONLY, false,
+		  __start___ksymtab_gpl_htable },
+		{ __start___ksymtab_gpl_future, __stop___ksymtab_gpl_future,
+		  __start___kcrctab_gpl_future,
+		  WILL_BE_GPL_ONLY, false,
+		  __start___ksymtab_gpl_future_htable },
+	};
+
+	for (i = 0; i < ARRAY_SIZE(arr); i++) {
+		if (hash_find_symbol_in_section(&arr[i], NULL, fsa))
+			return true;
+	}
+
+	list_for_each_entry_rcu(mod, &modules, list) {
+		const struct symsearch arr[] = {
+			{ mod->syms, mod->syms + mod->num_syms, mod->crcs,
+			  NOT_GPL_ONLY, false,
+			  mod->syms_htable },
+			{ mod->gpl_syms, mod->gpl_syms + mod->num_gpl_syms,
+			  mod->gpl_crcs,
+			  GPL_ONLY, false,
+			  mod->gpl_syms_htable },
+			{ mod->gpl_future_syms,
+			  mod->gpl_future_syms + mod->num_gpl_future_syms,
+			  mod->gpl_future_crcs,
+			  WILL_BE_GPL_ONLY, false,
+			  mod->gpl_future_syms_htable },
+		};
+
+		for (i = 0; i < ARRAY_SIZE(arr); i++) {
+			if (hash_find_symbol_in_section(&arr[i], mod, fsa))
+				return true;
+		}
+	}
+
+	return false;
+}
+#else
+static inline bool hash_find_symbol(struct find_symbol_arg *fsa)
+{
+	return false;
+}
+#endif /* CONFIG_MODULE_ELF_HASH */
+
 /* Find a symbol and return it, along with, (optional) crc and
  * (optional) module which owns it */
 const struct kernel_symbol *find_symbol(const char *name,
@@ -342,7 +525,8 @@ const struct kernel_symbol *find_symbol(const char *name,
 	fsa.gplok = gplok;
 	fsa.warn = warn;
 
-	if (each_symbol(find_symbol_in_section, &fsa)) {
+	if (hash_find_symbol(&fsa) ||
+	    each_symbol(find_symbol_in_section, &fsa)) {
 		if (owner)
 			*owner = fsa.owner;
 		if (crc)
@@ -2124,6 +2308,11 @@ static noinline struct module *load_module(void __user *umod,
 		goto free_hdr;
 	}
 
+	if (security_load_module(hdr, len)) {
+		err = -EFAULT;
+		goto free_hdr;
+	}
+
 	/* Sanity checks against insmoding binaries or wrong arch,
            weird elf version */
 	if (memcmp(hdr->e_ident, ELFMAG, SELFMAG) != 0
@@ -2375,6 +2564,14 @@ static noinline struct module *load_module(void __user *umod,
 	mod->gpl_future_crcs = section_addr(hdr, sechdrs, secstrings,
 					    "__kcrctab_gpl_future");
 
+#ifdef CONFIG_MODULE_ELF_HASH
+	mod->syms_htable = section_addr(hdr, sechdrs, secstrings,
+					"__ksymtab.htable");
+	mod->gpl_syms_htable = section_addr(hdr, sechdrs, secstrings,
+					    "__ksymtab_gpl.htable");
+	mod->gpl_future_syms_htable = section_addr(hdr, sechdrs, secstrings,
+						"__ksymtab_gpl_future.htable");
+#endif
 #ifdef CONFIG_UNUSED_SYMBOLS
 	mod->unused_syms = section_objs(hdr, sechdrs, secstrings,
 					"__ksymtab_unused",

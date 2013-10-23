@@ -312,7 +312,7 @@ static void tx_status(struct ieee80211_hw *hw, struct sk_buff *skb,
  * zd_mac_tx_failed - callback for failed frames
  * @dev: the mac80211 wireless device
  *
- * This function is called if a frame couldn't be succesfully be
+ * This function is called if a frame couldn't be successfully be
  * transferred. The first frame from the tx queue, will be selected and
  * reported as error to the upper layers.
  */
@@ -717,7 +717,7 @@ int zd_mac_rx(struct ieee80211_hw *hw, const u8 *buffer, unsigned int length)
 }
 
 static int zd_op_add_interface(struct ieee80211_hw *hw,
-				struct ieee80211_if_init_conf *conf)
+				struct ieee80211_vif *vif)
 {
 	struct zd_mac *mac = zd_hw_mac(hw);
 
@@ -725,22 +725,22 @@ static int zd_op_add_interface(struct ieee80211_hw *hw,
 	if (mac->type != NL80211_IFTYPE_UNSPECIFIED)
 		return -EOPNOTSUPP;
 
-	switch (conf->type) {
+	switch (vif->type) {
 	case NL80211_IFTYPE_MONITOR:
 	case NL80211_IFTYPE_MESH_POINT:
 	case NL80211_IFTYPE_STATION:
 	case NL80211_IFTYPE_ADHOC:
-		mac->type = conf->type;
+		mac->type = vif->type;
 		break;
 	default:
 		return -EOPNOTSUPP;
 	}
 
-	return zd_write_mac_addr(&mac->chip, conf->mac_addr);
+	return zd_write_mac_addr(&mac->chip, vif->addr);
 }
 
 static void zd_op_remove_interface(struct ieee80211_hw *hw,
-				    struct ieee80211_if_init_conf *conf)
+				    struct ieee80211_vif *vif)
 {
 	struct zd_mac *mac = zd_hw_mac(hw);
 	mac->type = NL80211_IFTYPE_UNSPECIFIED;

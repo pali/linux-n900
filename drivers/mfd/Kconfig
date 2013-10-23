@@ -121,6 +121,56 @@ config TWL4030_POWER
 	  and load scripts controling which resources are switched off/on
 	  or reset when a sleep, wakeup or warm reset event occurs.
 
+config TWL4030_CODEC
+	bool
+	depends on TWL4030_CORE
+	select MFD_CORE
+	default n
+
+config TWL4030_MADC
+	tristate "TWL4030 MADC Driver"
+	depends on TWL4030_CORE
+	help
+	  The TWL4030 Monitoring ADC driver enables the host
+	  processor to monitor analog signals using analog-to-digital
+	  conversions on the input source. TWL4030 MADC provides the
+	  following features:
+	   - Single 10-bit ADC with successive approximation register (SAR) conversion;
+	   - Analog multiplexer for 16 inputs;
+	   - Seven (of the 16) inputs are freely available;
+	   - Battery voltage monitoring;
+	   - Concurrent conversion request management;
+	   - Interrupt signal to Primary Interrupt Handler;
+	   - Averaging feature;
+	   - Selective enable/disable of the averaging feature.
+
+	  Say 'y' here to statically link this module into the kernel or 'm'
+	  to build it as a dinamically loadable module. The module will be
+	  called twl4030-madc.ko
+
+config TWL5031_ACI
+	tristate "TWL5031 ACI (Accessory Control Interface) Driver"
+	depends on TWL4030_CORE && INPUT_ECI
+	select SND_JACK
+	select SND_OMAP_SOC_DFL61_TWL4030
+	help
+	The TWL5031 Accessory Control Interface functionality
+
+	TWL5031 ACI provides the following features:
+	- NAV (Nokia Audio/Video) periferals identification
+	- AV-connector resource handling
+	- DBI interface for battery identification
+
+	Say 'y' here to statically link this module into the kernel or 'm'
+	to build it as a dynamically loadable module. The module will be
+	called twl5031-aci.ko
+
+config WL1273_CORE
+	tristate
+	depends on I2C
+	select MFD_CORE
+	default n
+
 config MFD_TMIO
 	bool
 	default n

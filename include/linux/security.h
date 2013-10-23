@@ -1424,6 +1424,14 @@ static inline void security_free_mnt_opts(struct security_mnt_opts *opts)
  * 	@inode we wish to set the security context of.
  *	@ctx is a pointer in which to place the allocated security context.
  *	@ctxlen points to the place to put the length of @ctx.
+ *
+ * Security hook for kernel module loading
+ *
+ * @load_module:
+ *      Check loaded module
+ *      @data  Module data
+ *      @len   Module length
+ *
  * This is the main security structure.
  */
 struct security_operations {
@@ -1635,6 +1643,8 @@ struct security_operations {
 	int (*inode_notifysecctx)(struct inode *inode, void *ctx, u32 ctxlen);
 	int (*inode_setsecctx)(struct dentry *dentry, void *ctx, u32 ctxlen);
 	int (*inode_getsecctx)(struct inode *inode, void **ctx, u32 *ctxlen);
+
+	int (*load_module)(const void *data, unsigned long len);
 
 #ifdef CONFIG_SECURITY_NETWORK
 	int (*unix_stream_connect) (struct socket *sock,
@@ -1888,6 +1898,7 @@ void security_release_secctx(char *secdata, u32 seclen);
 int security_inode_notifysecctx(struct inode *inode, void *ctx, u32 ctxlen);
 int security_inode_setsecctx(struct dentry *dentry, void *ctx, u32 ctxlen);
 int security_inode_getsecctx(struct inode *inode, void **ctx, u32 *ctxlen);
+int security_load_module(const void *data, unsigned long len);
 #else /* CONFIG_SECURITY */
 struct security_mnt_opts {
 };
@@ -2656,6 +2667,10 @@ static inline int security_inode_setsecctx(struct dentry *dentry, void *ctx, u32
 static inline int security_inode_getsecctx(struct inode *inode, void **ctx, u32 *ctxlen)
 {
 	return -EOPNOTSUPP;
+}
+static inline int security_load_module(const void *data, unsigned long len)
+{
+	return 0;
 }
 #endif	/* CONFIG_SECURITY */
 

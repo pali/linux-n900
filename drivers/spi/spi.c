@@ -663,6 +663,33 @@ int spi_setup(struct spi_device *spi)
 }
 EXPORT_SYMBOL_GPL(spi_setup);
 
+static int spi_check_limitations(struct spi_device *spi,
+				struct spi_message *message)
+{
+	struct spi_master *master = spi->master;
+
+	/* Half-duplex links include original MicroWire, and ones with
+	 * only one data pin like SPI_3WIRE (switches direction) or where
+	 * either MOSI or MISO is missing.  They can also be caused by
+	 * software limitations.
+	 */
+	if ((master->flags & SPI_MASTER_HALF_DUPLEX)
+			|| (spi->mode & SPI_3WIRE)) {
+		struct spi_transfer *xfer;
+		unsigned flags = master->flags;
+
+		list_for_each_entry(xfer, &message->transfers, transfer_list) {
+			if (xfer->rx_buf && xfer->tx_buf)
+				return -EINVAL;
+			if ((flags & SPI_MASTER_NO_TX) && xfer->tx_buf)
+				return -EINVAL;
+			if ((flags & SPI_MASTER_NO_RX) && xfer->rx_buf)
+				return -EINVAL;
+		}
+	}
+	return 0;
+}
+
 /**
  * spi_async - asynchronous SPI transfer
  * @spi: device with which data will be exchanged
@@ -695,26 +722,11 @@ EXPORT_SYMBOL_GPL(spi_setup);
 int spi_async(struct spi_device *spi, struct spi_message *message)
 {
 	struct spi_master *master = spi->master;
+	int status;
 
-	/* Half-duplex links include original MicroWire, and ones with
-	 * only one data pin like SPI_3WIRE (switches direction) or where
-	 * either MOSI or MISO is missing.  They can also be caused by
-	 * software limitations.
-	 */
-	if ((master->flags & SPI_MASTER_HALF_DUPLEX)
-			|| (spi->mode & SPI_3WIRE)) {
-		struct spi_transfer *xfer;
-		unsigned flags = master->flags;
-
-		list_for_each_entry(xfer, &message->transfers, transfer_list) {
-			if (xfer->rx_buf && xfer->tx_buf)
-				return -EINVAL;
-			if ((flags & SPI_MASTER_NO_TX) && xfer->tx_buf)
-				return -EINVAL;
-			if ((flags & SPI_MASTER_NO_RX) && xfer->rx_buf)
-				return -EINVAL;
-		}
-	}
+	status = spi_check_limitations(spi, message);
+	if (status < 0)
+		return status;
 
 	message->spi = spi;
 	message->status = -EINPROGRESS;
@@ -760,15 +772,24 @@ int spi_sync(struct spi_device *spi, struct spi_message *message)
 {
 	DECLARE_COMPLETION_ONSTACK(done);
 	int status;
+	struct spi_master *master = spi->master;
 
-	message->complete = spi_complete;
-	message->context = &done;
-	status = spi_async(spi, message);
-	if (status == 0) {
-		wait_for_completion(&done);
-		status = message->status;
+	if (master->transfer_sync) {
+		status = spi_check_limitations(spi, message);
+		if (status < 0)
+			return status;
+		message->spi = spi;
+		status = master->transfer_sync(spi, message);
+	} else {
+		message->complete = spi_complete;
+		message->context = &done;
+		status = spi_async(spi, message);
+		if (status == 0) {
+			wait_for_completion(&done);
+			status = message->status;
+		}
+		message->context = NULL;
 	}
-	message->context = NULL;
 	return status;
 }
 EXPORT_SYMBOL_GPL(spi_sync);

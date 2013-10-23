@@ -98,7 +98,9 @@ void blk_set_default_limits(struct queue_limits *lim)
 	lim->max_sectors = BLK_DEF_MAX_SECTORS;
 	lim->max_hw_sectors = INT_MAX;
 	lim->max_discard_sectors = SAFE_MAX_SECTORS;
+	lim->align_mask = 0;
 	lim->logical_block_size = lim->physical_block_size = lim->io_min = 512;
+	lim->discard_zeroes_data = -1;
 	lim->bounce_pfn = (unsigned long)(BLK_BOUNCE_ANY >> PAGE_SHIFT);
 	lim->alignment_offset = 0;
 	lim->io_opt = 0;
@@ -251,6 +253,18 @@ void blk_queue_max_discard_sectors(struct request_queue *q,
 	q->limits.max_discard_sectors = max_discard_sectors;
 }
 EXPORT_SYMBOL(blk_queue_max_discard_sectors);
+
+/**
+ * blk_queue_align_mask - set align_mask
+ * @q:  the request queue for the device
+ * @align_mask: align_mask
+ **/
+void blk_queue_align_mask(struct request_queue *q, unsigned int align_mask)
+{
+	if (is_power_of_2(align_mask + 1))
+		q->limits.align_mask = align_mask;
+}
+EXPORT_SYMBOL(blk_queue_align_mask);
 
 /**
  * blk_queue_max_phys_segments - set max phys segments for a request for this queue
@@ -553,6 +567,7 @@ int blk_stack_limits(struct queue_limits *t, struct queue_limits *b,
 	t->io_opt = lcm(t->io_opt, b->io_opt);
 
 	t->cluster &= b->cluster;
+	t->discard_zeroes_data &= b->discard_zeroes_data;
 
 	/* Physical block size a multiple of the logical block size? */
 	if (t->physical_block_size & (t->logical_block_size - 1)) {
@@ -588,6 +603,9 @@ int blk_stack_limits(struct queue_limits *t, struct queue_limits *b,
 	/* Discard */
 	t->max_discard_sectors = min_not_zero(t->max_discard_sectors,
 					      b->max_discard_sectors);
+
+	/* Align mask */
+	t->align_mask = min_not_zero(t->align_mask, b->align_mask);
 
 	return ret;
 }

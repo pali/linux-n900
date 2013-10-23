@@ -17,6 +17,56 @@
 #include "sdio_ops.h"
 
 /**
+ *	sdio_release_power - allow to release power of a certain SDIO function
+ *	@func: SDIO function that is accessed
+ *
+ *	Indicate to the core SDIO layer that we're not requiring that the
+ *	function remain powered.  If all functions for the card are in the
+ *	same "no power" state, then the host controller can remove power from
+ *	the card.  Note: the function driver must preserve hardware states if
+ *	necessary.
+ */
+int sdio_release_power(struct sdio_func *func)
+{
+	int ret = 0;
+	BUG_ON(!func);
+	BUG_ON(!func->card);
+
+	if (atomic_dec_and_test(&func->card->power_claims))
+		ret = mmc_release_power(func->card->host);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(sdio_release_power);
+
+/*
+ *	sdio_claim_power - request power for a certain SDIO function
+ *	@func: SDIO function that is accessed
+ *
+ *	Indicate to the core SDIO layer that we want power back for this
+ *	SDIO function.  The power may or may not actually have been removed
+ *	since last call to sdio_release_power(), so the function driver must
+ *	not assume any preserved state at the hardware level and re-perform
+ *	all the necessary hardware config.  This function returns 0 when
+ *	power is actually restored, or some error code if this cannot be
+ *	achieved.  One error reason might be that the card is no longer
+ *	available on the bus (was removed while powered down and card
+ *	detection didn't trigger yet).
+ */
+int sdio_claim_power(struct sdio_func *func)
+{
+	int ret = 0;
+	BUG_ON(!func);
+	BUG_ON(!func->card);
+
+	if (atomic_inc_return(&func->card->power_claims) == 1)
+		ret = mmc_claim_power(func->card->host);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(sdio_claim_power);
+
+/**
  *	sdio_claim_host - exclusively claim a bus for a certain SDIO function
  *	@func: SDIO function that will be accessed
  *
@@ -189,7 +239,12 @@ static inline unsigned int sdio_max_byte_size(struct sdio_func *func)
 {
 	unsigned mval =	min(func->card->host->max_seg_size,
 			    func->card->host->max_blk_size);
-	mval = min(mval, func->max_blksize);
+
+	if (mmc_blksz_for_byte_mode(func->card))
+		mval = min(mval, func->cur_blksize);
+	else
+		mval = min(mval, func->max_blksize);
+
 	return min(mval, 512u); /* maximum size for byte mode */
 }
 
@@ -399,6 +454,36 @@ void sdio_writeb(struct sdio_func *func, u8 b, unsigned int addr, int *err_ret)
 		*err_ret = ret;
 }
 EXPORT_SYMBOL_GPL(sdio_writeb);
+
+/**
+ *	sdio_writeb_readb - write and read a byte from SDIO function
+ *	@func: SDIO function to access
+ *	@write_byte: byte to write
+ *	@addr: address to write to
+ *	@err_ret: optional status value from transfer
+ *
+ *	Performs a RAW (Read after Write) operation as defined by SDIO spec -
+ *	single byte is written to address space of a given SDIO function and
+ *	response is read back from the same address, both using single request.
+ *	If there is a problem with the operation, 0xff is returned and
+ *	@err_ret will contain the error code.
+ */
+u8 sdio_writeb_readb(struct sdio_func *func, u8 write_byte,
+	unsigned int addr, int *err_ret)
+{
+	int ret;
+	u8 val;
+
+	ret = mmc_io_rw_direct(func->card, 1, func->num, addr,
+			write_byte, &val);
+	if (err_ret)
+		*err_ret = ret;
+	if (ret)
+		val = 0xff;
+
+	return val;
+}
+EXPORT_SYMBOL_GPL(sdio_writeb_readb);
 
 /**
  *	sdio_memcpy_fromio - read a chunk of memory from a SDIO function
@@ -635,3 +720,52 @@ void sdio_f0_writeb(struct sdio_func *func, unsigned char b, unsigned int addr,
 		*err_ret = ret;
 }
 EXPORT_SYMBOL_GPL(sdio_f0_writeb);
+
+/**
+ *	sdio_get_host_pm_caps - get host power management capabilities
+ *	@func: SDIO function attached to host
+ *
+ *	Returns a capability bitmask corresponding to power management
+ *	features supported by the host controller that the card function
+ *	might rely upon during a system suspend.  The host doesn't need
+ *	to be claimed, nor the function active, for this information to be
+ *	obtained.
+ */
+mmc_pm_flag_t sdio_get_host_pm_caps(struct sdio_func *func)
+{
+	BUG_ON(!func);
+	BUG_ON(!func->card);
+
+	return func->card->host->pm_caps;
+}
+EXPORT_SYMBOL_GPL(sdio_get_host_pm_caps);
+
+/**
+ *	sdio_set_host_pm_flags - set wanted host power management capabilities
+ *	@func: SDIO function attached to host
+ *
+ *	Set a capability bitmask corresponding to wanted host controller
+ *	power management features for the upcoming suspend state.
+ *	This must be called, if needed, each time the suspend method of
+ *	the function driver is called, and must contain only bits that
+ *	were returned by sdio_get_host_pm_caps().
+ *	The host doesn't need to be claimed, nor the function active,
+ *	for this information to be set.
+ */
+int sdio_set_host_pm_flags(struct sdio_func *func, mmc_pm_flag_t flags)
+{
+	struct mmc_host *host;
+
+	BUG_ON(!func);
+	BUG_ON(!func->card);
+
+	host = func->card->host;
+
+	if (flags & ~host->pm_caps)
+		return -EINVAL;
+
+	/* function suspend methods are serialized, hence no lock needed */
+	host->pm_flags |= flags;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(sdio_set_host_pm_flags);

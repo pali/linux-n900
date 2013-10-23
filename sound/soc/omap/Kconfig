@@ -99,3 +99,31 @@ config SND_OMAP_SOC_ZOOM2
 	help
 	  Say Y if you want to add support for Soc audio on Zoom2 board.
 
+config SND_OMAP_SOC_DFL61_TWL4030
+	tristate "SoC Audio support for Nokia DFL61 devices (TWL5031 path)"
+	depends on SND_OMAP_SOC && (MACH_NOKIA_RX71 || MACH_NOKIA_RM680 || MACH_NOKIA_RM696)
+	select SND_OMAP_SOC_MCBSP
+	select SND_SOC_TWL4030
+	help
+	  Say Y if you want to add support for SoC audio for TWL4030 on
+	  Nokia DFL61 (Device Family Linux 61).
+
+config SND_OMAP_SOC_DFL61_WL1273
+	tristate "SoC Audio support for Nokia DFL61 devices (WL1273 path, FM/BT)"
+	depends on SND_OMAP_SOC && (MACH_NOKIA_RX71 || MACH_NOKIA_RM680 || MACH_NOKIA_RM696) && I2C
+
+	select SND_OMAP_SOC_MCBSP
+	select SND_SOC_WL1273
+	help
+	  Say Y if you want to add support for SoC audio for WL1273 FM radio
+	  and Bluetooth on Nokia DFL61 (Device Family Linux 61).
+
+config SND_OMAP_SOC_DFL61_TLV320DAC33
+	tristate "SoC Audio support for Nokia DFL61 devices (TLV320DAC33 path)"
+	depends on SND_OMAP_SOC && (MACH_NOKIA_RX71 || MACH_NOKIA_RM680 || MACH_NOKIA_RM696)
+	select SND_OMAP_SOC_MCBSP
+	select SND_SOC_TLV320DAC33
+	select SND_SOC_TPA6130A2
+	help
+	  Say Y if you want to add support for SoC audio for TLV320DAC33 on
+	  Nokia DFL61 (Device Family Linux 61).

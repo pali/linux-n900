@@ -338,8 +338,7 @@ struct i2c_adapter {
 	void *algo_data;
 
 	/* data fields that are valid for all devices	*/
-	u8 level; 			/* nesting level for lockdep */
-	struct mutex bus_lock;
+	struct rt_mutex bus_lock;
 
 	int timeout;			/* in jiffies */
 	int retries;
@@ -367,7 +366,7 @@ static inline void i2c_set_adapdata(struct i2c_adapter *dev, void *data)
  */
 static inline void i2c_lock_adapter(struct i2c_adapter *adapter)
 {
-	mutex_lock(&adapter->bus_lock);
+	rt_mutex_lock(&adapter->bus_lock);
 }
 
 /**
@@ -376,7 +375,7 @@ static inline void i2c_lock_adapter(struct i2c_adapter *adapter)
  */
 static inline void i2c_unlock_adapter(struct i2c_adapter *adapter)
 {
-	mutex_unlock(&adapter->bus_lock);
+	rt_mutex_unlock(&adapter->bus_lock);
 }
 
 /*flags for the client struct: */
@@ -509,6 +508,7 @@ struct i2c_msg {
 #define I2C_M_IGNORE_NAK	0x1000	/* if I2C_FUNC_PROTOCOL_MANGLING */
 #define I2C_M_NO_RD_ACK		0x0800	/* if I2C_FUNC_PROTOCOL_MANGLING */
 #define I2C_M_RECV_LEN		0x0400	/* length will be first received byte */
+#define I2C_M_IGNORE_TIMEOUT	0x0200	/* Use with known timeout cases */
 	__u16 len;		/* msg length				*/
 	__u8 *buf;		/* pointer to msg data			*/
 };

@@ -23,11 +23,28 @@
 /*
  * This file implements functions needed to recover from unclean un-mounts.
  * When UBIFS is mounted, it checks a flag on the master node to determine if
- * an un-mount was completed sucessfully. If not, the process of mounting
- * incorparates additional checking and fixing of on-flash data structures.
+ * an un-mount was completed successfully. If not, the process of mounting
+ * incorporates additional checking and fixing of on-flash data structures.
  * UBIFS always cleans away all remnants of an unclean un-mount, so that
  * errors do not accumulate. However UBIFS defers recovery if it is mounted
  * read-only, and the flash is not modified in that case.
+ *
+ * The general UBIFS approach to the recovery is that it recovers from
+ * corruptions which could be caused by power cuts, but it refuses to recover
+ * from corruption caused by other reasons. And UBIFS tries to distinguish
+ * between these 2 reasons of corruptions and silently recover in the former
+ * case and loudly complain in the latter case.
+ *
+ * UBIFS writes only to erased LEBs, so it writes only to the flash space
+ * containing only 0xFFs. UBIFS also always writes strictly from the beginning
+ * of the LEB to the end. And UBIFS assumes that the underlying flash media
+ * writes in @c->max_write_size bytes at a time.
+ *
+ * Hence, if UBIFS finds a corrupted node at offset X, it expects only the min.
+ * I/O unit corresponding to offset X to contain corrupted data, all the
+ * following min. I/O units have to contain empty space (all 0xFFs). If this is
+ * not true, the corruption cannot be the result of a power cut, and UBIFS
+ * refuses to mount.
  */
 
 #include <linux/crc32.h>
@@ -291,7 +308,7 @@ int ubifs_recover_master_node(struct ubifs_info *c)
 
 	memcpy(c->mst_node, mst, UBIFS_MST_NODE_SZ);
 
-	if ((c->vfs_sb->s_flags & MS_RDONLY)) {
+	if (c->ro_mount) {
 		/* Read-only mode. Keep a copy for switching to rw mode */
 		c->rcvrd_mst_node = kmalloc(sz, GFP_KERNEL);
 		if (!c->rcvrd_mst_node) {
@@ -361,8 +378,9 @@ int ubifs_write_rcvrd_mst_node(struct ubifs_info *c)
  * @offs: offset to check
  *
  * This function returns %1 if @offs was in the last write to the LEB whose data
- * is in @buf, otherwise %0 is returned.  The determination is made by checking
- * for subsequent empty space starting from the next @c->min_io_size boundary.
+ * is in @buf, otherwise %0 is returned. The determination is made by checking
+ * for subsequent empty space starting from the next @c->max_write_size
+ * boundary.
  */
 static int is_last_write(const struct ubifs_info *c, void *buf, int offs)
 {
@@ -370,10 +388,10 @@ static int is_last_write(const struct ubifs_info *c, void *buf, int offs)
 	uint8_t *p;
 
 	/*
-	 * Round up to the next @c->min_io_size boundary i.e. @offs is in the
-	 * last wbuf written. After that should be empty space.
+	 * Round up to the next @c->max_write_size boundary i.e. @offs is in
+	 * the last wbuf written. After that should be empty space.
 	 */
-	empty_offs = ALIGN(offs + 1, c->min_io_size);
+	empty_offs = ALIGN(offs + 1, c->max_write_size);
 	check_len = c->leb_size - empty_offs;
 	p = buf + empty_offs - offs;
 	return is_empty(p, check_len);
@@ -428,7 +446,7 @@ static int no_more_nodes(const struct ubifs_info *c, void *buf, int len,
 	int skip, dlen = le32_to_cpu(ch->len);
 
 	/* Check for empty space after the corrupt node's common header */
-	skip = ALIGN(offs + UBIFS_CH_SZ, c->min_io_size) - offs;
+	skip = ALIGN(offs + UBIFS_CH_SZ, c->max_write_size) - offs;
 	if (is_empty(buf + skip, len - skip))
 		return 1;
 	/*
@@ -440,7 +458,7 @@ static int no_more_nodes(const struct ubifs_info *c, void *buf, int len,
 		return 0;
 	}
 	/* Now we know the corrupt node's length we can skip over it */
-	skip = ALIGN(offs + dlen, c->min_io_size) - offs;
+	skip = ALIGN(offs + dlen, c->max_write_size) - offs;
 	/* After which there should be empty space */
 	if (is_empty(buf + skip, len - skip))
 		return 1;
@@ -468,7 +486,7 @@ static int fix_unclean_leb(struct ubifs_info *c, struct ubifs_scan_leb *sleb,
 		endpt = snod->offs + snod->len;
 	}
 
-	if ((c->vfs_sb->s_flags & MS_RDONLY) && !c->remounting_rw) {
+	if (c->ro_mount && !c->remounting_rw) {
 		/* Add to recovery list */
 		struct ubifs_unclean_leb *ucleb;
 
@@ -670,10 +688,14 @@ struct ubifs_scan_leb *ubifs_recover_leb(struct ubifs_info *c, int lnum,
 		} else {
 			int corruption = first_non_ff(buf, len);
 
+			/*
+			 * See header comment for this file for more
+			 * explanations about the reasons we have this check.
+			 */
 			ubifs_err("corrupt empty space LEB %d:%d, corruption "
 				  "starts at %d", lnum, offs, corruption);
 			/* Make sure we dump interesting non-0xFF data */
-			offs = corruption;
+			offs += corruption;
 			buf += corruption;
 			goto corrupted;
 		}
@@ -771,7 +793,8 @@ out_free:
  * @sbuf: LEB-sized buffer to use
  *
  * This function does a scan of a LEB, but caters for errors that might have
- * been caused by the unclean unmount from which we are attempting to recover.
+ * been caused by unclean reboots from which we are attempting to recover
+ * (assume that only the last log LEB can be corrupted by an unclean reboot).
  *
  * This function returns %0 on success and a negative error code on failure.
  */
@@ -834,12 +857,8 @@ struct ubifs_scan_leb *ubifs_recover_log_leb(struct ubifs_info *c, int lnum,
 static int recover_head(const struct ubifs_info *c, int lnum, int offs,
 			void *sbuf)
 {
-	int len, err;
+	int len = c->max_write_size, err;
 
-	if (c->min_io_size > 1)
-		len = c->min_io_size;
-	else
-		len = 512;
 	if (offs + len > c->leb_size)
 		len = c->leb_size - offs;
 
@@ -882,7 +901,7 @@ int ubifs_recover_inl_heads(const struct ubifs_info *c, void *sbuf)
 {
 	int err;
 
-	ubifs_assert(!(c->vfs_sb->s_flags & MS_RDONLY) || c->remounting_rw);
+	ubifs_assert(!c->ro_mount || c->remounting_rw);
 
 	dbg_rcvry("checking index head at %d:%d", c->ihead_lnum, c->ihead_offs);
 	err = recover_head(c, c->ihead_lnum, c->ihead_offs, sbuf);
@@ -1062,8 +1081,21 @@ int ubifs_rcvry_gc_commit(struct ubifs_info *c)
 	}
 	err = ubifs_find_dirty_leb(c, &lp, wbuf->offs, 2);
 	if (err) {
-		if (err == -ENOSPC)
-			dbg_err("could not find a dirty LEB");
+		/*
+		 * There are no dirty or empty LEBs subject to here being
+		 * enough for the index. Try to use
+		 * 'ubifs_find_free_leb_for_idx()', which will return any empty
+		 * LEBs (ignoring index requirements). If the index then
+		 * doesn't have enough LEBs the recovery commit will fail -
+		 * which is the  same result anyway i.e. recovery fails. So
+		 * there is no problem ignoring index  requirements and just
+		 * grabbing a free LEB since we have already established there
+		 * is not a dirty LEB we could have used instead.
+		 */
+		if (err == -ENOSPC) {
+			dbg_rcvry("could not find a dirty LEB");
+			goto find_free;
+		}
 		return err;
 	}
 	ubifs_assert(!(lp.flags & LPROPS_INDEX));
@@ -1138,8 +1170,8 @@ int ubifs_rcvry_gc_commit(struct ubifs_info *c)
 find_free:
 	/*
 	 * There is no GC head LEB or the free space in the GC head LEB is too
-	 * small. Allocate gc_lnum by calling 'ubifs_find_free_leb_for_idx()' so
-	 * GC is not run.
+	 * small, or there are not dirty LEBs. Allocate gc_lnum by calling
+	 * 'ubifs_find_free_leb_for_idx()' so GC is not run.
 	 */
 	lnum = ubifs_find_free_leb_for_idx(c);
 	if (lnum < 0) {
@@ -1447,7 +1479,7 @@ int ubifs_recover_size(struct ubifs_info *c)
 			}
 		}
 		if (e->exists && e->i_size < e->d_size) {
-			if (!e->inode && (c->vfs_sb->s_flags & MS_RDONLY)) {
+			if (!e->inode && c->ro_mount) {
 				/* Fix the inode size and pin it in memory */
 				struct inode *inode;
 

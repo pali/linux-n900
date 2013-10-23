@@ -530,4 +530,40 @@ config TOUCHSCREEN_PCAP
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called pcap_ts.
+
+config TOUCHSCREEN_SYNTM12XX
+	tristate "Synaptic TM12xx touchscreen"
+	help
+	  Say Y here to enable support for Synaptic TM12xx
+          series touchscreen controller. This driver supports
+	  most series 2000 and 3000 touchscreen controllers.
+
+	  If unsure, say N.
+
+	  To compile this driver as module, choose M here: the
+	  module will be called syntm12xx
+
+config TOUCHSCREEN_ATMEL_MXT
+       tristate "Atmel mXT touchscreen"
+       depends on I2C
+       help
+         Say Y here to enable support for Atmel mXT touchscreen controller.
+
+	 If unsure, say N.
+
+	 To compile this driver as module, choose M here: the
+	 module will be called atmel_mxt
+
+config TOUCHSCREEN_ATMEL_MXT_DEBUGFS
+       bool "Atmel mXT debugfs support"
+       default y
+       depends on TOUCHSCREEN_ATMEL_MXT
+       select DEBUG_FS
+       help
+         Say Y here to enable debugfs support for Atmel mXT touchscreen driver
+	 With this option enabled interface for firmware objects
+	 and parameters is accessible through debugfs. As this is for debugging
+	 purposes, the interface will appear/disappear if you write 1/0 to
+	 'debug_fs' sysfs entry in the drivers sysfs directory.
+
 endif

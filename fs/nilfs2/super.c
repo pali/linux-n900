@@ -301,7 +301,7 @@ int nilfs_commit_super(struct nilfs_sb_info *sbi, int dupsb)
 		memcpy(sbp[1], sbp[0], nilfs->ns_sbsize);
 		nilfs->ns_sbwtime[1] = t;
 	}
-	sbi->s_super->s_dirt = 0;
+	sb_mark_clean(sbi->s_super);
 	return nilfs_sync_super(sbi, dupsb);
 }
 
@@ -345,7 +345,7 @@ static int nilfs_sync_fs(struct super_block *sb, int wait)
 		err = nilfs_construct_segment(sb);
 
 	down_write(&nilfs->ns_sem);
-	if (sb->s_dirt)
+	if (sb_is_dirty(sb))
 		nilfs_commit_super(sbi, 1);
 	up_write(&nilfs->ns_sem);
 

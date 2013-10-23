@@ -81,6 +81,7 @@
 /* circular buffer */
 struct gs_buf {
 	unsigned		buf_size;
+	unsigned		buf_full;
 	char			*buf_buf;
 	char			*buf_get;
 	char			*buf_put;
@@ -110,6 +111,7 @@ struct gs_port {
 	struct list_head	write_pool;
 	struct gs_buf		port_write_buf;
 	wait_queue_head_t	drain_wait;	/* wait while writes drain */
+	wait_queue_head_t	full_wait;	/* wait while buffer is full */
 
 	/* REVISIT this state ... */
 	struct usb_cdc_line_coding port_line_coding;	/* 8-N-1 etc */
@@ -124,6 +126,7 @@ static struct portmaster {
 static unsigned	n_ports;
 
 #define GS_CLOSE_TIMEOUT		15		/* seconds */
+#define GS_FULL_TIMEOUT			2		/* seconds */
 
 
 
@@ -151,6 +154,7 @@ static int gs_buf_alloc(struct gs_buf *gb, unsigned size)
 		return -ENOMEM;
 
 	gb->buf_size = size;
+	gb->buf_full = false;
 	gb->buf_put = gb->buf_buf;
 	gb->buf_get = gb->buf_buf;
 
@@ -166,6 +170,7 @@ static void gs_buf_free(struct gs_buf *gb)
 {
 	kfree(gb->buf_buf);
 	gb->buf_buf = NULL;
+	gb->buf_full = false;
 }
 
 /*
@@ -176,6 +181,7 @@ static void gs_buf_free(struct gs_buf *gb)
 static void gs_buf_clear(struct gs_buf *gb)
 {
 	gb->buf_get = gb->buf_put;
+	gb->buf_full = false;
 	/* equivalent to a get of all data available */
 }
 
@@ -187,6 +193,9 @@ static void gs_buf_clear(struct gs_buf *gb)
  */
 static unsigned gs_buf_data_avail(struct gs_buf *gb)
 {
+	if (gb->buf_full)
+		return gb->buf_size;
+
 	return (gb->buf_size + gb->buf_put - gb->buf_get) % gb->buf_size;
 }
 
@@ -198,7 +207,13 @@ static unsigned gs_buf_data_avail(struct gs_buf *gb)
  */
 static unsigned gs_buf_space_avail(struct gs_buf *gb)
 {
-	return (gb->buf_size + gb->buf_get - gb->buf_put - 1) % gb->buf_size;
+	if (gb->buf_full)
+		return 0;
+
+	if (gb->buf_get == gb->buf_put)
+		return gb->buf_size;
+
+	return (gb->buf_size + gb->buf_get - gb->buf_put) % gb->buf_size;
 }
 
 /*
@@ -215,8 +230,10 @@ gs_buf_put(struct gs_buf *gb, const char *buf, unsigned count)
 	unsigned len;
 
 	len  = gs_buf_space_avail(gb);
-	if (count > len)
+	if (count >= len) {
 		count = len;
+		gb->buf_full = true;
+	}
 
 	if (count == 0)
 		return 0;
@@ -269,6 +286,7 @@ gs_buf_get(struct gs_buf *gb, char *buf, unsigned count)
 		else /* count == len */
 			gb->buf_get = gb->buf_buf;
 	}
+	gb->buf_full = false;
 
 	return count;
 }
@@ -325,13 +343,10 @@ void gs_free_req(struct usb_ep *ep, struct usb_request *req)
 static unsigned
 gs_send_packet(struct gs_port *port, char *packet, unsigned size)
 {
-	unsigned len;
 
-	len = gs_buf_data_avail(&port->port_write_buf);
-	if (len < size)
-		size = len;
-	if (size != 0)
-		size = gs_buf_get(&port->port_write_buf, packet, size);
+	size = gs_buf_get(&port->port_write_buf, packet, size);
+	wake_up_interruptible(&port->full_wait);
+
 	return size;
 }
 
@@ -353,9 +368,14 @@ __acquires(&port->port_lock)
 */
 {
 	struct list_head	*pool = &port->write_pool;
-	struct usb_ep		*in = port->port_usb->in;
+	struct usb_ep		*in;
 	int			status = 0;
 	bool			do_tty_wake = false;
+
+	if (!port->port_usb)
+		return -ENODEV;
+
+	in = port->port_usb->in;
 
 	while (!list_empty(pool)) {
 		struct usb_request	*req;
@@ -415,8 +435,13 @@ __acquires(&port->port_lock)
 */
 {
 	struct list_head	*pool = &port->read_pool;
-	struct usb_ep		*out = port->port_usb->out;
+	struct usb_ep		*out;
 	unsigned		started = 0;
+
+	if (!port->port_usb)
+		return -ENODEV;
+
+	out = port->port_usb->out;
 
 	while (!list_empty(pool)) {
 		struct usb_request	*req;
@@ -556,7 +581,7 @@ recycle:
 			if (do_push)
 				tasklet_schedule(&port->push);
 			else
-				pr_warning(PREFIX "%d: RX not scheduled?\n",
+				pr_debug(PREFIX "%d: RX not scheduled?\n",
 					port->port_num);
 		}
 	}
@@ -879,7 +904,17 @@ static int gs_write(struct tty_struct *tty, const unsigned char *buf, int count)
 	pr_vdebug("gs_write: ttyGS%d (%p) writing %d bytes\n",
 			port->port_num, tty, count);
 
+	if (port->port_write_buf.buf_full)
+		wait_event_interruptible_timeout(port->full_wait,
+					!port->port_write_buf.buf_full,
+					GS_FULL_TIMEOUT * HZ);
+
 	spin_lock_irqsave(&port->port_lock, flags);
+	if (unlikely(port->port_write_buf.buf_buf == NULL)) {
+		spin_unlock_irqrestore(&port->port_lock, flags);
+		return 0;
+	}
+
 	if (count)
 		count = gs_buf_put(&port->port_write_buf, buf, count);
 	/* treat count == 0 as flush_chars() */
@@ -1016,6 +1051,7 @@ gs_port_alloc(unsigned port_num, struct usb_cdc_line_coding *coding)
 	spin_lock_init(&port->port_lock);
 	init_waitqueue_head(&port->close_wait);
 	init_waitqueue_head(&port->drain_wait);
+	init_waitqueue_head(&port->full_wait);
 
 	tasklet_init(&port->push, gs_rx_push, (unsigned long) port);
 
@@ -1316,5 +1352,6 @@ void gserial_disconnect(struct gserial *gser)
 	gs_free_requests(gser->out, &port->read_pool);
 	gs_free_requests(gser->out, &port->read_queue);
 	gs_free_requests(gser->in, &port->write_pool);
+	wake_up_interruptible(&port->full_wait);
 	spin_unlock_irqrestore(&port->port_lock, flags);
 }

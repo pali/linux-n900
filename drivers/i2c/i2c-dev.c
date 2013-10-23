@@ -103,6 +103,14 @@ static void return_i2c_dev(struct i2c_dev *i2c_dev)
 	kfree(i2c_dev);
 }
 
+static int i2cdev_access_restricted(struct i2c_client *client)
+{
+	/* require SYS_ADMIN and SYS_RAWIO capabilities for access */
+	if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SYS_RAWIO))
+		return -EPERM;
+	return 0;
+}
+
 static ssize_t show_adapter_name(struct device *dev,
 				 struct device_attribute *attr, char *buf)
 {
@@ -141,6 +149,9 @@ static ssize_t i2cdev_read (struct file *file, char __user *buf, size_t count,
 
 	struct i2c_client *client = (struct i2c_client *)file->private_data;
 
+	if (i2cdev_access_restricted(client))
+		return -EPERM;
+
 	if (count > 8192)
 		count = 8192;
 
@@ -164,6 +175,9 @@ static ssize_t i2cdev_write (struct file *file, const char __user *buf, size_t c
 	int ret;
 	char *tmp;
 	struct i2c_client *client = (struct i2c_client *)file->private_data;
+
+	if (i2cdev_access_restricted(client))
+		return -EPERM;
 
 	if (count > 8192)
 		count = 8192;
@@ -219,6 +233,9 @@ static noinline int i2cdev_ioctl_rdrw(struct i2c_client *client,
 	 * be sent at once */
 	if (rdwr_arg.nmsgs > I2C_RDRW_IOCTL_MAX_MSGS)
 		return -EINVAL;
+
+	if (i2cdev_access_restricted(client))
+		return -EPERM;
 
 	rdwr_pa = (struct i2c_msg *)
 		kmalloc(rdwr_arg.nmsgs * sizeof(struct i2c_msg),
@@ -317,6 +334,9 @@ static noinline int i2cdev_ioctl_smbus(struct i2c_client *client,
 			data_arg.read_write);
 		return -EINVAL;
 	}
+
+	if (i2cdev_access_restricted(client))
+		return -EPERM;
 
 	/* Note that command values are always valid! */
 

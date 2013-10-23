@@ -25,6 +25,14 @@
 #include <linux/kernel.h>
 #include <linux/utsname.h>
 
+
+#if defined USB_ETH_RNDIS
+#  undef USB_ETH_RNDIS
+#endif
+#ifdef CONFIG_USB_ETH_RNDIS
+#  define USB_ETH_RNDIS y
+#endif
+
 #include "u_ether.h"
 
 
@@ -66,7 +74,7 @@
 #define DRIVER_DESC		"Ethernet Gadget"
 #define DRIVER_VERSION		"Memorial Day 2008"
 
-#ifdef CONFIG_USB_ETH_RNDIS
+#ifdef USB_ETH_RNDIS
 #define PREFIX			"RNDIS/"
 #else
 #define PREFIX			""
@@ -87,7 +95,7 @@
 
 static inline bool has_rndis(void)
 {
-#ifdef	CONFIG_USB_ETH_RNDIS
+#ifdef	USB_ETH_RNDIS
 	return true;
 #else
 	return false;
@@ -110,7 +118,7 @@ static inline bool has_rndis(void)
 
 #include "f_ecm.c"
 #include "f_subset.c"
-#ifdef	CONFIG_USB_ETH_RNDIS
+#ifdef	USB_ETH_RNDIS
 #include "f_rndis.c"
 #include "rndis.c"
 #endif
@@ -177,7 +185,7 @@ static struct usb_device_descriptor device_desc = {
 	/* .bcdDevice = f(hardware) */
 	/* .iManufacturer = DYNAMIC */
 	/* .iProduct = DYNAMIC */
-	/* NO SERIAL NUMBER */
+	/* .iSerialNumber = DYNAMIC */
 	.bNumConfigurations =	1,
 };
 
@@ -201,12 +209,15 @@ static const struct usb_descriptor_header *otg_desc[] = {
 
 #define STRING_MANUFACTURER_IDX		0
 #define STRING_PRODUCT_IDX		1
+#define STRING_SERIALNUMBER_IDX		2
 
 static char manufacturer[50];
+static char serialnumber[13];
 
 static struct usb_string strings_dev[] = {
 	[STRING_MANUFACTURER_IDX].s = manufacturer,
 	[STRING_PRODUCT_IDX].s = PREFIX DRIVER_DESC,
+	[STRING_SERIALNUMBER_IDX].s = serialnumber,
 	{  } /* end of list */
 };
 
@@ -247,11 +258,12 @@ static struct usb_configuration rndis_config_driver = {
 	.bConfigurationValue	= 2,
 	/* .iConfiguration = DYNAMIC */
 	.bmAttributes		= USB_CONFIG_ATT_SELFPOWER,
+	.bMaxPower		= 250, /* 500mA */
 };
 
 /*-------------------------------------------------------------------------*/
 
-#ifdef CONFIG_USB_ETH_EEM
+#ifdef USB_ETH_EEM
 static int use_eem = 1;
 #else
 static int use_eem;
@@ -285,6 +297,7 @@ static struct usb_configuration eth_config_driver = {
 	.bConfigurationValue	= 1,
 	/* .iConfiguration = DYNAMIC */
 	.bmAttributes		= USB_CONFIG_ATT_SELFPOWER,
+	.bMaxPower		= 250, /* 500mA */
 };
 
 /*-------------------------------------------------------------------------*/
@@ -294,6 +307,7 @@ static int __init eth_bind(struct usb_composite_dev *cdev)
 	int			gcnum;
 	struct usb_gadget	*gadget = cdev->gadget;
 	int			status;
+	int			i;
 
 	/* set up network link layer */
 	status = gether_setup(cdev->gadget, hostaddr);
@@ -362,6 +376,20 @@ static int __init eth_bind(struct usb_composite_dev *cdev)
 		goto fail;
 	strings_dev[STRING_PRODUCT_IDX].id = status;
 	device_desc.iProduct = status;
+
+	for (i = 0; i < sizeof serialnumber - 2; i += 2) {
+		unsigned char		c = DRIVER_VERSION[i / 2];
+
+		if (!c)
+			break;
+		sprintf(&serialnumber[i], "%02X", c);
+	}
+
+	status = usb_string_id(cdev);
+	if (status < 0)
+		goto fail;
+	strings_dev[STRING_SERIALNUMBER_IDX].id = status;
+	device_desc.iSerialNumber = status;
 
 	/* register our configuration(s); RNDIS first, if it's used */
 	if (has_rndis()) {

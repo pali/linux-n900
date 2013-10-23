@@ -26,8 +26,11 @@
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/i2c.h>
+#include <linux/i2c-omap.h>
+
 #include <mach/irqs.h>
-#include <mach/mux.h>
+#include <plat/mux.h>
+#include <plat/omap-pm.h>
 
 #define OMAP_I2C_SIZE		0x3f
 #define OMAP1_I2C_BASE		0xfffb3800
@@ -69,14 +72,14 @@ static struct resource i2c_resources[][2] = {
 		},					\
 	}
 
-static u32 i2c_rate[ARRAY_SIZE(i2c_resources)];
+static struct omap_i2c_bus_platform_data i2c_pdata[ARRAY_SIZE(i2c_resources)];
 static struct platform_device omap_i2c_devices[] = {
-	I2C_DEV_BUILDER(1, i2c_resources[0], &i2c_rate[0]),
+	I2C_DEV_BUILDER(1, i2c_resources[0], &i2c_pdata[0]),
 #if	defined(CONFIG_ARCH_OMAP24XX) || defined(CONFIG_ARCH_OMAP34XX)
-	I2C_DEV_BUILDER(2, i2c_resources[1], &i2c_rate[1]),
+	I2C_DEV_BUILDER(2, i2c_resources[1], &i2c_pdata[1]),
 #endif
 #if	defined(CONFIG_ARCH_OMAP34XX)
-	I2C_DEV_BUILDER(3, i2c_resources[2], &i2c_rate[2]),
+	I2C_DEV_BUILDER(3, i2c_resources[2], &i2c_pdata[2]),
 #endif
 };
 
@@ -99,6 +102,31 @@ static const int omap34xx_pins[][2] = {};
 #endif
 
 #define OMAP_I2C_CMDLINE_SETUP	(BIT(31))
+
+#ifdef CONFIG_ARCH_OMAP34XX
+/*
+ * omap_i2c_set_wfc_mpu_wkup_lat - sets mpu wake up constraint
+ * @dev:	i2c bus device pointer
+ * @val:	latency constraint to set, -1 to disable constraint
+ *
+ * When waiting for completion of a i2c transfer, we need to set a wake up
+ * latency constraint for the MPU. This is to ensure quick enough wakeup from
+ * idle, when transfer completes.
+ */
+static void omap_i2c_set_wfc_mpu_wkup_lat(struct device *dev, int val)
+{
+	omap_pm_set_max_mpu_wakeup_lat(dev, val);
+}
+#endif
+
+static void __init omap_set_i2c_constraint_func(
+				struct omap_i2c_bus_platform_data *pd)
+{
+	if (cpu_is_omap34xx())
+		pd->set_mpu_wkup_lat = omap_i2c_set_wfc_mpu_wkup_lat;
+	else
+		pd->set_mpu_wkup_lat = NULL;
+}
 
 static void __init omap_i2c_mux_pins(int bus)
 {
@@ -180,8 +208,8 @@ static int __init omap_i2c_bus_setup(char *str)
 	get_options(str, 3, ints);
 	if (ints[0] < 2 || ints[1] < 1 || ints[1] > ports)
 		return 0;
-	i2c_rate[ints[1] - 1] = ints[2];
-	i2c_rate[ints[1] - 1] |= OMAP_I2C_CMDLINE_SETUP;
+	i2c_pdata[ints[1] - 1].clkrate = ints[2];
+	i2c_pdata[ints[1] - 1].clkrate |= OMAP_I2C_CMDLINE_SETUP;
 
 	return 1;
 }
@@ -195,9 +223,10 @@ static int __init omap_register_i2c_bus_cmdline(void)
 {
 	int i, err = 0;
 
-	for (i = 0; i < ARRAY_SIZE(i2c_rate); i++)
-		if (i2c_rate[i] & OMAP_I2C_CMDLINE_SETUP) {
-			i2c_rate[i] &= ~OMAP_I2C_CMDLINE_SETUP;
+	for (i = 0; i < ARRAY_SIZE(i2c_pdata); i++)
+		if (i2c_pdata[i].clkrate & OMAP_I2C_CMDLINE_SETUP) {
+			i2c_pdata[i].clkrate &= ~OMAP_I2C_CMDLINE_SETUP;
+			omap_set_i2c_constraint_func(&i2c_pdata[i]);
 			err = omap_i2c_add_bus(i + 1);
 			if (err)
 				goto out;
@@ -231,9 +260,11 @@ int __init omap_register_i2c_bus(int bus_id, u32 clkrate,
 			return err;
 	}
 
-	if (!i2c_rate[bus_id - 1])
-		i2c_rate[bus_id - 1] = clkrate;
-	i2c_rate[bus_id - 1] &= ~OMAP_I2C_CMDLINE_SETUP;
+	if (!i2c_pdata[bus_id - 1].clkrate)
+		i2c_pdata[bus_id - 1].clkrate = clkrate;
+
+	omap_set_i2c_constraint_func(&i2c_pdata[bus_id - 1]);
+	i2c_pdata[bus_id - 1].clkrate &= ~OMAP_I2C_CMDLINE_SETUP;
 
 	return omap_i2c_add_bus(bus_id);
 }

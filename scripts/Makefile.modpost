@@ -84,7 +84,7 @@ modpost = scripts/mod/modpost                    \
  $(if $(cross_build),-c)
 
 quiet_cmd_modpost = MODPOST $(words $(filter-out vmlinux FORCE, $^)) modules
-      cmd_modpost = $(modpost) -s
+      cmd_modpost = $(modpost) -s $(if $(CONFIG_MODULE_ELF_HASH),-H)
 
 PHONY += __modpost
 __modpost: $(modules:.ko=.o) FORCE
@@ -125,6 +125,21 @@ $(modules): %.ko :%.o %.mod.o FORCE
 
 targets += $(modules)
 
+ifdef CONFIG_MODULE_ELF_HASH
+# Use modpost -H to generate an ELF style hash table for each of the kernel
+# symbol table (except for the unused ones).  These data structures are included
+# in .tmp_vmlinux.mod.c file.  This will be compiled and linked with the final
+# vmlinux image and used by the kernel for symbol lookup.  Do not care of
+# warnings about section mismatch on .tmp_vmlinux the goal of modpost at this
+# stage is just to create the ELF hash table for the exported symbols.
+
+just_modpost = scripts/mod/modpost
+quiet_cmd_kernel-htable = HTABLE  $@
+      cmd_kernel-htable = $(just_modpost) -s -S -H $@
+
+.tmp_vmlinux: FORCE
+	$(call cmd,kernel-htable)
+endif
 
 # Add FORCE to the prequisites of a target to force it to be always rebuilt.
 # ---------------------------------------------------------------------------

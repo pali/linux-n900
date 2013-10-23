@@ -1275,7 +1275,6 @@ static int read_latency_timer(struct usb_serial_port *port)
 	unsigned short latency = 0;
 	int rv = 0;
 
-
 	dbg("%s", __func__);
 
 	rv = usb_control_msg(udev,
@@ -1288,8 +1287,9 @@ static int read_latency_timer(struct usb_serial_port *port)
 	if (rv < 0) {
 		dev_err(&port->dev, "Unable to read latency timer: %i\n", rv);
 		return -EIO;
-	}
-	return latency;
+	} else
+		priv->latency = latency;
+	return rv;
 }
 
 static int get_serial_info(struct usb_serial_port *port,
@@ -1643,8 +1643,7 @@ static int ftdi_sio_port_probe(struct usb_serial_port *port)
 	kref_init(&priv->kref);
 	spin_lock_init(&priv->tx_lock);
 	init_waitqueue_head(&priv->delta_msr_wait);
-	/* This will push the characters through immediately rather
-	   than queue a task to deliver them */
+
 	priv->flags = ASYNC_LOW_LATENCY;
 
 	if (quirk && quirk->port_probe)
@@ -1676,7 +1675,8 @@ static int ftdi_sio_port_probe(struct usb_serial_port *port)
 
 	ftdi_determine_type(port);
 	ftdi_set_max_packet_size(port);
-	read_latency_timer(port);
+	if (read_latency_timer(port) < 0)
+		priv->latency = 16;
 	create_sysfs_attrs(port);
 	return 0;
 }
@@ -1830,7 +1830,7 @@ static int ftdi_submit_read_urb(struct usb_serial_port *port, gfp_t mem_flags)
 			   urb->transfer_buffer_length,
 			   ftdi_read_bulk_callback, port);
 	result = usb_submit_urb(urb, mem_flags);
-	if (result)
+	if (result && result != -EPERM)
 		dev_err(&port->dev,
 			"%s - failed submitting read urb, error %d\n",
 							__func__, result);
@@ -2339,23 +2339,27 @@ static void ftdi_set_termios(struct tty_struct *tty,
 
 	/* Set number of data bits, parity, stop bits */
 
-	termios->c_cflag &= ~CMSPAR;
-
 	urb_value = 0;
 	urb_value |= (cflag & CSTOPB ? FTDI_SIO_SET_DATA_STOP_BITS_2 :
 		      FTDI_SIO_SET_DATA_STOP_BITS_1);
-	urb_value |= (cflag & PARENB ?
-		      (cflag & PARODD ? FTDI_SIO_SET_DATA_PARITY_ODD :
-		       FTDI_SIO_SET_DATA_PARITY_EVEN) :
-		      FTDI_SIO_SET_DATA_PARITY_NONE);
+	if (cflag & PARENB) {
+		if (cflag & CMSPAR)
+			urb_value |= cflag & PARODD ?
+				     FTDI_SIO_SET_DATA_PARITY_MARK :
+				     FTDI_SIO_SET_DATA_PARITY_SPACE;
+		else
+			urb_value |= cflag & PARODD ?
+				     FTDI_SIO_SET_DATA_PARITY_ODD :
+				     FTDI_SIO_SET_DATA_PARITY_EVEN;
+	} else {
+		urb_value |= FTDI_SIO_SET_DATA_PARITY_NONE;
+	}
 	if (cflag & CSIZE) {
 		switch (cflag & CSIZE) {
-		case CS5: urb_value |= 5; dbg("Setting CS5"); break;
-		case CS6: urb_value |= 6; dbg("Setting CS6"); break;
 		case CS7: urb_value |= 7; dbg("Setting CS7"); break;
 		case CS8: urb_value |= 8; dbg("Setting CS8"); break;
 		default:
-			dev_err(&port->dev, "CSIZE was set but not CS5-CS8\n");
+			dev_err(&port->dev, "CSIZE was set but not CS7-CS8\n");
 		}
 	}
 

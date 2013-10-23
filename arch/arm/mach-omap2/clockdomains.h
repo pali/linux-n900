@@ -10,7 +10,7 @@
 #ifndef __ARCH_ARM_MACH_OMAP2_CLOCKDOMAINS_H
 #define __ARCH_ARM_MACH_OMAP2_CLOCKDOMAINS_H
 
-#include <mach/clockdomain.h>
+#include <plat/clockdomain.h>
 
 /*
  * OMAP2/3-common clockdomains
@@ -167,6 +167,12 @@ static struct clockdomain iva2_clkdm = {
 	.flags		= CLKDM_CAN_HWSUP_SWSUP,
 	.clktrctrl_mask = OMAP3430_CLKTRCTRL_IVA2_MASK,
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.clk_reg_num	= 1,
+	.idle_def	= {
+		[0] = {
+			.idlest_mask = OMAP3430_ST_IVA2,
+		},
+	},
 };
 
 static struct clockdomain gfx_3430es1_clkdm = {
@@ -183,6 +189,12 @@ static struct clockdomain sgx_clkdm = {
 	.flags		= CLKDM_CAN_HWSUP_SWSUP,
 	.clktrctrl_mask = OMAP3430ES2_CLKTRCTRL_SGX_MASK,
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_GE_OMAP3430ES2),
+	.clk_reg_num	= 1,
+	.idle_def	= {
+		[0] = {
+			.idlest_mask = OMAP3430ES2_ST_SGX_SHIFT,
+		},
+	},
 };
 
 /*
@@ -206,6 +218,57 @@ static struct clockdomain core_l3_34xx_clkdm = {
 	.flags		= CLKDM_CAN_HWSUP,
 	.clktrctrl_mask = OMAP3430_CLKTRCTRL_L3_MASK,
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.clk_reg_num	= 3,
+	.idle_def	= {
+		[0] = {
+			/* UARTs are controlled by idle loop so ignore */
+			.fclk_ignore = OMAP3430_EN_UART2 |
+				OMAP3430_EN_UART1,
+			/*
+			 * Reason for IDLEST ignores:
+			 * - SDRC and OMAPCTRL controlled by HW
+			 * - HSOTGUSB_IDLE bit is autoidled by HW
+			 * - MAILBOX is controlled by HW
+			 */
+			.idlest_mask =
+				OMAP3430ES2_ST_MMC3_MASK |
+				OMAP3430_ST_ICR_MASK |
+				OMAP3430_ST_AES2_MASK |
+				OMAP3430_ST_SHA12_MASK |
+				OMAP3430_ST_DES2_MASK |
+				OMAP3430_ST_MMC2_MASK |
+				OMAP3430_ST_MMC1_MASK |
+				OMAP3430_ST_MSPRO_MASK |
+				OMAP3430_ST_HDQ_MASK |
+				OMAP3430_ST_MCSPI4_MASK |
+				OMAP3430_ST_MCSPI3_MASK |
+				OMAP3430_ST_MCSPI2_MASK |
+				OMAP3430_ST_MCSPI1_MASK |
+				OMAP3430_ST_I2C3_MASK |
+				OMAP3430_ST_I2C2_MASK |
+				OMAP3430_ST_I2C1_MASK |
+				OMAP3430_ST_GPT11_MASK |
+				OMAP3430_ST_GPT10_MASK |
+				OMAP3430_ST_MCBSP5_MASK |
+				OMAP3430_ST_MCBSP1_MASK |
+				OMAP3430ES2_ST_SSI_IDLE_MASK |
+				OMAP3430ES2_ST_HSOTGUSB_STDBY_MASK |
+				OMAP3430_ST_D2D_MASK |
+				OMAP3430_ST_SDMA_MASK |
+				OMAP3430_ST_SSI_STDBY_MASK,
+		},
+		[1] = {
+			.idlest_mask = OMAP3430_ST_PKA_MASK |
+				OMAP3430_ST_AES1_MASK |
+				OMAP3430_ST_RNG_MASK |
+				OMAP3430_ST_SHA11_MASK |
+				OMAP3430_ST_DES1_MASK,
+		},
+		[2] = {
+			.idlest_mask = OMAP3430ES2_ST_USBTLL_MASK |
+				OMAP3430ES2_ST_CPEFUSE_MASK,
+		},
+	},
 };
 
 static struct clockdomain core_l4_34xx_clkdm = {
@@ -222,6 +285,13 @@ static struct clockdomain dss_34xx_clkdm = {
 	.flags		= CLKDM_CAN_HWSUP_SWSUP,
 	.clktrctrl_mask = OMAP3430_CLKTRCTRL_DSS_MASK,
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.clk_reg_num	= 1,
+	.idle_def	= {
+		[0] = {
+			.idlest_mask = OMAP3430ES2_ST_DSS_IDLE_MASK |
+				OMAP3430ES2_ST_DSS_STDBY_MASK,
+		},
+	},
 };
 
 static struct clockdomain cam_clkdm = {
@@ -230,6 +300,12 @@ static struct clockdomain cam_clkdm = {
 	.flags		= CLKDM_CAN_HWSUP_SWSUP,
 	.clktrctrl_mask = OMAP3430_CLKTRCTRL_CAM_MASK,
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.clk_reg_num	= 1,
+	.idle_def	= {
+		[0] = {
+			.idlest_mask = OMAP3430_ST_CAM,
+		},
+	},
 };
 
 static struct clockdomain usbhost_clkdm = {
@@ -238,6 +314,13 @@ static struct clockdomain usbhost_clkdm = {
 	.flags		= CLKDM_CAN_HWSUP_SWSUP,
 	.clktrctrl_mask = OMAP3430ES2_CLKTRCTRL_USBHOST_MASK,
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_GE_OMAP3430ES2),
+	.clk_reg_num	= 1,
+	.idle_def	= {
+		[0] = {
+			.idlest_mask = OMAP3430ES2_ST_USBHOST_IDLE_MASK |
+				OMAP3430ES2_ST_USBHOST_STDBY_MASK,
+		},
+	},
 };
 
 static struct clockdomain per_clkdm = {
@@ -246,6 +329,29 @@ static struct clockdomain per_clkdm = {
 	.flags		= CLKDM_CAN_HWSUP_SWSUP,
 	.clktrctrl_mask = OMAP3430_CLKTRCTRL_PER_MASK,
 	.omap_chip	= OMAP_CHIP_INIT(CHIP_IS_OMAP3430),
+	.clk_reg_num	= 1,
+	.idle_def	= {
+		[0] = {
+			.fclk_ignore = OMAP3430_ST_UART3_MASK,
+			/*
+			 * GPIO2...6 are dropped out from this mask
+			 * as they are always non-idle, UART3 is also
+			 * out as it is handled by idle loop
+			 * */
+			.idlest_mask = OMAP3430_ST_WDT3_MASK |
+				OMAP3430_ST_GPT9_MASK |
+				OMAP3430_ST_GPT8_MASK |
+				OMAP3430_ST_GPT7_MASK |
+				OMAP3430_ST_GPT6_MASK |
+				OMAP3430_ST_GPT5_MASK |
+				OMAP3430_ST_GPT4_MASK |
+				OMAP3430_ST_GPT3_MASK |
+				OMAP3430_ST_GPT2_MASK |
+				OMAP3430_ST_MCBSP4_MASK |
+				OMAP3430_ST_MCBSP3_MASK |
+				OMAP3430_ST_MCBSP2_MASK,
+		},
+	},
 };
 
 /*

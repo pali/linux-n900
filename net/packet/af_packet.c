@@ -1099,8 +1099,12 @@ static int packet_snd(struct socket *sock,
 	err = -ENXIO;
 	if (dev == NULL)
 		goto out_unlock;
-	if (sock->type == SOCK_RAW)
+	if (sock->type == SOCK_RAW) {
 		reserve = dev->hard_header_len;
+		err = -EINVAL;
+		if (len < reserve)
+			goto out_unlock;
+	}
 
 	err = -ENETDOWN;
 	if (!(dev->flags & IFF_UP))
@@ -1116,7 +1120,7 @@ static int packet_snd(struct socket *sock,
 		goto out_unlock;
 
 	skb_reserve(skb, LL_RESERVED_SPACE(dev));
-	skb_reset_network_header(skb);
+	skb_set_network_header(skb, reserve);
 
 	err = -EINVAL;
 	if (sock->type == SOCK_DGRAM &&

@@ -770,9 +770,13 @@ SYSCALL_DEFINE2(inotify_rm_watch, int, fd, __s32, wd)
 	struct file *filp;
 	int ret = 0, fput_needed;
 
+	mutex_lock(&umount_mutex);
+
 	filp = fget_light(fd, &fput_needed);
-	if (unlikely(!filp))
+	if (unlikely(!filp)) {
+		mutex_unlock(&umount_mutex);
 		return -EBADF;
+	}
 
 	/* verify that this is indeed an inotify instance */
 	if (unlikely(filp->f_op != &inotify_fops)) {
@@ -797,6 +801,7 @@ SYSCALL_DEFINE2(inotify_rm_watch, int, fd, __s32, wd)
 
 out:
 	fput_light(filp, fput_needed);
+	mutex_unlock(&umount_mutex);
 	return ret;
 }
 

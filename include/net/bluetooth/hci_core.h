@@ -60,6 +60,12 @@ struct hci_conn_hash {
 	spinlock_t       lock;
 	unsigned int     acl_num;
 	unsigned int     sco_num;
+	unsigned int     le_num;
+};
+
+struct bdaddr_list {
+	struct list_head list;
+	bdaddr_t bdaddr;
 };
 
 struct hci_dev {
@@ -96,16 +102,20 @@ struct hci_dev {
 	atomic_t	cmd_cnt;
 	unsigned int	acl_cnt;
 	unsigned int	sco_cnt;
+	unsigned int	le_cnt;
 
 	unsigned int	acl_mtu;
 	unsigned int	sco_mtu;
+	unsigned int	le_mtu;
 	unsigned int	acl_pkts;
 	unsigned int	sco_pkts;
+	unsigned int	le_pkts;
 
-	unsigned long	cmd_last_tx;
 	unsigned long	acl_last_tx;
 	unsigned long	sco_last_tx;
+	unsigned long	le_last_tx;
 
+	struct timer_list	cmd_timer;
 	struct tasklet_struct	cmd_task;
 	struct tasklet_struct	rx_task;
 	struct tasklet_struct	tx_task;
@@ -124,6 +134,7 @@ struct hci_dev {
 
 	struct inquiry_cache	inq_cache;
 	struct hci_conn_hash	conn_hash;
+	struct bdaddr_list	blacklist;
 
 	struct hci_dev_stats	stat;
 
@@ -172,6 +183,7 @@ struct hci_conn {
 	__u32		 link_mode;
 	__u8             auth_type;
 	__u8             sec_level;
+	__u8		 pending_sec_level;
 	__u8             power_save;
 	__u16            disc_timeout;
 	unsigned long	 pend;
@@ -260,20 +272,36 @@ static inline void hci_conn_hash_add(struct hci_dev *hdev, struct hci_conn *c)
 {
 	struct hci_conn_hash *h = &hdev->conn_hash;
 	list_add(&c->list, &h->list);
-	if (c->type == ACL_LINK)
+	switch (c->type) {
+	case ACL_LINK:
 		h->acl_num++;
-	else
+		break;
+	case LE_LINK:
+		h->le_num++;
+		break;
+	case SCO_LINK:
+	case ESCO_LINK:
 		h->sco_num++;
+		break;
+	}
 }
 
 static inline void hci_conn_hash_del(struct hci_dev *hdev, struct hci_conn *c)
 {
 	struct hci_conn_hash *h = &hdev->conn_hash;
 	list_del(&c->list);
-	if (c->type == ACL_LINK)
+	switch (c->type) {
+	case ACL_LINK:
 		h->acl_num--;
-	else
+		break;
+	case LE_LINK:
+		h->le_num--;
+		break;
+	case SCO_LINK:
+	case ESCO_LINK:
 		h->sco_num--;
+		break;
+	}
 }
 
 static inline struct hci_conn *hci_conn_hash_lookup_handle(struct hci_dev *hdev,
@@ -367,22 +395,6 @@ static inline void hci_conn_put(struct hci_conn *conn)
 	}
 }
 
-/* ----- HCI tasks ----- */
-static inline void hci_sched_cmd(struct hci_dev *hdev)
-{
-	tasklet_schedule(&hdev->cmd_task);
-}
-
-static inline void hci_sched_rx(struct hci_dev *hdev)
-{
-	tasklet_schedule(&hdev->rx_task);
-}
-
-static inline void hci_sched_tx(struct hci_dev *hdev)
-{
-	tasklet_schedule(&hdev->tx_task);
-}
-
 /* ----- HCI Devices ----- */
 static inline void __hci_dev_put(struct hci_dev *d)
 {
@@ -435,30 +447,12 @@ int hci_get_conn_info(struct hci_dev *hdev, void __user *arg);
 int hci_get_auth_info(struct hci_dev *hdev, void __user *arg);
 int hci_inquiry(void __user *arg);
 
+struct bdaddr_list *hci_blacklist_lookup(struct hci_dev *hdev, bdaddr_t *bdaddr);
+int hci_blacklist_clear(struct hci_dev *hdev);
+
 void hci_event_packet(struct hci_dev *hdev, struct sk_buff *skb);
 
-/* Receive frame from HCI drivers */
-static inline int hci_recv_frame(struct sk_buff *skb)
-{
-	struct hci_dev *hdev = (struct hci_dev *) skb->dev;
-	if (!hdev || (!test_bit(HCI_UP, &hdev->flags) 
-			&& !test_bit(HCI_INIT, &hdev->flags))) {
-		kfree_skb(skb);
-		return -ENXIO;
-	}
-
-	/* Incomming skb */
-	bt_cb(skb)->incoming = 1;
-
-	/* Time stamp */
-	__net_timestamp(skb);
-
-	/* Queue frame for rx task */
-	skb_queue_tail(&hdev->rx_q, skb);
-	hci_sched_rx(hdev);
-	return 0;
-}
-
+int hci_recv_frame(struct sk_buff *skb);
 int hci_recv_fragment(struct hci_dev *hdev, int type, void *data, int count);
 
 int hci_register_sysfs(struct hci_dev *hdev);
@@ -476,6 +470,8 @@ void hci_conn_del_sysfs(struct hci_conn *conn);
 #define lmp_sniffsubr_capable(dev) ((dev)->features[5] & LMP_SNIFF_SUBR)
 #define lmp_esco_capable(dev)      ((dev)->features[3] & LMP_ESCO)
 #define lmp_ssp_capable(dev)       ((dev)->features[6] & LMP_SIMPLE_PAIR)
+#define lmp_le_capable(dev)        ((dev)->features[4] & LMP_LE)
+#define lmp_no_flush_capable(dev)  ((dev)->features[6] & LMP_NO_FLUSH)
 
 /* ----- HCI protocols ----- */
 struct hci_proto {

@@ -35,6 +35,7 @@
 #define L2CAP_DEFAULT_RETRANS_TO	1000    /* 1 second */
 #define L2CAP_DEFAULT_MONITOR_TO	12000   /* 12 seconds */
 #define L2CAP_DEFAULT_MAX_PDU_SIZE	672
+#define L2CAP_LE_DEFAULT_MTU		23
 
 #define L2CAP_CONN_TIMEOUT	(40000) /* 40 seconds */
 #define L2CAP_INFO_TIMEOUT	(4000)  /*  4 seconds */
@@ -155,6 +156,9 @@ struct l2cap_conn_rsp {
 /* channel indentifier */
 #define L2CAP_CID_SIGNALING	0x0001
 #define L2CAP_CID_CONN_LESS	0x0002
+#define L2CAP_CID_LE_DATA	0x0004
+#define L2CAP_CID_LE_SIGNALING	0x0005
+#define L2CAP_CID_SMP		0x0006
 #define L2CAP_CID_DYN_START	0x0040
 #define L2CAP_CID_DYN_END	0xffff
 
@@ -316,6 +320,7 @@ struct l2cap_pinfo {
 	__u8		sec_level;
 	__u8		role_switch;
 	__u8		force_reliable;
+	__u8		flushable;
 
 	__u8		conf_req[64];
 	__u8		conf_len;
@@ -324,7 +329,6 @@ struct l2cap_pinfo {
 
 	__u8		next_tx_seq;
 	__u8		expected_ack_seq;
-	__u8		req_seq;
 	__u8		expected_tx_seq;
 	__u8		buffer_seq;
 	__u8		buffer_seq_srej;
@@ -375,6 +379,7 @@ struct l2cap_pinfo {
 #define L2CAP_CONN_SEND_PBIT       0x10
 #define L2CAP_CONN_REMOTE_BUSY     0x20
 #define L2CAP_CONN_LOCAL_BUSY      0x40
+#define L2CAP_CONN_REJ_ACT         0x80
 
 #define __mod_retrans_timer() mod_timer(&l2cap_pi(sk)->retrans_timer, \
 		jiffies +  msecs_to_jiffies(L2CAP_DEFAULT_RETRANS_TO));

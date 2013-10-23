@@ -22,13 +22,9 @@
 #include <linux/device.h>
 
 /* Interface documentation is in mach/omap-pm.h */
-#include <mach/omap-pm.h>
+#include <plat/omap-pm.h>
 
-#include <mach/powerdomain.h>
-
-struct omap_opp *dsp_opps;
-struct omap_opp *mpu_opps;
-struct omap_opp *l3_opps;
+#include <plat/powerdomain.h>
 
 /*
  * Device-driver-originated constraints (via board-*.c files)
@@ -84,6 +80,7 @@ void omap_pm_set_min_bus_tput(struct device *dev, u8 agent_id, unsigned long r)
 	 * TI CDP code can call constraint_set here on the VDD2 OPP.
 	 */
 }
+EXPORT_SYMBOL(omap_pm_set_min_bus_tput);
 
 void omap_pm_set_max_dev_wakeup_lat(struct device *dev, long t)
 {
@@ -157,6 +154,7 @@ const struct omap_opp *omap_pm_dsp_get_opp_table(void)
 
 	return NULL;
 }
+EXPORT_SYMBOL(omap_pm_dsp_get_opp_table);
 
 void omap_pm_dsp_set_min_opp(u8 opp_id)
 {
@@ -181,7 +179,7 @@ void omap_pm_dsp_set_min_opp(u8 opp_id)
 	 *
 	 */
 }
-
+EXPORT_SYMBOL(omap_pm_dsp_set_min_opp);
 
 u8 omap_pm_dsp_get_opp(void)
 {
@@ -197,6 +195,31 @@ u8 omap_pm_dsp_get_opp(void)
 
 	return 0;
 }
+EXPORT_SYMBOL(omap_pm_dsp_get_opp);
+
+u8 omap_pm_vdd1_get_opp(void)
+{
+	pr_debug("OMAP PM: User requests current VDD1 OPP\n");
+
+	/*
+	 * For l-o call resource_get_level of vdd1_opp resource.
+	 */
+
+	return 0;
+}
+EXPORT_SYMBOL(omap_pm_vdd1_get_opp);
+
+u8 omap_pm_vdd2_get_opp(void)
+{
+	pr_debug("OMAP PM: User requests current VDD2 OPP\n");
+
+	/*
+	 * For l-o call resource_get_level of vdd2_opp resource.
+	 */
+
+	return 0;
+}
+EXPORT_SYMBOL(omap_pm_vdd2_get_opp);
 
 /*
  * CPUFreq-originated constraint
@@ -237,6 +260,7 @@ void omap_pm_cpu_set_freq(unsigned long f)
 	 * CDP should just be able to set the VDD1 OPP clock rate here.
 	 */
 }
+EXPORT_SYMBOL(omap_pm_cpu_set_freq);
 
 unsigned long omap_pm_cpu_get_freq(void)
 {
@@ -248,6 +272,7 @@ unsigned long omap_pm_cpu_get_freq(void)
 
 	return 0;
 }
+EXPORT_SYMBOL(omap_pm_cpu_get_freq);
 
 /*
  * Device context loss tracking
@@ -255,6 +280,8 @@ unsigned long omap_pm_cpu_get_freq(void)
 
 int omap_pm_get_dev_context_loss_count(struct device *dev)
 {
+	static u32 counter = 0;
+
 	if (!dev) {
 		WARN_ON(1);
 		return -EINVAL;
@@ -268,18 +295,16 @@ int omap_pm_get_dev_context_loss_count(struct device *dev)
 	 * off counter.
 	 */
 
-	return 0;
+	/* For the noop case, we cannot know the off counter, so
+	 * return an increasing counter which will ensure that
+	 * context is always restored. */
+	return counter++;
 }
 
 
 /* Should be called before clk framework init */
-int __init omap_pm_if_early_init(struct omap_opp *mpu_opp_table,
-				 struct omap_opp *dsp_opp_table,
-				 struct omap_opp *l3_opp_table)
+int __init omap_pm_if_early_init()
 {
-	mpu_opps = mpu_opp_table;
-	dsp_opps = dsp_opp_table;
-	l3_opps = l3_opp_table;
 	return 0;
 }
 

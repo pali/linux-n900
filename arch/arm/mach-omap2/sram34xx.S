@@ -83,12 +83,8 @@
  *  before use by the code in SRAM (SDRAM is not accessible during SDRC
  *  reconfiguration):
  *  new SDRC_RFR_CTRL_0 register contents
- *  new SDRC_ACTIM_CTRL_A_0 register contents
- *  new SDRC_ACTIM_CTRL_B_0 register contents
  *  new SDRC_MR_0 register value
  *  new SDRC_RFR_CTRL_1 register contents
- *  new SDRC_ACTIM_CTRL_A_1 register contents
- *  new SDRC_ACTIM_CTRL_B_1 register contents
  *  new SDRC_MR_1 register value
  *
  * If the param SDRC_RFR_CTRL_1 is 0, the parameters
@@ -102,24 +98,19 @@ ENTRY(omap3_sram_configure_core_dpll)
 	ldr	r4, [sp, #52]
 	str     r4, omap_sdrc_rfr_ctrl_0_val
 	ldr	r4, [sp, #56]
-	str     r4, omap_sdrc_actim_ctrl_a_0_val
-	ldr	r4, [sp, #60]
-	str     r4, omap_sdrc_actim_ctrl_b_0_val
-	ldr	r4, [sp, #64]
 	str     r4, omap_sdrc_mr_0_val
-	ldr	r4, [sp, #68]
+	ldr	r4, [sp, #60]
 	str     r4, omap_sdrc_rfr_ctrl_1_val
 	cmp	r4, #0			@ if SDRC_RFR_CTRL_1 is 0,
 	beq	skip_cs1_params		@  do not use cs1 params
-	ldr	r4, [sp, #72]
-	str     r4, omap_sdrc_actim_ctrl_a_1_val
-	ldr	r4, [sp, #76]
-	str     r4, omap_sdrc_actim_ctrl_b_1_val
-	ldr	r4, [sp, #80]
+	ldr	r4, [sp, #64]
 	str     r4, omap_sdrc_mr_1_val
 skip_cs1_params:
+	mrc p15, 0, r8, c1, c0, 0	@ read aux ctrl register
+	bic r10, r8, #0x800		@ clear Z-bit, disable branch prediction
+	mcr p15, 0, r10, c1, c0, 0	@ write aux ctrl register
 	dsb				@ flush buffered writes to interconnect
-
+	isb				@ prevent speculative exec past here
 	cmp	r3, #1			@ if increasing SDRC clk rate,
 	bleq	configure_sdrc		@ program the SDRC regs early (for RFR)
 	cmp	r1, #SDRC_UNLOCK_DLL	@ set the intended DLL state
@@ -137,6 +128,7 @@ skip_cs1_params:
 	beq	return_to_sdram		@ return to SDRAM code, otherwise,
 	bl	configure_sdrc		@ reprogram SDRC regs now
 return_to_sdram:
+	mcr p15, 0, r8, c1, c0, 0	@ restore aux ctrl register
 	isb				@ prevent speculative exec past here
 	mov 	r0, #0 			@ return value
 	ldmfd	sp!, {r1-r12, pc}	@ restore regs and return
@@ -219,12 +211,6 @@ configure_sdrc:
 	ldr	r12, omap_sdrc_rfr_ctrl_0_val	@ fetch value from SRAM
 	ldr	r11, omap3_sdrc_rfr_ctrl_0	@ fetch addr from SRAM
 	str	r12, [r11]			@ store
-	ldr	r12, omap_sdrc_actim_ctrl_a_0_val
-	ldr	r11, omap3_sdrc_actim_ctrl_a_0
-	str	r12, [r11]
-	ldr	r12, omap_sdrc_actim_ctrl_b_0_val
-	ldr	r11, omap3_sdrc_actim_ctrl_b_0
-	str	r12, [r11]
 	ldr	r12, omap_sdrc_mr_0_val
 	ldr	r11, omap3_sdrc_mr_0
 	str	r12, [r11]
@@ -232,12 +218,6 @@ configure_sdrc:
 	cmp	r12, #0			@ if SDRC_RFR_CTRL_1 is 0,
 	beq	skip_cs1_prog		@  do not program cs1 params
 	ldr	r11, omap3_sdrc_rfr_ctrl_1
-	str	r12, [r11]
-	ldr	r12, omap_sdrc_actim_ctrl_a_1_val
-	ldr	r11, omap3_sdrc_actim_ctrl_a_1
-	str	r12, [r11]
-	ldr	r12, omap_sdrc_actim_ctrl_b_1_val
-	ldr	r11, omap3_sdrc_actim_ctrl_b_1
 	str	r12, [r11]
 	ldr	r12, omap_sdrc_mr_1_val
 	ldr	r11, omap3_sdrc_mr_1
@@ -259,14 +239,6 @@ omap3_sdrc_rfr_ctrl_0:
 	.word OMAP34XX_SDRC_REGADDR(SDRC_RFR_CTRL_0)
 omap3_sdrc_rfr_ctrl_1:
 	.word OMAP34XX_SDRC_REGADDR(SDRC_RFR_CTRL_1)
-omap3_sdrc_actim_ctrl_a_0:
-	.word OMAP34XX_SDRC_REGADDR(SDRC_ACTIM_CTRL_A_0)
-omap3_sdrc_actim_ctrl_a_1:
-	.word OMAP34XX_SDRC_REGADDR(SDRC_ACTIM_CTRL_A_1)
-omap3_sdrc_actim_ctrl_b_0:
-	.word OMAP34XX_SDRC_REGADDR(SDRC_ACTIM_CTRL_B_0)
-omap3_sdrc_actim_ctrl_b_1:
-	.word OMAP34XX_SDRC_REGADDR(SDRC_ACTIM_CTRL_B_1)
 omap3_sdrc_mr_0:
 	.word OMAP34XX_SDRC_REGADDR(SDRC_MR_0)
 omap3_sdrc_mr_1:
@@ -274,14 +246,6 @@ omap3_sdrc_mr_1:
 omap_sdrc_rfr_ctrl_0_val:
 	.word 0xDEADBEEF
 omap_sdrc_rfr_ctrl_1_val:
-	.word 0xDEADBEEF
-omap_sdrc_actim_ctrl_a_0_val:
-	.word 0xDEADBEEF
-omap_sdrc_actim_ctrl_a_1_val:
-	.word 0xDEADBEEF
-omap_sdrc_actim_ctrl_b_0_val:
-	.word 0xDEADBEEF
-omap_sdrc_actim_ctrl_b_1_val:
 	.word 0xDEADBEEF
 omap_sdrc_mr_0_val:
 	.word 0xDEADBEEF
@@ -298,3 +262,10 @@ core_m2_mask_val:
 ENTRY(omap3_sram_configure_core_dpll_sz)
 	.word	. - omap3_sram_configure_core_dpll
 
+ENTRY(__sram_wait_delay)
+	subs    r0, r0, #1		@ loop till counter = 0
+	bne    __sram_wait_delay
+	mov 	pc, lr
+
+ENTRY(__sram_wait_delay_sz)
+	.word   . - __sram_wait_delay

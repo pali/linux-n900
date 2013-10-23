@@ -249,7 +249,12 @@ rx_submit(struct eth_dev *dev, struct usb_request *req, gfp_t gfp_flags)
 	 * but on at least one, checksumming fails otherwise.  Note:
 	 * RNDIS headers involve variable numbers of LE32 values.
 	 */
-	skb_reserve(skb, NET_IP_ALIGN);
+	/*
+	 * RX: Do not move data by IP_ALIGN:
+	 * if your DMA controller cannot handle it
+	 */
+	if (!gadget_dma32(dev->gadget))
+		skb_reserve(skb, NET_IP_ALIGN);
 
 	req->buf = skb->data;
 	req->length = size;
@@ -276,12 +281,21 @@ static void rx_complete(struct usb_ep *ep, struct usb_request *req)
 	struct sk_buff	*skb = req->context, *skb2;
 	struct eth_dev	*dev = ep->driver_data;
 	int		status = req->status;
+	int		align = 0;
 
 	switch (status) {
 
 	/* normal completion */
 	case 0:
 		skb_put(skb, req->actual);
+		if (gadget_dma32(dev->gadget) && NET_IP_ALIGN) {
+			u8 *data = skb->data;
+			size_t len = skb_headlen(skb);
+			align = NET_IP_ALIGN;
+			skb_put(skb, align);
+			skb->data += align;
+			memmove(skb->data, data, len);
+		}
 
 		if (dev->unwrap) {
 			unsigned long	flags;
@@ -305,7 +319,7 @@ static void rx_complete(struct usb_ep *ep, struct usb_request *req)
 		while (skb2) {
 			if (status < 0
 					|| ETH_HLEN > skb2->len
-					|| skb2->len > ETH_FRAME_LEN) {
+					|| skb2->len > ETH_FRAME_LEN + align) {
 				dev->net->stats.rx_errors++;
 				dev->net->stats.rx_length_errors++;
 				DBG(dev, "rx length %d\n", skb2->len);
@@ -573,6 +587,24 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 
 		length = skb->len;
 	}
+
+	/*
+	 * Align data to 32bit if the dma controller requires it
+	 */
+	if (gadget_dma32(dev->gadget)) {
+
+		if (WARN_ON(skb_headroom(skb) < ((unsigned long)skb->data & 3))) {
+			dev_kfree_skb_any(skb);
+			goto drop;
+		} else {
+			u8 *data = skb->data;
+			size_t len = skb_headlen(skb);
+			skb->data -= ((unsigned long)skb->data & 3);
+			memmove(skb->data, data, len);
+			skb_set_tail_pointer(skb, len);
+		}
+	}
+
 	req->buf = skb->data;
 	req->context = skb;
 	req->complete = tx_complete;
@@ -714,7 +746,7 @@ static u8 __init nibble(unsigned char c)
 	return 0;
 }
 
-static int __init get_ether_addr(const char *str, u8 *dev_addr)
+static int get_ether_addr(const char *str, u8 *dev_addr)
 {
 	if (str) {
 		unsigned	i;
@@ -759,7 +791,7 @@ static const struct net_device_ops eth_netdev_ops = {
  *
  * Returns negative errno, or zero on success
  */
-int __init gether_setup(struct usb_gadget *g, u8 ethaddr[ETH_ALEN])
+int gether_setup(struct usb_gadget *g, u8 ethaddr[ETH_ALEN])
 {
 	struct eth_dev		*dev;
 	struct net_device	*net;

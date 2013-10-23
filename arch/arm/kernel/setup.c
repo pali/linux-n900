@@ -19,11 +19,14 @@
 #include <linux/seq_file.h>
 #include <linux/screen_info.h>
 #include <linux/init.h>
+#include <linux/kexec.h>
+#include <linux/crash_dump.h>
 #include <linux/root_dev.h>
 #include <linux/cpu.h>
 #include <linux/interrupt.h>
 #include <linux/smp.h>
 #include <linux/fs.h>
+#include <linux/memblock.h>
 
 #include <asm/unified.h>
 #include <asm/cpu.h>
@@ -83,6 +86,9 @@ EXPORT_SYMBOL(system_serial_low);
 
 unsigned int system_serial_high;
 EXPORT_SYMBOL(system_serial_high);
+
+char system_soc_info[SYSTEM_SOC_INFO_SIZE];
+EXPORT_SYMBOL(system_soc_info);
 
 unsigned int elf_hwcap;
 EXPORT_SYMBOL(elf_hwcap);
@@ -400,13 +406,12 @@ static int __init arm_add_memory(unsigned long start, unsigned long size)
 	size -= start & ~PAGE_MASK;
 	bank->start = PAGE_ALIGN(start);
 	bank->size  = size & PAGE_MASK;
-	bank->node  = PHYS_TO_NID(start);
 
 	/*
 	 * Check whether this memory region has non-zero size or
 	 * invalid node number.
 	 */
-	if (bank->size == 0 || bank->node >= MAX_NUMNODES)
+	if (bank->size == 0)
 		return -EINVAL;
 
 	meminfo.nr_banks++;
@@ -695,6 +700,79 @@ static int __init customize_machine(void)
 }
 arch_initcall(customize_machine);
 
+#ifdef CONFIG_KEXEC
+static inline unsigned long long get_total_mem(void)
+{
+	unsigned long total;
+
+	total = max_low_pfn - min_low_pfn;
+	return total << PAGE_SHIFT;
+}
+
+/**
+ * reserve_crashkernel() - reserves memory are for crash kernel
+ *
+ * This function reserves memory area given in "crashkernel=" kernel command
+ * line parameter. The memory reserved is used by a dump capture kernel when
+ * primary kernel is crashing.
+ */
+static void __init reserve_crashkernel(void)
+{
+	unsigned long long crash_size, crash_base;
+	unsigned long long total_mem;
+	int ret;
+
+	total_mem = get_total_mem();
+	ret = parse_crashkernel(boot_command_line, total_mem,
+				&crash_size, &crash_base);
+	if (ret)
+		return;
+
+	ret = reserve_bootmem(crash_base, crash_size, BOOTMEM_EXCLUSIVE);
+	if (ret < 0) {
+		printk(KERN_WARNING "crashkernel reservation failed - "
+		       "memory is in use (0x%lx)\n", (unsigned long)crash_base);
+		return;
+	}
+
+	printk(KERN_INFO "Reserving %ldMB of memory at %ldMB "
+	       "for crashkernel (System RAM: %ldMB)\n",
+	       (unsigned long)(crash_size >> 20),
+	       (unsigned long)(crash_base >> 20),
+	       (unsigned long)(total_mem >> 20));
+
+	crashk_res.start = crash_base;
+	crashk_res.end = crash_base + crash_size - 1;
+	insert_resource(&iomem_resource, &crashk_res);
+}
+#else
+static inline void reserve_crashkernel(void) {}
+#endif /* CONFIG_KEXEC */
+
+/*
+ * Note: elfcorehdr_addr is not just limited to vmcore. It is also used by
+ * is_kdump_kernel() to determine if we are booting after a panic. Hence
+ * ifdef it under CONFIG_CRASH_DUMP and not CONFIG_PROC_VMCORE.
+ */
+
+#ifdef CONFIG_CRASH_DUMP
+/*
+ * elfcorehdr= specifies the location of elf core header stored by the crashed
+ * kernel. This option will be passed by kexec loader to the capture kernel.
+ */
+static int __init setup_elfcorehdr(char *arg)
+{
+	char *end;
+
+	if (!arg)
+		return -EINVAL;
+
+	elfcorehdr_addr = memparse(arg, &end);
+	return end > arg ? 0 : -EINVAL;
+}
+early_param("elfcorehdr", setup_elfcorehdr);
+#endif /* CONFIG_CRASH_DUMP */
+
 void __init setup_arch(char **cmdline_p)
 {
 	struct tag *tags = (struct tag *)&init_tags;
@@ -742,12 +820,16 @@ void __init setup_arch(char **cmdline_p)
 	memcpy(boot_command_line, from, COMMAND_LINE_SIZE);
 	boot_command_line[COMMAND_LINE_SIZE-1] = '\0';
 	parse_cmdline(cmdline_p, from);
+
+	arm_memblock_init(&meminfo, mdesc);
+
 	paging_init(mdesc);
 	request_standard_resources(&meminfo, mdesc);
 
 #ifdef CONFIG_SMP
 	smp_init_cpus();
 #endif
+	reserve_crashkernel();
 
 	cpu_init();
 	tcm_init();
@@ -863,6 +945,8 @@ static int c_show(struct seq_file *m, void *v)
 	seq_printf(m, "Revision\t: %04x\n", system_rev);
 	seq_printf(m, "Serial\t\t: %08x%08x\n",
 		   system_serial_high, system_serial_low);
+	if (strlen(system_soc_info))
+		seq_printf(m, "SoC Info\t: %s\n",  system_soc_info);
 
 	return 0;
 }

@@ -1,0 +1,10 @@
+config SECURITY_AEGIS_RESTOK
+	tristate "Resource Token database manager"
+	depends on SECURITY_AEGIS
+	select SECURITYFS
+	default n
+	help
+	  This selects the Resource Token database manager. This is
+	  part of Maemo Aegis security framework.
+	  If you are unsure how to answer this question, answer N.
+

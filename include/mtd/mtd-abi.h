@@ -88,6 +88,20 @@ struct otp_info {
 	__u32 locked;
 };
 
+#define MTD_MAX_PARTITION_NAME_LEN	64
+struct mtd_partition_user {
+	__u64 size;
+	__u64 offset;
+	__u32 mask_flags;
+	char name[MTD_MAX_PARTITION_NAME_LEN];
+	__u8 padding[128];	/* reserved for future, must be zero! */
+};
+
+struct mtd_partitions {
+	__u32 nparts;
+	struct mtd_partition_user __user *parts;
+};
+
 #define MEMGETINFO		_IOR('M', 1, struct mtd_info_user)
 #define MEMERASE		_IOW('M', 2, struct erase_info_user)
 #define MEMWRITEOOB		_IOWR('M', 3, struct mtd_oob_buf)
@@ -110,6 +124,7 @@ struct otp_info {
 #define MEMERASE64		_IOW('M', 20, struct erase_info_user64)
 #define MEMWRITEOOB64		_IOWR('M', 21, struct mtd_oob_buf64)
 #define MEMREADOOB64		_IOWR('M', 22, struct mtd_oob_buf64)
+#define MTDREPARTITION		_IOW('M', 23, struct mtd_partitions)
 
 /*
  * Obsolete legacy interface. Keep it in order not to break userspace

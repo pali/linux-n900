@@ -1,0 +1,125 @@
+OMAP PA interface format - arch/arm/plat-omap/pa.c
+
+Certain restrictions apply to calling OMAP HS secure mode services, which make
+it necessary for the kernel driver to at least copy user space input to a
+buffer in kernel space before passing it to the secure side. For instance, all
+data passed to the secure mode must be physically continuous and all pointers
+must be word-aligned.
+
+The format used for describing PA interfaces consists of pa_format_* structures
+defined in the kernel include file include/asm-arm/arch-omap/pa.h. The format
+binary always starts with the pa_format_header structure, which defines the
+number of commands defined in the file. Each interface definition starts with a
+pa_format_command structure followed by any number of pa_format_entry
+structures. Therefore, the general file structure is:
+
+    pa_format_header
+    pa_format_command
+    pa_format_entry
+    ...
+    pa_format_command
+    pa_format_entry
+    ...
+
+An interface definition starts with the pa_format_command structure, which
+contains the following fields:
+
+    cmd                 A command identifier value (>=SEC_CMD_PA_FIRST = 0x100)
+                        that uniquely identifies the interface.
+    filename            The name of the PA found in the PA firmware TOC.
+    sa                  The index of the sub-application that provides the
+                        interface.
+    index               The index of the function in the sub-application.
+    npar                The number of parameters for the interface.
+    nres                The number of results.
+
+The pa_format_command structure is followed by npar pa_format_entry structures,
+which define the interface parameters, and nres pa_format_entry structures,
+which define the results. The pa_format_entry structure contains the following
+fields:
+
+    type                The data type for the parameter/result entry. This is
+                        how the entry is passed to the PA.
+    size                Typically, the size for the entry in bytes, depending
+                        on the data type and the ref field.
+    ref                 Additional information for the entry.
+    value               The default value for the entry, or an index reference
+                        to a (preceding) parameter entry.
+
+There are five possible data types for an entry:
+
+    PA_TYPE_DATA        The entry is data of unspecified type, which is passed
+                        to the PA as is. The size is given in the size field.
+
+    PA_TYPE_PTR_VIRT    NOT USED - Secure Environment works with physical addresses?
+                        The data passed to the PA is a virtual memory pointer
+                        to a memory area whose size is given in the size field,
+                        is the value of a parameter entry, or matches the size
+                        of a parameter entry, depending on the ref field.
+
+    PA_TYPE_PTR_PHYS    The entry is a physical memory pointer, otherwise the
+                        same as PA_TYPE_PTR_VIRT.
+
+    PA_TYPE_PTR_KEYS    The entry is a physical pointer to the memory area
+                        where KEYS are stored. This type is supported only for
+                        parameter entries.
+
+    PA_TYPE_PTR_PAPUB   The entry is a physical pointer to the memory area
+                        where PA public keys are stored. This type is supported
+                        only for parameter entries.
+                        
+    PA_TYPE_BUF_LEN	The entry is a driver buffer length parameter. Driver
+    			buffer idenified by a buffer id (uint32).
+
+    PA_TYPE_BUF_PTR	The entry is a driver buffer memory pointer. Driver
+    			buffer idenified by a buffer id (uint32).
+
+    PA_TYPE_CRED	The entry is credential string. size passed in parameter
+    			entry->value. replaced with uint64_t application id
+    			
+
+There are six possible values for the ref field, which controls how the entry
+is interpreted in the driver input / output, and how the size of the buffers
+pointed by the pointer data types is determined:
+
+    PA_IO_NORMAL        Supported for parameter and result entries. Included in
+                        input and output. The size of the entry is given in the
+                        size field. The value field is ignored.
+                        
+    PA_IO_ONLY          Supported only for parameter entries. Valid only for
+                        PA_TYPE_DATA, PA_TYPE_BUF_LEN or PA_TYPE_BUF_PTR.
+                        Included in input, but not passed to the PA. 
+                        Useful for passing buffer sizes for other entries
+                        in driver input.
+                        
+                        NEW: For PA_TYPE_BUF_LEN or PA_TYPE_BUF_PTR entry types
+                        passes driver buffer ID to be used for result entries.
+
+    PA_IO_RESERVED      Supported for parameter and a result entries. Excluded
+                        from input and output. The size is given in the size
+                        field and must not be >4 bytes. The value is given in
+                        the value field.
+                        
+                        NEW: For PA_TYPE_BUF_LEN or PA_TYPE_BUF_PTR entry types 
+                        value field contains the index of the parameter which
+                        has buffer a id
+
+    PA_IO_DEFOUT        Supported only for result entries. Included in output.
+                        The size is given in the size field and must not be >4
+                        bytes. The default value is given in the value field.
+
+    PA_IO_SIZE_VAL      Supported for parameter and result entries. Only valid
+                        for pointer data types. Included in input and output.
+                        The size for the entry is given as the input value for
+                        a parameter entry whose index is given in the value
+                        field, added by the value of the size field. For
+                        parameter entries, the referenced entry must precede
+                        this entry in the input.
+
+                        NEW: For PA_TYPE_DATA entry types refer to the data
+                        size instead of using size field.                        
+
+    PA_IO_SIZE_PAR      As PA_IO_SIZE_VAL, but the size of the entry matches
+                        the size of a parameter entry, added by the value of
+                        the size field.
+                                              

@@ -49,12 +49,14 @@ static int check_short_pattern(uint8_t *buf, int len, int paglen, struct nand_bb
  * @param buf		temporary buffer
  * @param bd		descriptor for the good/bad block search pattern
  * @param chip		create the table for a specific chip, -1 read all chips.
- *              Applies only if NAND_BBT_PERCHIP option is set
+ *			Applies only if NAND_BBT_PERCHIP option is set
+ * @param block		block number or -1 if whole device is to scanned
  *
  * Create a bad block table by scanning the device
  * for the given good/bad block identify pattern
  */
-static int create_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr *bd, int chip)
+static int create_bbt(struct mtd_info *mtd, uint8_t *buf,
+		      struct nand_bbt_descr *bd, int chip, int block)
 {
 	struct onenand_chip *this = mtd->priv;
 	struct bbm_info *bbm = this->bbm;
@@ -65,7 +67,8 @@ static int create_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr 
 	struct mtd_oob_ops ops;
 	int rgn;
 
-	printk(KERN_INFO "Scanning device for bad blocks\n");
+	if (block == -1)
+		printk(KERN_INFO "Scanning device for bad blocks\n");
 
 	len = 2;
 
@@ -77,8 +80,13 @@ static int create_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr 
 	/* Note that numblocks is 2 * (real numblocks) here;
 	 * see i += 2 below as it makses shifting and masking less painful
 	 */
-	numblocks = this->chipsize >> (bbm->bbt_erase_shift - 1);
-	startblock = 0;
+	if (block == -1) {
+		numblocks = this->chipsize >> (bbm->bbt_erase_shift - 1);
+		startblock = 0;
+	} else {
+		numblocks = block + 1;
+		startblock = block;
+	}
 	from = 0;
 
 	ops.mode = MTD_OOB_PLACE;
@@ -88,6 +96,18 @@ static int create_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr 
 
 	for (i = startblock; i < numblocks; ) {
 		int ret;
+
+		if (i > 0) {
+			if (FLEXONENAND(this)) {
+				rgn = flexonenand_region(mtd, from);
+				from += mtd->eraseregions[rgn].erasesize;
+			} else
+				from += (1 << bbm->bbt_erase_shift);
+		}
+		if (block != -1)
+			from = from * (block / 2);
+
+		bbm->bbt_checked[i >> 3] |= 0x03 << (i & 0x6);
 
 		for (j = 0; j < len; j++) {
 			/* No need to read pages fully,
@@ -100,39 +120,16 @@ static int create_bbt(struct mtd_info *mtd, uint8_t *buf, struct nand_bbt_descr 
 
 			if (ret || check_short_pattern(&buf[j * scanlen], scanlen, mtd->writesize, bd)) {
 				bbm->bbt[i >> 3] |= 0x03 << (i & 0x6);
-				printk(KERN_WARNING "Bad eraseblock %d at 0x%08x\n",
-					i >> 1, (unsigned int) from);
+				printk(KERN_INFO "OneNAND eraseblock %d is an "
+					"initial bad block\n", i >> 1);
 				mtd->ecc_stats.badblocks++;
 				break;
 			}
 		}
 		i += 2;
-
-		if (FLEXONENAND(this)) {
-			rgn = flexonenand_region(mtd, from);
-			from += mtd->eraseregions[rgn].erasesize;
-		} else
-			from += (1 << bbm->bbt_erase_shift);
 	}
 
 	return 0;
-}
-
-
-/**
- * onenand_memory_bbt - [GENERIC] create a memory based bad block table
- * @param mtd		MTD device structure
- * @param bd		descriptor for the good/bad block search pattern
- *
- * The function creates a memory based bbt by scanning the device
- * for manufacturer / software marked good / bad blocks
- */
-static inline int onenand_memory_bbt (struct mtd_info *mtd, struct nand_bbt_descr *bd)
-{
-	struct onenand_chip *this = mtd->priv;
-
-        bd->options &= ~NAND_BBT_SCANEMPTY;
-	return create_bbt(mtd, this->page_buf, bd, -1);
 }
 
 /**
@@ -145,11 +142,17 @@ static int onenand_isbad_bbt(struct mtd_info *mtd, loff_t offs, int allowbbt)
 {
 	struct onenand_chip *this = mtd->priv;
 	struct bbm_info *bbm = this->bbm;
+	struct nand_bbt_descr *bd = bbm->badblock_pattern;
 	int block;
 	uint8_t res;
 
 	/* Get block number * 2 */
 	block = (int) (onenand_block(this, offs) << 1);
+
+	/* Check if block has been scanned for bad block */
+	if (!((bbm->bbt_checked[block >> 3] >> (block & 0x06)) & 0x03))
+		create_bbt(mtd, this->page_buf, bd, -1, block);
+
 	res = (bbm->bbt[block >> 3] >> (block & 0x06)) & 0x03;
 
 	DEBUG(MTD_DEBUG_LEVEL2, "onenand_isbad_bbt: bbt info for offs 0x%08x: (block %d) 0x%02x\n",
@@ -182,13 +185,21 @@ int onenand_scan_bbt(struct mtd_info *mtd, struct nand_bbt_descr *bd)
 {
 	struct onenand_chip *this = mtd->priv;
 	struct bbm_info *bbm = this->bbm;
-	int len, ret = 0;
+	int len;
 
 	len = this->chipsize >> (this->erase_shift + 2);
 	/* Allocate memory (2bit per block) and clear the memory bad block table */
 	bbm->bbt = kzalloc(len, GFP_KERNEL);
 	if (!bbm->bbt) {
 		printk(KERN_ERR "onenand_scan_bbt: Out of memory\n");
+		return -ENOMEM;
+	}
+
+	bbm->bbt_checked = kzalloc(len, GFP_KERNEL);
+	if (!bbm->bbt_checked) {
+		printk(KERN_ERR "onenand_scan_bbt: Out of memory\n");
+		kfree(bbm->bbt);
+		bbm->bbt = NULL;
 		return -ENOMEM;
 	}
 
@@ -201,14 +212,9 @@ int onenand_scan_bbt(struct mtd_info *mtd, struct nand_bbt_descr *bd)
 	if (!bbm->isbad_bbt)
 		bbm->isbad_bbt = onenand_isbad_bbt;
 
-	/* Scan the device to build a memory based bad block table */
-	if ((ret = onenand_memory_bbt(mtd, bd))) {
-		printk(KERN_ERR "onenand_scan_bbt: Can't scan flash and build the RAM-based BBT\n");
-		kfree(bbm->bbt);
-		bbm->bbt = NULL;
-	}
+	bd->options &= ~NAND_BBT_SCANEMPTY;
 
-	return ret;
+	return 0;
 }
 
 /*

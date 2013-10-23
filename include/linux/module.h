@@ -279,6 +279,12 @@ struct module
 	const unsigned long *gpl_future_crcs;
 	unsigned int num_gpl_future_syms;
 
+#ifdef CONFIG_MODULE_ELF_HASH
+	const unsigned long *syms_htable;
+	const unsigned long *gpl_syms_htable;
+	const unsigned long *gpl_future_syms_htable;
+#endif
+
 	/* Exception table */
 	unsigned int num_exentries;
 	struct exception_table_entry *extable;
@@ -417,6 +423,9 @@ struct symsearch {
 		WILL_BE_GPL_ONLY,
 	} licence;
 	bool unused;
+#ifdef CONFIG_MODULE_ELF_HASH
+	const unsigned long *htable;
+#endif
 };
 
 /* Search for an exported symbol by name. */

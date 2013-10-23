@@ -118,19 +118,10 @@ static int sdio_bus_probe(struct device *dev)
 	struct sdio_driver *drv = to_sdio_driver(dev->driver);
 	struct sdio_func *func = dev_to_sdio_func(dev);
 	const struct sdio_device_id *id;
-	int ret;
 
 	id = sdio_match_device(func, drv);
 	if (!id)
 		return -ENODEV;
-
-	/* Set the default block size so the driver is sure it's something
-	 * sensible. */
-	sdio_claim_host(func);
-	ret = sdio_set_block_size(func, 0);
-	sdio_release_host(func);
-	if (ret)
-		return ret;
 
 	return drv->probe(func, id);
 }
@@ -248,12 +239,15 @@ int sdio_add_func(struct sdio_func *func)
 /*
  * Unregister a SDIO function with the driver model, and
  * (eventually) free it.
+ * This function can be called through error paths where sdio_add_func() was
+ * never executed (because a failure occurred at an earlier point).
  */
 void sdio_remove_func(struct sdio_func *func)
 {
-	if (sdio_func_present(func))
-		device_del(&func->dev);
+	if (!sdio_func_present(func))
+		return;
 
+	device_del(&func->dev);
 	put_device(&func->dev);
 }
 

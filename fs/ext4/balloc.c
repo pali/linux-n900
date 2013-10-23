@@ -487,7 +487,7 @@ void ext4_add_groupblocks(handle_t *handle, struct super_block *sb,
 	ret = ext4_handle_dirty_metadata(handle, NULL, gd_bh);
 	if (!err)
 		err = ret;
-	sb->s_dirt = 1;
+	sb_mark_dirty(sb);
 
 error_return:
 	brelse(bitmap_bh);

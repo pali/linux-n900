@@ -115,6 +115,7 @@ enum rq_flag_bits {
 	__REQ_NOIDLE,		/* Don't anticipate more IO after this one */
 	__REQ_IO_STAT,		/* account I/O stat */
 	__REQ_MIXED_MERGE,	/* merge of different types, fail separately */
+	__REQ_SECURE,		/* secure discard (used with __REQ_DISCARD) */
 	__REQ_NR_BITS,		/* stops here */
 };
 
@@ -144,6 +145,7 @@ enum rq_flag_bits {
 #define REQ_NOIDLE	(1 << __REQ_NOIDLE)
 #define REQ_IO_STAT	(1 << __REQ_IO_STAT)
 #define REQ_MIXED_MERGE	(1 << __REQ_MIXED_MERGE)
+#define REQ_SECURE	(1 << __REQ_SECURE)
 
 #define REQ_FAILFAST_MASK	(REQ_FAILFAST_DEV | REQ_FAILFAST_TRANSPORT | \
 				 REQ_FAILFAST_DRIVER)
@@ -312,6 +314,7 @@ struct queue_limits {
 	unsigned int		io_min;
 	unsigned int		io_opt;
 	unsigned int		max_discard_sectors;
+	unsigned int		align_mask;
 
 	unsigned short		logical_block_size;
 	unsigned short		max_hw_segments;
@@ -319,6 +322,7 @@ struct queue_limits {
 
 	unsigned char		misaligned;
 	unsigned char		cluster;
+	signed char		discard_zeroes_data;
 };
 
 struct request_queue
@@ -458,6 +462,7 @@ struct request_queue
 #define QUEUE_FLAG_IO_STAT     15	/* do IO stats */
 #define QUEUE_FLAG_CQ	       16	/* hardware does queuing */
 #define QUEUE_FLAG_DISCARD     17	/* supports DISCARD */
+#define QUEUE_FLAG_SECDISCARD  18	/* supports SECDISCARD */
 
 #define QUEUE_FLAG_DEFAULT	((1 << QUEUE_FLAG_IO_STAT) |		\
 				 (1 << QUEUE_FLAG_STACKABLE)	|	\
@@ -589,6 +594,8 @@ enum {
 #define blk_queue_stackable(q)	\
 	test_bit(QUEUE_FLAG_STACKABLE, &(q)->queue_flags)
 #define blk_queue_discard(q)	test_bit(QUEUE_FLAG_DISCARD, &(q)->queue_flags)
+#define blk_queue_secdiscard(q)	(blk_queue_discard(q) && \
+	test_bit(QUEUE_FLAG_SECDISCARD, &(q)->queue_flags))
 
 #define blk_fs_request(rq)	((rq)->cmd_type == REQ_TYPE_FS)
 #define blk_pc_request(rq)	((rq)->cmd_type == REQ_TYPE_BLOCK_PC)
@@ -617,6 +624,7 @@ enum {
 #define blk_barrier_rq(rq)	((rq)->cmd_flags & REQ_HARDBARRIER)
 #define blk_fua_rq(rq)		((rq)->cmd_flags & REQ_FUA)
 #define blk_discard_rq(rq)	((rq)->cmd_flags & REQ_DISCARD)
+#define blk_secure_rq(rq)	((rq)->cmd_flags & REQ_SECURE)
 #define blk_bidi_rq(rq)		((rq)->next_rq != NULL)
 /* rq->queuelist of dequeued request must be list_empty() */
 #define blk_queued_rq(rq)	(!list_empty(&(rq)->queuelist))
@@ -860,7 +868,13 @@ static inline unsigned int blk_rq_bytes(const struct request *rq)
 
 static inline int blk_rq_cur_bytes(const struct request *rq)
 {
-	return rq->bio ? bio_cur_bytes(rq->bio) : 0;
+	if (rq->bio) {
+		if (blk_discard_rq(rq))
+			return rq->bio->bi_size;
+		else
+			return  bio_cur_bytes(rq->bio);
+	} else
+		return 0;
 }
 
 extern unsigned int blk_rq_err_bytes(const struct request *rq);
@@ -934,6 +948,8 @@ extern void blk_queue_max_hw_segments(struct request_queue *, unsigned short);
 extern void blk_queue_max_segment_size(struct request_queue *, unsigned int);
 extern void blk_queue_max_discard_sectors(struct request_queue *q,
 		unsigned int max_discard_sectors);
+extern void blk_queue_align_mask(struct request_queue *q,
+				 unsigned int align_mask);
 extern void blk_queue_logical_block_size(struct request_queue *, unsigned short);
 extern void blk_queue_physical_block_size(struct request_queue *, unsigned int);
 extern void blk_queue_alignment_offset(struct request_queue *q,
@@ -1006,6 +1022,7 @@ static inline struct request *blk_map_queue_find_tag(struct blk_queue_tag *bqt,
 extern int blkdev_issue_flush(struct block_device *, sector_t *);
 #define DISCARD_FL_WAIT		0x01	/* wait for completion */
 #define DISCARD_FL_BARRIER	0x02	/* issue DISCARD_BARRIER request */
+#define DISCARD_FL_SECURE	0x04
 extern int blkdev_issue_discard(struct block_device *, sector_t sector,
 		sector_t nr_sects, gfp_t, int flags);
 
@@ -1144,6 +1161,19 @@ static inline int bdev_alignment_offset(struct block_device *bdev)
 		return bdev->bd_part->alignment_offset;
 
 	return q->limits.alignment_offset;
+}
+
+static inline unsigned int queue_discard_zeroes_data(struct request_queue *q)
+{
+	if (q->limits.discard_zeroes_data == 1)
+		return 1;
+
+	return 0;
+}
+
+static inline unsigned int bdev_discard_zeroes_data(struct block_device *bdev)
+{
+	return queue_discard_zeroes_data(bdev_get_queue(bdev));
 }
 
 static inline int queue_dma_alignment(struct request_queue *q)

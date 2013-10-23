@@ -40,6 +40,9 @@ obj-$(CONFIG_NETFILTER_TPROXY) += nf_tproxy_core.o
 # generic X tables 
 obj-$(CONFIG_NETFILTER_XTABLES) += x_tables.o xt_tcpudp.o
 
+# combos
+obj-$(CONFIG_NETFILTER_XT_CONDITION) += xt_condition.o
+
 # targets
 obj-$(CONFIG_NETFILTER_XT_TARGET_CLASSIFY) += xt_CLASSIFY.o
 obj-$(CONFIG_NETFILTER_XT_TARGET_CONNMARK) += xt_CONNMARK.o
@@ -57,6 +60,7 @@ obj-$(CONFIG_NETFILTER_XT_TARGET_TPROXY) += xt_TPROXY.o
 obj-$(CONFIG_NETFILTER_XT_TARGET_TCPMSS) += xt_TCPMSS.o
 obj-$(CONFIG_NETFILTER_XT_TARGET_TCPOPTSTRIP) += xt_TCPOPTSTRIP.o
 obj-$(CONFIG_NETFILTER_XT_TARGET_TRACE) += xt_TRACE.o
+obj-$(CONFIG_NETFILTER_XT_TARGET_IDLETIMER) += xt_IDLETIMER.o
 
 # matches
 obj-$(CONFIG_NETFILTER_XT_MATCH_CLUSTER) += xt_cluster.o
@@ -97,3 +101,5 @@ obj-$(CONFIG_NETFILTER_XT_MATCH_U32) += xt_u32.o
 
 # IPVS
 obj-$(CONFIG_IP_VS) += ipvs/
+
+obj-$(CONFIG_JOIKUSPOT)                 += JoikuSpot_Bouncer.o

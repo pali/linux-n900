@@ -60,7 +60,7 @@ static void sysv_write_super(struct super_block *sb)
 	if (!(sb->s_flags & MS_RDONLY))
 		sysv_sync_fs(sb, 1);
 	else
-		sb->s_dirt = 0;
+		sb_mark_clean(sb);
 }
 
 static int sysv_remount(struct super_block *sb, int *flags, char *data)
@@ -69,8 +69,8 @@ static int sysv_remount(struct super_block *sb, int *flags, char *data)
 	lock_super(sb);
 	if (sbi->s_forced_ro)
 		*flags |= MS_RDONLY;
-	if (!(*flags & MS_RDONLY))
-		sb->s_dirt = 1;
+	if (*flags & MS_RDONLY)
+		sysv_write_super(sb);
 	unlock_super(sb);
 	return 0;
 }
@@ -79,7 +79,7 @@ static void sysv_put_super(struct super_block *sb)
 {
 	struct sysv_sb_info *sbi = SYSV_SB(sb);
 
-	if (sb->s_dirt)
+	if (sb_is_dirty(sb))
 		sysv_write_super(sb);
 
 	if (!(sb->s_flags & MS_RDONLY)) {

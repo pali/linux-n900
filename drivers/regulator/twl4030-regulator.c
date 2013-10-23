@@ -12,6 +12,7 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/err.h>
+#include <linux/delay.h>
 #include <linux/platform_device.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
@@ -39,6 +40,9 @@ struct twlreg_info {
 	/* voltage in mV = table[VSEL]; table_len must be a power-of-two */
 	u8			table_len;
 	const u16		*table;
+
+	/* regulator specific turn-on delay */
+	u16			delay;
 
 	/* chip constraints on regulator behavior */
 	u16			min_mV;
@@ -108,13 +112,18 @@ static int twl4030reg_enable(struct regulator_dev *rdev)
 {
 	struct twlreg_info	*info = rdev_get_drvdata(rdev);
 	int			grp;
+	int			ret;
 
 	grp = twl4030reg_read(info, VREG_GRP);
 	if (grp < 0)
 		return grp;
 
 	grp |= P1_GRP;
-	return twl4030reg_write(info, VREG_GRP, grp);
+	ret = twl4030reg_write(info, VREG_GRP, grp);
+
+	udelay(info->delay);
+
+	return ret;
 }
 
 static int twl4030reg_disable(struct regulator_dev *rdev)
@@ -126,7 +135,7 @@ static int twl4030reg_disable(struct regulator_dev *rdev)
 	if (grp < 0)
 		return grp;
 
-	grp &= ~P1_GRP;
+	grp &= ~(P1_GRP | P2_GRP | P3_GRP);
 	return twl4030reg_write(info, VREG_GRP, grp);
 }
 
@@ -260,6 +269,18 @@ static const u16 VSIM_VSEL_table[] = {
 static const u16 VDAC_VSEL_table[] = {
 	1200, 1300, 1800, 1800,
 };
+static const u16 VDD1_VSEL_table[] = {
+	800, 1450,
+};
+static const u16 VDD2_VSEL_table[] = {
+	800, 1450, 1500,
+};
+static const u16 VIO_VSEL_table[] = {
+	1800, 1850,
+};
+static const u16 VINTANA2_VSEL_table[] = {
+	2500, 2750,
+};
 
 
 static int twl4030ldo_list_voltage(struct regulator_dev *rdev, unsigned index)
@@ -356,11 +377,81 @@ static struct regulator_ops twl4030fixed_ops = {
 
 /*----------------------------------------------------------------------*/
 
-#define TWL_ADJUSTABLE_LDO(label, offset, num) { \
+/*
+ * VRRTC provides 32768Hz OSC and the PM digital state machine. It can also
+ * provide power to external devices. It is always on, but it can be put to
+ * a lower leakage sleep mode, depending on the external load. The sleep mode
+ * provides enough current for the internal users.
+ */
+
+static int twl4030vrrtc_enable(struct regulator_dev *rdev)
+{
+	u8 value;
+	int status;
+
+	status = twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &value,
+		REG_CFG_PWRANA2);
+	if (status <  0)
+		return status;
+
+	value &= ~(1<<6);
+
+	status = twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, value,
+		REG_CFG_PWRANA2);
+
+	return status;
+}
+
+static int twl4030vrrtc_disable(struct regulator_dev *rdev)
+{
+	u8 value;
+	int status;
+
+	status = twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &value,
+		REG_CFG_PWRANA2);
+	if (status <  0)
+		return status;
+
+	value |= 1<<6;
+
+	status = twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, value,
+		REG_CFG_PWRANA2);
+
+	return status;
+}
+
+static int twl4030vrrtc_is_enabled(struct regulator_dev *rdev)
+{
+	u8 value;
+	int status;
+
+	status = twl4030_i2c_read_u8(TWL4030_MODULE_PM_MASTER, &value,
+		REG_CFG_PWRANA2);
+	if (!status)
+		return !(value & (1<<6));
+	else
+		return status;
+}
+
+static struct regulator_ops twl4030vrrtc_ops = {
+	.list_voltage	= twl4030fixed_list_voltage,
+
+	.get_voltage	= twl4030fixed_get_voltage,
+
+	.enable		= twl4030vrrtc_enable,
+	.disable	= twl4030vrrtc_disable,
+	.is_enabled	= twl4030vrrtc_is_enabled,
+};
+
+
+/*----------------------------------------------------------------------*/
+
+#define TWL_ADJUSTABLE_LDO(label, offset, num, turnon_delay) { \
 	.base = offset, \
 	.id = num, \
 	.table_len = ARRAY_SIZE(label##_VSEL_table), \
 	.table = label##_VSEL_table, \
+	.delay = turnon_delay, \
 	.desc = { \
 		.name = #label, \
 		.id = TWL4030_REG_##label, \
@@ -371,10 +462,11 @@ static struct regulator_ops twl4030fixed_ops = {
 		}, \
 	}
 
-#define TWL_FIXED_LDO(label, offset, mVolts, num) { \
+#define TWL_FIXED_LDO(label, offset, mVolts, num, turnon_delay) { \
 	.base = offset, \
 	.id = num, \
 	.min_mV = mVolts, \
+	.delay = turnon_delay, \
 	.desc = { \
 		.name = #label, \
 		.id = TWL4030_REG_##label, \
@@ -385,35 +477,45 @@ static struct regulator_ops twl4030fixed_ops = {
 		}, \
 	}
 
+#define TWL_RTC_LDO(label, mVolts, num) { \
+	.id = num, \
+	.min_mV = mVolts, \
+	.desc = { \
+		.name = #label, \
+		.id = TWL4030_REG_##label, \
+		.n_voltages = 1, \
+		.ops = &twl4030vrrtc_ops, \
+		.type = REGULATOR_VOLTAGE, \
+		.owner = THIS_MODULE, \
+		}, \
+	}
+
 /*
  * We list regulators here if systems need some level of
  * software control over them after boot.
  */
 static struct twlreg_info twl4030_regs[] = {
-	TWL_ADJUSTABLE_LDO(VAUX1, 0x17, 1),
-	TWL_ADJUSTABLE_LDO(VAUX2_4030, 0x1b, 2),
-	TWL_ADJUSTABLE_LDO(VAUX2, 0x1b, 2),
-	TWL_ADJUSTABLE_LDO(VAUX3, 0x1f, 3),
-	TWL_ADJUSTABLE_LDO(VAUX4, 0x23, 4),
-	TWL_ADJUSTABLE_LDO(VMMC1, 0x27, 5),
-	TWL_ADJUSTABLE_LDO(VMMC2, 0x2b, 6),
-	/*
-	TWL_ADJUSTABLE_LDO(VPLL1, 0x2f, 7),
-	*/
-	TWL_ADJUSTABLE_LDO(VPLL2, 0x33, 8),
-	TWL_ADJUSTABLE_LDO(VSIM, 0x37, 9),
-	TWL_ADJUSTABLE_LDO(VDAC, 0x3b, 10),
-	/*
-	TWL_ADJUSTABLE_LDO(VINTANA1, 0x3f, 11),
-	TWL_ADJUSTABLE_LDO(VINTANA2, 0x43, 12),
-	TWL_ADJUSTABLE_LDO(VINTDIG, 0x47, 13),
-	TWL_SMPS(VIO, 0x4b, 14),
-	TWL_SMPS(VDD1, 0x55, 15),
-	TWL_SMPS(VDD2, 0x63, 16),
-	 */
-	TWL_FIXED_LDO(VUSB1V5, 0x71, 1500, 17),
-	TWL_FIXED_LDO(VUSB1V8, 0x74, 1800, 18),
-	TWL_FIXED_LDO(VUSB3V1, 0x77, 3100, 19),
+	TWL_ADJUSTABLE_LDO(VAUX1, 0x17, 1, 100),
+	TWL_ADJUSTABLE_LDO(VAUX2_4030, 0x1b, 2, 100),
+	TWL_ADJUSTABLE_LDO(VAUX2, 0x1b, 2, 100),
+	TWL_ADJUSTABLE_LDO(VAUX3, 0x1f, 3, 100),
+	TWL_ADJUSTABLE_LDO(VAUX4, 0x23, 4, 100),
+	TWL_ADJUSTABLE_LDO(VMMC1, 0x27, 5, 100),
+	TWL_ADJUSTABLE_LDO(VMMC2, 0x2b, 6, 100),
+	TWL_ADJUSTABLE_LDO(VPLL1, 0x2f, 7, 100),
+	TWL_ADJUSTABLE_LDO(VPLL2, 0x33, 8, 100),
+	TWL_ADJUSTABLE_LDO(VSIM, 0x37, 9, 100),
+	TWL_ADJUSTABLE_LDO(VDAC, 0x3b, 10, 100),
+	TWL_FIXED_LDO(VINTANA1, 0x3f, 1500, 11, 100),
+	TWL_ADJUSTABLE_LDO(VINTANA2, 0x43, 12, 100),
+	TWL_FIXED_LDO(VINTDIG, 0x47, 1500, 13, 100),
+	TWL_ADJUSTABLE_LDO(VIO, 0x4b, 14, 1000),
+	TWL_ADJUSTABLE_LDO(VDD1, 0x55, 15, 1000),
+	TWL_ADJUSTABLE_LDO(VDD2, 0x63, 16, 1000),
+	TWL_FIXED_LDO(VUSB1V5, 0x71, 1500, 17, 100),
+	TWL_FIXED_LDO(VUSB1V8, 0x74, 1800, 18, 100),
+	TWL_FIXED_LDO(VUSB3V1, 0x77, 3100, 19, 150),
+	TWL_RTC_LDO(VRRTC, 1500, 20),
 	/* VUSBCP is managed *only* by the USB subchip */
 };
 
@@ -446,6 +548,19 @@ static int twl4030reg_probe(struct platform_device *pdev)
 	c->valid_ops_mask &= REGULATOR_CHANGE_VOLTAGE
 				| REGULATOR_CHANGE_MODE
 				| REGULATOR_CHANGE_STATUS;
+	switch(pdev->id) {
+		case TWL4030_REG_VIO:
+		case TWL4030_REG_VDD1:
+		case TWL4030_REG_VDD2:
+		case TWL4030_REG_VPLL1:
+		case TWL4030_REG_VINTANA1:
+		case TWL4030_REG_VINTANA2:
+		case TWL4030_REG_VINTDIG:
+			c->always_on = true;
+			break;
+		default:
+			break;
+	}
 
 	rdev = regulator_register(&info->desc, &pdev->dev, initdata, info);
 	if (IS_ERR(rdev)) {

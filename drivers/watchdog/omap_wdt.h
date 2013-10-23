@@ -51,4 +51,10 @@
 #define PTV			0	/* prescale */
 #define GET_WLDR_VAL(secs)	(0xffffffff - ((secs) * (32768/(1<<PTV))) + 1)
 
+#ifdef CONFIG_PM
+extern void pm_wdt_ping(unsigned);
+#else
+static inline void pm_wdt_ping(unsigned v) {}
+#endif
+
 #endif				/* _OMAP_WATCHDOG_H */

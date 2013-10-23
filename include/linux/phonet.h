@@ -47,6 +47,9 @@
 
 /* ioctls */
 #define SIOCPNGETOBJECT		(SIOCPROTOPRIVATE + 0)
+#define SIOCPNADDRESOURCE	(SIOCPROTOPRIVATE + 14)
+#define SIOCPNDELRESOURCE	(SIOCPROTOPRIVATE + 15)
+#define FBUS_GETIFINDEX		_IOR(0xFB, 1, int)
 
 /* Phonet protocol header */
 struct phonethdr {

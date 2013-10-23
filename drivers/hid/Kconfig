@@ -326,6 +326,14 @@ config ZEROPLUS_FF
 	  Say Y here if you have a Zeroplus based game controller and want
 	  to have force feedback support for it.
 
+config HID_TWL4030_VIBRA
+	tristate "HID Support for TWL4030 Vibrator"
+	depends on TWL4030_CORE
+	select TWL4030_CODEC
+	select INPUT_FF_MEMLESS
+	---help---
+	  This option enables support for TWL4030 Vibrator Driver.
+
 endmenu
 
 endif # HID_SUPPORT

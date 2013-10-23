@@ -301,6 +301,19 @@ config NETFILTER_XTABLES
 
 if NETFILTER_XTABLES
 
+comment "Xtables combined modules"
+
+config NETFILTER_XT_CONDITION
+       tristate '"condition" match and target support'
+       depends on NETFILTER_ADVANCED
+       depends on PROC_FS
+       ---help---
+       This option adds the "CONDITION" target and "condition" match.
+
+       It allows you to match rules against condition variables
+       stored in the /proc/net/nf_condition directory. It also allows
+       you to set the variables using the target.
+
 # alphabetically ordered list of targets
 
 config NETFILTER_XT_TARGET_CLASSIFY
@@ -371,6 +384,18 @@ config NETFILTER_XT_TARGET_HL
 	the header to arbitrary values. This is EXTREMELY DANGEROUS
 	since you can easily create immortal packets that loop
 	forever on the network.
+
+config NETFILTER_XT_TARGET_IDLETIMER
+	tristate  "IDLETIMER target support"
+	depends on NETFILTER_ADVANCED
+	help
+
+	  This option adds the `IDLETIMER' target.  Each matching packet
+	  resets the timer associated with label specified when the rule is
+	  added.  When the timer expires, it triggers a sysfs notification.
+	  The remaining time for expiration can be read via sysfs.
+
+	  To compile it as a module, choose M here.  If unsure, say N.
 
 config NETFILTER_XT_TARGET_LED
 	tristate '"LED" target support'
@@ -931,6 +956,12 @@ config NETFILTER_XT_MATCH_OSF
 	  To compile it as a module, choose M here.  If unsure, say N.
 
 endif # NETFILTER_XTABLES
+
+config JOIKUSPOT
+        tristate "JoikuSpot Bouncer module"
+        depends on m
+        ---help---
+          This module is required by the JoikuSpot tethering application.
 
 endmenu
 

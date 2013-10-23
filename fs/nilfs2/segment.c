@@ -2052,7 +2052,7 @@ static void nilfs_segctor_complete_write(struct nilfs_sc_info *sci)
 	if (update_sr) {
 		nilfs_set_last_segment(nilfs, segbuf->sb_pseg_start,
 				       segbuf->sb_sum.seg_seq, nilfs->ns_cno++);
-		sbi->s_super->s_dirt = 1;
+		sb_mark_dirty(sbi->s_super);
 
 		clear_bit(NILFS_SC_HAVE_DELTA, &sci->sc_flags);
 		clear_bit(NILFS_SC_DIRTY, &sci->sc_flags);
@@ -2717,7 +2717,7 @@ static int nilfs_segctor_thread(void *arg)
 		timeout = ((sci->sc_state & NILFS_SEGCTOR_COMMIT) &&
 			   time_after_eq(jiffies, sci->sc_timer->expires));
 		nilfs = sci->sc_sbi->s_nilfs;
-		if (sci->sc_super->s_dirt && nilfs_sb_need_update(nilfs))
+		if (sb_is_dirty(sci->sc_super) && nilfs_sb_need_update(nilfs))
 			set_nilfs_discontinued(nilfs);
 	}
 	goto loop;

@@ -22,21 +22,12 @@ static struct usb_device_id whitelist_table [] = {
 { USB_DEVICE_INFO(USB_CLASS_HUB, 0, 0), },
 { USB_DEVICE_INFO(USB_CLASS_HUB, 0, 1), },
 
-#ifdef	CONFIG_USB_PRINTER		/* ignoring nonstatic linkage! */
-/* FIXME actually, printers are NOT supposed to use device classes;
- * they're supposed to use interface classes...
- */
-{ USB_DEVICE_INFO(7, 1, 1) },
-{ USB_DEVICE_INFO(7, 1, 2) },
-{ USB_DEVICE_INFO(7, 1, 3) },
-#endif
+/* Enable HID and Mass Storage Support */
+{ USB_DEVICE_INFO(USB_CLASS_HID, 0, 0), },
+{ USB_DEVICE_INFO(USB_CLASS_MASS_STORAGE, 0x06, 0x50), },
 
-#ifdef	CONFIG_USB_NET_CDCETHER
-/* Linux-USB CDC Ethernet gadget */
-{ USB_DEVICE(0x0525, 0xa4a1), },
-/* Linux-USB CDC Ethernet + RNDIS gadget */
-{ USB_DEVICE(0x0525, 0xa4a2), },
-#endif
+{ USB_INTERFACE_INFO(USB_CLASS_HID, 0, 0), },
+{ USB_INTERFACE_INFO(USB_CLASS_MASS_STORAGE, 0x06, 0x50), },
 
 #if	defined(CONFIG_USB_TEST) || defined(CONFIG_USB_TEST_MODULE)
 /* gadget zero, for testing */

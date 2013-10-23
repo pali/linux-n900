@@ -63,7 +63,6 @@ void xt_rateest_put(struct xt_rateest *est)
 	mutex_lock(&xt_rateest_mutex);
 	if (--est->refcnt == 0) {
 		hlist_del(&est->list);
-		gen_kill_estimator(&est->bstats, &est->rstats);
 		kfree(est);
 	}
 	mutex_unlock(&xt_rateest_mutex);
@@ -75,11 +74,37 @@ xt_rateest_tg(struct sk_buff *skb, const struct xt_target_param *par)
 {
 	const struct xt_rateest_target_info *info = par->targinfo;
 	struct gnet_stats_basic_packed *stats = &info->est->bstats;
+	struct gnet_stats_rate_est *rstats = &info->est->rstats;
+	struct xt_rateest_stats *istats = &info->est->istats;
+	unsigned long msecs;
+	int oldest;
 
 	spin_lock_bh(&info->est->lock);
+
+	/* update statistics */
 	stats->bytes += skb->len;
 	stats->packets++;
+
+	/* update reference data list */
+	istats->idx = (istats->idx + 1) & XT_RATEEST_MOD_MASK;
+	istats->totalsize -= istats->pkt_size[istats->idx];
+	istats->totalsize += skb->len;
+
+	istats->pkt_jiffies[istats->idx] = jiffies;
+	istats->pkt_size[istats->idx] = skb->len;
+
+	/* calculate current rates */
+	oldest = (istats->idx - istats->count) & XT_RATEEST_MOD_MASK;
+	if (unlikely(istats->count < XT_RATEEST_MAX_PACKETS - 1))
+		istats->count++;
+
 	spin_unlock_bh(&info->est->lock);
+
+	msecs = jiffies_to_msecs(jiffies - istats->pkt_jiffies[oldest]);
+	if (msecs) {
+		rstats->bps = ((istats->totalsize << 8) / msecs) << 2;
+		rstats->pps = (((istats->count + 1) << 8) / msecs) << 2;
+	}
 
 	return XT_CONTINUE;
 }
@@ -88,23 +113,9 @@ static bool xt_rateest_tg_checkentry(const struct xt_tgchk_param *par)
 {
 	struct xt_rateest_target_info *info = par->targinfo;
 	struct xt_rateest *est;
-	struct {
-		struct nlattr		opt;
-		struct gnet_estimator	est;
-	} cfg;
 
 	est = xt_rateest_lookup(info->name);
 	if (est) {
-		/*
-		 * If estimator parameters are specified, they must match the
-		 * existing estimator.
-		 */
-		if ((!info->interval && !info->ewma_log) ||
-		    (info->interval != est->params.interval ||
-		     info->ewma_log != est->params.ewma_log)) {
-			xt_rateest_put(est);
-			return false;
-		}
 		info->est = est;
 		return true;
 	}
@@ -116,25 +127,12 @@ static bool xt_rateest_tg_checkentry(const struct xt_tgchk_param *par)
 	strlcpy(est->name, info->name, sizeof(est->name));
 	spin_lock_init(&est->lock);
 	est->refcnt		= 1;
-	est->params.interval	= info->interval;
-	est->params.ewma_log	= info->ewma_log;
-
-	cfg.opt.nla_len		= nla_attr_size(sizeof(cfg.est));
-	cfg.opt.nla_type	= TCA_STATS_RATE_EST;
-	cfg.est.interval	= info->interval;
-	cfg.est.ewma_log	= info->ewma_log;
-
-	if (gen_new_estimator(&est->bstats, &est->rstats, &est->lock,
-			      &cfg.opt) < 0)
-		goto err2;
 
 	info->est = est;
 	xt_rateest_hash_insert(est);
 
 	return true;
 
-err2:
-	kfree(est);
 err1:
 	return false;
 }

@@ -892,7 +892,7 @@ static void pullup(struct at91_udc *udc, int is_on)
 
 			txvc |= AT91_UDP_TXVC_PUON;
 			at91_udp_write(udc, AT91_UDP_TXVC, txvc);
-		} else if (cpu_is_at91sam9261()) {
+		} else if (cpu_is_at91sam9261() || cpu_is_at91sam9g10()) {
 			u32	usbpucr;
 
 			usbpucr = at91_sys_read(AT91_MATRIX_USBPUCR);
@@ -910,7 +910,7 @@ static void pullup(struct at91_udc *udc, int is_on)
 
 			txvc &= ~AT91_UDP_TXVC_PUON;
 			at91_udp_write(udc, AT91_UDP_TXVC, txvc);
-		} else if (cpu_is_at91sam9261()) {
+		} else if (cpu_is_at91sam9261() || cpu_is_at91sam9g10()) {
 			u32	usbpucr;
 
 			usbpucr = at91_sys_read(AT91_MATRIX_USBPUCR);
@@ -1656,9 +1656,7 @@ static int __init at91udc_probe(struct platform_device *pdev)
 	if (!res)
 		return -ENXIO;
 
-	if (!request_mem_region(res->start,
-			res->end - res->start + 1,
-			driver_name)) {
+	if (!request_mem_region(res->start, resource_size(res), driver_name)) {
 		DBG("someone's using UDC memory\n");
 		return -EBUSY;
 	}
@@ -1692,14 +1690,14 @@ static int __init at91udc_probe(struct platform_device *pdev)
 		udc->ep[3].maxpacket = 64;
 		udc->ep[4].maxpacket = 512;
 		udc->ep[5].maxpacket = 512;
-	} else if (cpu_is_at91sam9261()) {
+	} else if (cpu_is_at91sam9261() || cpu_is_at91sam9g10()) {
 		udc->ep[3].maxpacket = 64;
 	} else if (cpu_is_at91sam9263()) {
 		udc->ep[0].maxpacket = 64;
 		udc->ep[3].maxpacket = 64;
 	}
 
-	udc->udp_baseaddr = ioremap(res->start, res->end - res->start + 1);
+	udc->udp_baseaddr = ioremap(res->start, resource_size(res));
 	if (!udc->udp_baseaddr) {
 		retval = -ENOMEM;
 		goto fail0a;
@@ -1781,7 +1779,7 @@ fail0a:
 	if (cpu_is_at91rm9200())
 		gpio_free(udc->board.pullup_pin);
 fail0:
-	release_mem_region(res->start, res->end - res->start + 1);
+	release_mem_region(res->start, resource_size(res));
 	DBG("%s probe failed, %d\n", driver_name, retval);
 	return retval;
 }
@@ -1813,7 +1811,7 @@ static int __exit at91udc_remove(struct platform_device *pdev)
 		gpio_free(udc->board.pullup_pin);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	release_mem_region(res->start, res->end - res->start + 1);
+	release_mem_region(res->start, resource_size(res));
 
 	clk_put(udc->iclk);
 	clk_put(udc->fclk);

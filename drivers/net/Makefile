@@ -162,6 +162,9 @@ obj-$(CONFIG_PPPOL2TP) += pppox.o pppol2tp.o
 obj-$(CONFIG_SLIP) += slip.o
 obj-$(CONFIG_SLHC) += slhc.o
 
+obj-$(CONFIG_N_FBUS) += n_fbus.o
+n_fbus-objs := fbus.o fbus-net.o
+
 obj-$(CONFIG_XEN_NETDEV_FRONTEND) += xen-netfront.o
 
 obj-$(CONFIG_DUMMY) += dummy.o

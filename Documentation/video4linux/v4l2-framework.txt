@@ -71,6 +71,10 @@ sub-device instances, the video_device struct stores V4L2 device node data
 and in the future a v4l2_fh struct will keep track of filehandle instances
 (this is not yet implemented).
 
+The V4L2 framework also optionally integrates with the media framework. If a
+driver sets the struct v4l2_device mdev field, sub-devices and video nodes
+will automatically appear in the media framework as entities.
+
 
 struct v4l2_device
 ------------------
@@ -83,11 +87,20 @@ You must register the device instance:
 
 	v4l2_device_register(struct device *dev, struct v4l2_device *v4l2_dev);
 
-Registration will initialize the v4l2_device struct and link dev->driver_data
-to v4l2_dev. If v4l2_dev->name is empty then it will be set to a value derived
-from dev (driver name followed by the bus_id, to be precise). If you set it
-up before calling v4l2_device_register then it will be untouched. If dev is
-NULL, then you *must* setup v4l2_dev->name before calling v4l2_device_register.
+Registration will initialize the v4l2_device struct. If the dev->driver_data
+field is NULL, it will be linked to v4l2_dev.
+
+Drivers that want integration with the media device framework need to set
+dev->driver_data manually to point to the driver-specific device structure
+that embed the struct v4l2_device instance. This is achieved by a
+dev_set_drvdata() call before registering the V4L2 device instance. They must
+also set the struct v4l2_device mdev field to point to a properly initialized
+and registered media_device instance.
+
+If v4l2_dev->name is empty then it will be set to a value derived from dev
+(driver name followed by the bus_id, to be precise). If you set it up before
+calling v4l2_device_register then it will be untouched. If dev is NULL, then
+you *must* setup v4l2_dev->name before calling v4l2_device_register.
 
 You can use v4l2_device_set_name() to set the name based on a driver name and
 a driver-global atomic_t instance. This will generate names like ivtv0, ivtv1,
@@ -108,6 +121,7 @@ You unregister with:
 
 	v4l2_device_unregister(struct v4l2_device *v4l2_dev);
 
+If the dev->driver_data field points to v4l2_dev, it will be reset to NULL.
 Unregistering will also automatically unregister all subdevs from the device.
 
 If you have a hotpluggable device (e.g. a USB device), then when a disconnect
@@ -192,6 +206,11 @@ You also need a way to go from the low-level struct to v4l2_subdev. For the
 common i2c_client struct the i2c_set_clientdata() call is used to store a
 v4l2_subdev pointer, for other busses you may have to use other methods.
 
+Bridges might also need to store per-subdev private data, such as a pointer to
+bridge-specific per-subdev private data. The v4l2_subdev structure provides
+host private data for that purpose that can be accessed with
+v4l2_get_subdev_hostdata() and v4l2_set_subdev_hostdata().
+
 From the bridge driver perspective you load the sub-device module and somehow
 obtain the v4l2_subdev pointer. For i2c devices this is easy: you call
 i2c_get_clientdata(). For other busses something similar needs to be done.
@@ -249,6 +268,26 @@ A sub-device driver initializes the v4l2_subdev struct using:
 Afterwards you need to initialize subdev->name with a unique name and set the
 module owner. This is done for you if you use the i2c helper functions.
 
+If integration with the media framework is needed, you must initialize the
+media_entity struct embedded in the v4l2_subdev struct (entity field) by
+calling media_entity_init():
+
+	struct media_pad *pads = &my_sd->pads;
+	int err;
+
+	err = media_entity_init(&sd->entity, npads, pads, 0);
+
+The pads array must have been previously initialized. There is no need to
+manually set the struct media_entity type and name fields, but the revision
+field must be initialized if needed.
+
+A reference to the entity will be automatically acquired/released when the
+subdev device node (if any) is opened/closed.
+
+Don't forget to cleanup the media entity before the sub-device is destroyed:
+
+	media_entity_cleanup(&sd->entity);
+
 A device (bridge) driver needs to register the v4l2_subdev with the
 v4l2_device:
 
@@ -257,6 +296,9 @@ v4l2_device:
 This can fail if the subdev module disappeared before it could be registered.
 After this function was called successfully the subdev->dev field points to
 the v4l2_device.
+
+If the v4l2_device parent device has a non-NULL mdev field, the sub-device
+entity will be automatically registered with the media device.
 
 You can unregister a sub-device using:
 
@@ -312,6 +354,61 @@ not contain any knowledge about the underlying hardware. So a driver might
 contain several subdevs that use an I2C bus, but also a subdev that is
 controlled through GPIO pins. This distinction is only relevant when setting
 up the device, but once the subdev is registered it is completely transparent.
+
+
+V4L2 sub-device userspace API
+-----------------------------
+
+Beside exposing a kernel API through the v4l2_subdev_ops structure, V4L2
+sub-devices can also be controlled directly by userspace applications.
+
+Device nodes named v4l-subdevX can be created in /dev to access sub-devices
+directly. If a sub-device supports direct userspace configuration it must set
+the V4L2_SUBDEV_FL_HAS_DEVNODE flag before being registered.
+
+After registering sub-devices, the v4l2_device driver can create device nodes
+for all registered sub-devices marked with V4L2_SUBDEV_FL_HAS_DEVNODE by calling
+v4l2_device_register_subdev_nodes(). Those device nodes will be automatically
+removed when sub-devices are unregistered.
+
+The device node handles a subset of the V4L2 API.
+
+VIDIOC_QUERYCTRL
+VIDIOC_QUERYMENU
+VIDIOC_G_CTRL
+VIDIOC_S_CTRL
+VIDIOC_G_EXT_CTRLS
+VIDIOC_S_EXT_CTRLS
+VIDIOC_TRY_EXT_CTRLS
+
+	The controls ioctls are identical to the ones defined in V4L2. They
+	behave identically, with the only exception that they deal only with
+	controls implemented in the sub-device. Depending on the driver, those
+	controls can be also be accessed through one (or several) V4L2 device
+	nodes.
+
+VIDIOC_DQEVENT
+VIDIOC_SUBSCRIBE_EVENT
+VIDIOC_UNSUBSCRIBE_EVENT
+
+	The events ioctls are identical to the ones defined in V4L2. They
+	behave identically, with the only exception that they deal only with
+	events generated by the sub-device. Depending on the driver, those
+	events can also be reported by one (or several) V4L2 device nodes.
+
+	Sub-device drivers that want to use events need to set the
+	V4L2_SUBDEV_USES_EVENTS v4l2_subdev::flags and initialize
+	v4l2_subdev::nevents to events queue depth before registering the
+	sub-device. After registration events can be queued as usual on the
+	v4l2_subdev::devnode device node.
+
+	To properly support events, the poll() file operation is also
+	implemented.
+
+Private ioctls
+
+	All ioctls not in the above list are passed directly to the sub-device
+	driver through the core::ioctl operation.
 
 
 I2C sub-device drivers
@@ -465,6 +562,21 @@ The v4l2_file_operations struct is a subset of file_operations. The main
 difference is that the inode argument is omitted since it is never used.
 
 
+If integration with the media framework is needed, you must initialize the
+media_entity struct embedded in the video_device struct (entity field) by
+calling media_entity_init():
+
+	struct media_pad *pad = &my_vdev->pad;
+	int err;
+
+	err = media_entity_init(&vdev->entity, 1, pad, 0);
+
+The pads array must have been previously initialized. There is no need to
+manually set the struct media_entity type and name fields.
+
+A reference to the entity will be automatically acquired/released when the
+video device is opened/closed.
+
 video_device registration
 -------------------------
 
@@ -476,6 +588,9 @@ for you.
 		video_device_release(vdev); /* or kfree(my_vdev); */
 		return err;
 	}
+
+If the v4l2_device parent device has a non-NULL mdev field, the video device
+entity will be automatically registered with the media device.
 
 Which device is registered depends on the type argument. The following
 types exist:
@@ -554,6 +669,13 @@ queueing buffers.
 
 When the last user of the video device node exits, then the vdev->release()
 callback is called and you can do the final cleanup there.
+
+Don't forget to cleanup the media entity associated with the video device if
+it has been initialized:
+
+	media_entity_cleanup(&vdev->entity);
+
+This can be done from the release callback.
 
 
 video_device helper functions
@@ -683,3 +805,100 @@ The better way to understand it is to take a look at vivi driver. One
 of the main reasons for vivi is to be a videobuf usage example. the
 vivi_thread_tick() does the task that the IRQ callback would do on PCI
 drivers (or the irq callback on USB).
+
+struct v4l2_fh
+--------------
+
+struct v4l2_fh provides a way to easily keep file handle specific data
+that is used by the V4L2 framework.
+
+struct v4l2_fh is allocated as a part of the driver's own file handle
+structure and is set to file->private_data in the driver's open
+function by the driver. Drivers can extract their own file handle
+structure by using the container_of macro.
+
+Useful functions:
+
+- v4l2_fh_init()
+
+  Initialise the file handle. This *MUST* be performed in the driver's
+  v4l2_file_operations->open() handler.
+
+- v4l2_fh_add()
+
+  Add a v4l2_fh to video_device file handle list. May be called after
+  initialising the file handle.
+
+- v4l2_fh_del()
+
+  Unassociate the file handle from video_device(). The file handle
+  exit function may now be called.
+
+- v4l2_fh_exit()
+
+  Uninitialise the file handle. After uninitialisation the v4l2_fh
+  memory can be freed.
+
+The users of v4l2_fh know whether a driver uses v4l2_fh as its
+file->private_data pointer by testing the V4L2_FL_USES_V4L2_FH bit in
+video_device->flags.
+
+V4L2 events
+-----------
+
+The V4L2 events provide a generic way to pass events to user space.
+The driver must use v4l2_fh to be able to support V4L2 events.
+
+Useful functions:
+
+- v4l2_event_alloc()
+
+  To use events, the driver must allocate events for the file handle. By
+  calling the function more than once, the driver may assure that at least n
+  events in total have been allocated. The function may not be called in
+  atomic context.
+
+- v4l2_event_queue()
+
+  Queue events to video device. The driver's only responsibility is to fill
+  in the type and the data fields. The other fields will be filled in by
+  V4L2.
+
+- v4l2_event_subscribe()
+
+  The video_device->ioctl_ops->vidioc_subscribe_event must check the driver
+  is able to produce events with specified event id. Then it calls
+  v4l2_event_subscribe() to subscribe the event.
+
+- v4l2_event_unsubscribe()
+
+  vidioc_unsubscribe_event in struct v4l2_ioctl_ops. A driver may use
+  v4l2_event_unsubscribe() directly unless it wants to be involved in
+  unsubscription process.
+
+  The special type V4L2_EVENT_ALL may be used to unsubscribe all events. The
+  drivers may want to handle this in a special way.
+
+- v4l2_event_pending()
+
+  Returns the number of pending events. Useful when implementing poll.
+
+Drivers do not initialise events directly. The events are initialised
+through v4l2_fh_init() if video_device->ioctl_ops->vidioc_subscribe_event is
+non-NULL. This *MUST* be performed in the driver's
+v4l2_file_operations->open() handler.
+
+Events are delivered to user space through the poll system call. The driver
+can use v4l2_fh->events->wait wait_queue_head_t as the argument for
+poll_wait().
+
+There are standard and private events. New standard events must use the
+smallest available event type. The drivers must allocate their events from
+their own class starting from class base. Class base is
+V4L2_EVENT_PRIVATE_START + n * 1000 where n is the lowest available number.
+The first event type in the class is reserved for future use, so the first
+available event type is 'class base + 1'.
+
+An example on how the V4L2 events may be used can be found in the OMAP
+3 ISP driver available at <URL:http://gitorious.org/omap3camera> as of
+writing this.

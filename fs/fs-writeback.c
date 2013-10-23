@@ -142,9 +142,9 @@ static void wb_clear_pending(struct bdi_writeback *wb, struct bdi_work *work)
 	if (atomic_dec_and_test(&work->pending)) {
 		struct backing_dev_info *bdi = wb->bdi;
 
-		spin_lock(&bdi->wb_lock);
+		spin_lock_bh(&bdi->wb_lock);
 		list_del_rcu(&work->list);
-		spin_unlock(&bdi->wb_lock);
+		spin_unlock_bh(&bdi->wb_lock);
 
 		wb_work_complete(work);
 	}
@@ -162,22 +162,18 @@ static void bdi_queue_work(struct backing_dev_info *bdi, struct bdi_work *work)
 	 * make sure the above stores are seen before the item is
 	 * noticed on the list
 	 */
-	spin_lock(&bdi->wb_lock);
+	spin_lock_bh(&bdi->wb_lock);
 	list_add_tail_rcu(&work->list, &bdi->work_list);
-	spin_unlock(&bdi->wb_lock);
-
-	/*
-	 * If the default thread isn't there, make sure we add it. When
-	 * it gets created and wakes up, we'll run this work.
-	 */
-	if (unlikely(list_empty_careful(&bdi->wb_list)))
+	if (bdi->wb.task) {
+		wake_up_process(bdi->wb.task);
+	} else {
+		/*
+		 * The bdi thread isn't there, wake up the forker thread which
+		 * will create and run it.
+		 */
 		wake_up_process(default_backing_dev_info.wb.task);
-	else {
-		struct bdi_writeback *wb = &bdi->wb;
-
-		if (wb->task)
-			wake_up_process(wb->task);
 	}
+	spin_unlock_bh(&bdi->wb_lock);
 }
 
 /*
@@ -204,10 +200,12 @@ static void bdi_alloc_queue_work(struct backing_dev_info *bdi,
 		bdi_work_init(work, args);
 		bdi_queue_work(bdi, work);
 	} else {
-		struct bdi_writeback *wb = &bdi->wb;
-
-		if (wb->task)
-			wake_up_process(wb->task);
+		spin_lock_bh(&bdi->wb_lock);
+		if (unlikely(!bdi->wb.task))
+			wake_up_process(default_backing_dev_info.wb.task);
+		else
+			wake_up_process(bdi->wb.task);
+		spin_unlock_bh(&bdi->wb_lock);
 	}
 }
 
@@ -936,35 +934,38 @@ long wb_do_writeback(struct bdi_writeback *wb, int force_wait)
  * Handle writeback of dirty data for the device backed by this bdi. Also
  * wakes up periodically and does kupdated style flushing.
  */
-int bdi_writeback_task(struct bdi_writeback *wb)
+int bdi_writeback_thread(struct bdi_writeback *wb)
 {
-	unsigned long last_active = jiffies;
-	unsigned long wait_jiffies = -1UL;
 	long pages_written;
 
 	while (!kthread_should_stop()) {
+		/*
+		 * Remove own delayed wake-up timer, since we are already awake
+		 * and we'll take care of the preriodic write-back.
+		 */
+		del_timer(&wb->wakeup_timer);
+
 		pages_written = wb_do_writeback(wb, 0);
 
 		if (pages_written)
-			last_active = jiffies;
-		else if (wait_jiffies != -1UL) {
-			unsigned long max_idle;
+			wb->last_active = jiffies;
 
-			/*
-			 * Longest period of inactivity that we tolerate. If we
-			 * see dirty data again later, the task will get
-			 * recreated automatically.
-			 */
-			max_idle = max(5UL * 60 * HZ, wait_jiffies);
-			if (time_after(jiffies, max_idle + last_active))
-				break;
+		set_current_state(TASK_INTERRUPTIBLE);
+		if (!list_empty(&wb->bdi->work_list) || kthread_should_stop()) {
+			__set_current_state(TASK_RUNNING);
+			continue;
 		}
 
-		if (dirty_writeback_interval) {
-			wait_jiffies = msecs_to_jiffies(dirty_writeback_interval * 10);
-			schedule_timeout_interruptible(wait_jiffies);
-		} else
+		if (wb_has_dirty_io(wb) && dirty_writeback_interval)
+			schedule_timeout(msecs_to_jiffies(dirty_writeback_interval * 10));
+		else {
+			/*
+			 * We have nothing to do, so can go sleep without any
+			 * timeout and save power. When a work is queued or
+			 * something is made dirty - we will be woken up.
+			 */
 			schedule();
+		}
 
 		try_to_freeze();
 	}
@@ -1061,6 +1062,8 @@ static noinline void block_dump___mark_inode_dirty(struct inode *inode)
 void __mark_inode_dirty(struct inode *inode, int flags)
 {
 	struct super_block *sb = inode->i_sb;
+	struct backing_dev_info *bdi = NULL;
+	bool wakeup_bdi = false;
 
 	/*
 	 * Don't do this for I_DIRTY_PAGES - that doesn't actually
@@ -1114,22 +1117,31 @@ void __mark_inode_dirty(struct inode *inode, int flags)
 		 * reposition it (that would break b_dirty time-ordering).
 		 */
 		if (!was_dirty) {
-			struct bdi_writeback *wb = &inode_to_bdi(inode)->wb;
-			struct backing_dev_info *bdi = wb->bdi;
+			bdi = inode_to_bdi(inode);
 
-			if (bdi_cap_writeback_dirty(bdi) &&
-			    !test_bit(BDI_registered, &bdi->state)) {
-				WARN_ON(1);
-				printk(KERN_ERR "bdi-%s not registered\n",
-								bdi->name);
+			if (bdi_cap_writeback_dirty(bdi)) {
+				WARN(!test_bit(BDI_registered, &bdi->state),
+				     "bdi-%s not registered\n", bdi->name);
+
+				/*
+				 * If this is the first dirty inode for this
+				 * bdi, we have to wake-up the corresponding
+				 * bdi thread to make sure background
+				 * write-back happens later.
+				 */
+				if (!wb_has_dirty_io(&bdi->wb))
+					wakeup_bdi = true;
 			}
 
 			inode->dirtied_when = jiffies;
-			list_move(&inode->i_list, &wb->b_dirty);
+			list_move(&inode->i_list, &bdi->wb.b_dirty);
 		}
 	}
 out:
 	spin_unlock(&inode_lock);
+
+	if (wakeup_bdi)
+		bdi_wakeup_thread_delayed(bdi);
 }
 EXPORT_SYMBOL(__mark_inode_dirty);
 

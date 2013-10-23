@@ -89,4 +89,11 @@ static inline int mtd_has_cmdlinepart(void) { return 1; }
 static inline int mtd_has_cmdlinepart(void) { return 0; }
 #endif
 
+int mtd_is_partition(struct mtd_info *mtd);
+int mtd_add_partition(struct mtd_info *master, char *name,
+		      long long offset, long long length);
+int mtd_del_partition(struct mtd_info *master, int partno);
+
+struct mtd_info *part_get_mtd_master(struct mtd_info *mtd);
+
 #endif

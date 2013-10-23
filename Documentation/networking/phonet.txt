@@ -86,6 +86,30 @@ The resource field is only used when sending and receiving;
 It is ignored by bind() and getsockname().
 
 
+Routing
+-------
+
+When a packet comes with a destination address not matching any Phonet
+address assigned to the host, it is routed. There are 4 steps:
+
+1) If the packet destination object is 0, the resource field is looked
+up. If a local socket has subscribed to that resource, the packet is
+delivered to that socket. For resource subscription, see below.
+
+2) The destination address is looked up in the permanent Phonet
+routing table. If a network interface is configured for the destination
+address, the packet is forwarded through that interface. The routing
+table is configured with the "pnroute" userland utility.
+
+3) Otherwise, the kernel checks which is the last network interface, if
+any, from which a packet was received, such that the source address of
+that earlier packet equals the destination address of the new packet.
+The new packet is then forwarded through the corresponding interface,
+if that interface still exists.
+
+4) By default, the packet is discarded.
+
+
 Low-level datagram protocol
 ---------------------------
 
@@ -110,6 +134,22 @@ other peer.
 This protocol follows the SOCK_DGRAM connection-less semantics.
 However, connect() and getpeername() are not supported, as they did
 not seem useful with Phonet usages (could be added easily).
+
+
+Resource subscription
+---------------------
+
+A Phonet datagram socket can be subscribed to any number of 8-bits
+Phonet resources, as follow:
+
+  uint32_t res = 0xXX;
+  ioctl(fd, SIOCPNADDRESOURCE, &res);
+
+Subscription is similarly cancelled using the SIOCPNDELRESOURCE I/O
+control request, or when the socket is closed.
+
+Note that no more than one socket can be subcribed to any given
+resource at a time. If not, ioctl() will return EBUSY.
 
 
 Phonet Pipe protocol

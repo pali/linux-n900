@@ -1,0 +1,30 @@
+config SECURITY_AEGIS_VALIDATOR
+	bool "Aegis Validator"
+	depends on SECURITY
+	depends on SECURITY_AEGIS
+	depends on SECURITY_AEGIS_RESTOK
+	depends on SECURITY_AEGIS_CREDP
+	depends on SECURITY_AEGIS_CREDS
+	select SECURITYFS
+	select CRYPTO_SHA1
+	select OMAP_SEC
+	select ARCH_OMAP3_HS
+	default y
+	help
+	  This kernel module checks integrity of applications, libraries and
+	  scripts (when started as a command) by comparing calculated SHA1
+	  hash value of the file to a stored reference value. The reference
+	  values are initialized in boot by loading a signed file that contains
+	  a list of reference hash values and pathnames. The module is based
+	  on the LSM hooks. The code has been derived from the code of DigSig
+	  project (http://disec.sourceforge.net/).
+
+	  If you are unsure how to answer this question, answer N.
+
+config SECURITY_AEGIS_VALIDATOR_INIT_PATH
+        string "Path to validator-init helper"
+        depends on SECURITY_AEGIS_VALIDATOR
+        default "/usr/sbin/validator-init"
+        help
+          Path to helper program forked by the kernel to load initial hashes.
+

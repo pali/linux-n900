@@ -110,4 +110,14 @@ config CHARGER_PCF50633
 	help
 	 Say Y to include support for NXP PCF50633 Main Battery Charger.
 
+config TWL5031_BCC
+	tristate "TWL5031 BCC Driver"
+	depends on TWL4030_CORE
+	help
+	The TWL5031 BCC driver enables VAC/USB chargers detection.
+
+	Say 'y' here to statically link this module into the kernel or 'm'
+	to build it as a dynamically loadable module. The module will be
+	called twl5031-bcc.ko
+
 endif # POWER_SUPPLY

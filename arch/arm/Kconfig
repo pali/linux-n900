@@ -10,6 +10,7 @@ config ARM
 	default y
 	select HAVE_AOUT
 	select HAVE_IDE
+	select HAVE_MEMBLOCK
 	select RTC_LIB
 	select SYS_SUPPORTS_APM_EMULATION
 	select HAVE_OPROFILE
@@ -18,6 +19,8 @@ config ARM
 	select HAVE_KRETPROBES if (HAVE_KPROBES)
 	select HAVE_FUNCTION_TRACER if (!XIP_KERNEL)
 	select HAVE_GENERIC_DMA_COHERENT
+	select HAVE_KERNEL_GZIP
+	select HAVE_KERNEL_LZO
 	help
 	  The ARM series is a line of low-power-consumption RISC chip designs
 	  licensed by ARM Ltd and targeted at embedded applications and
@@ -30,6 +33,9 @@ config HAVE_PWM
 	bool
 
 config SYS_SUPPORTS_APM_EMULATION
+	bool
+
+config HAVE_SCHED_CLOCK
 	bool
 
 config GENERIC_GPIO
@@ -641,7 +647,6 @@ config ARCH_SHARK
 config ARCH_LH7A40X
 	bool "Sharp LH7A40X"
 	select CPU_ARM922T
-	select ARCH_DISCONTIGMEM_ENABLE if !LH7A40X_CONTIGMEM
 	select ARCH_SPARSEMEM_ENABLE if !LH7A40X_CONTIGMEM
 	help
 	  Say Y here for systems based on one of the Sharp LH7A40X
@@ -687,6 +692,7 @@ config ARCH_OMAP
 	select ARCH_HAS_CPUFREQ
 	select GENERIC_TIME
 	select GENERIC_CLOCKEVENTS
+	select HAVE_SCHED_CLOCK
 	help
 	  Support for TI's OMAP platform (OMAP1 and OMAP2).
 
@@ -1011,6 +1017,8 @@ choice
 
 	config VMSPLIT_3G
 		bool "3G/1G user/kernel split"
+	config VMSPLIT_3G_OPT
+		bool "2.7/1.3G user/kernel split"
 	config VMSPLIT_2G
 		bool "2G/2G user/kernel split"
 	config VMSPLIT_1G
@@ -1021,6 +1029,7 @@ config PAGE_OFFSET
 	hex
 	default 0x40000000 if VMSPLIT_1G
 	default 0x80000000 if VMSPLIT_2G
+	default 0xB0000000 if VMSPLIT_3G_OPT
 	default 0xC0000000
 
 config NR_CPUS
@@ -1108,10 +1117,6 @@ config OABI_COMPAT
 config ARCH_HAS_HOLES_MEMORYMODEL
 	bool
 
-# Discontigmem is deprecated
-config ARCH_DISCONTIGMEM_ENABLE
-	bool
-
 config ARCH_SPARSEMEM_ENABLE
 	bool
 
@@ -1119,13 +1124,7 @@ config ARCH_SPARSEMEM_DEFAULT
 	def_bool ARCH_SPARSEMEM_ENABLE
 
 config ARCH_SELECT_MEMORY_MODEL
-	def_bool ARCH_DISCONTIGMEM_ENABLE && ARCH_SPARSEMEM_ENABLE
-
-config NODES_SHIFT
-	int
-	default "4" if ARCH_LH7A40X
-	default "2"
-	depends on NEED_MULTIPLE_NODES
+	def_bool ARCH_SPARSEMEM_ENABLE
 
 config HIGHMEM
 	bool "High Memory Support (EXPERIMENTAL)"
@@ -1332,6 +1331,18 @@ config ATAGS_PROC
 	  Should the atags used to boot the kernel be exported in an "atags"
 	  file in procfs. Useful with kexec.
 
+config CRASH_DUMP
+	bool "Build kdump crash kernel (EXPERIMENTAL)"
+	depends on EXPERIMENTAL
+	help
+	  Build a kernel suitable for use as kdump capture kernel. This should
+	  be set only on dump capture kernels. Note that dump capture kernel
+	  must be loaded into different physical address than the primary kernel
+	  (e.g set PHYS_OFFSET and related mach/Makefile.boot parameters
+	  to match value given in 'crashkernel=size@start').
+
+	  For more details see Documentation/kdump/kdump.txt
+
 endmenu
 
 menu "CPU Power Management"
@@ -1519,6 +1530,10 @@ endmenu
 source "net/Kconfig"
 
 source "drivers/Kconfig"
+
+if ARCH_OMAP
+source "drivers/cbus/Kconfig"
+endif
 
 source "fs/Kconfig"
 

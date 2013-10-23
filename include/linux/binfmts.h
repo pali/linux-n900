@@ -45,6 +45,11 @@ struct linux_binprm{
 #ifdef __alpha__
 	unsigned int taso:1;
 #endif
+#ifdef CONFIG_SECURITY_CREDENTIALS_POLICY
+	unsigned int hard_setgid:1;
+	unsigned int hard_setuid:1;
+	unsigned int policy_path:1;
+#endif
 	unsigned int recursion_depth;
 	struct file * file;
 	struct cred *cred;	/* new credentials */

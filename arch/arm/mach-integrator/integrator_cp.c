@@ -44,6 +44,8 @@
 #define INTCP_PA_MMC_BASE		0x1c000000
 #define INTCP_PA_AACI_BASE		0x1d000000
 
+#include "common.h"
+
 #define INTCP_PA_FLASH_BASE		0x24000000
 #define INTCP_FLASH_SIZE		SZ_32M
 
@@ -587,6 +589,7 @@ MACHINE_START(CINTEGRATOR, "ARM-IntegratorCP")
 	.io_pg_offst	= ((0xf1600000) >> 18) & 0xfffc,
 	.boot_params	= 0x00000100,
 	.map_io		= intcp_map_io,
+	.reserve	= integrator_reserve,
 	.init_irq	= intcp_init_irq,
 	.timer		= &cp_timer,
 	.init_machine	= intcp_init,

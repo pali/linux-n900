@@ -107,13 +107,23 @@ static int mmc_decode_cid(struct mmc_card *card)
 	return 0;
 }
 
+static void mmc_set_erase_size(struct mmc_card *card)
+{
+	if (card->ext_csd.erase_group_def & 1)
+		card->erase_size = card->ext_csd.hc_erase_size;
+	else
+		card->erase_size = card->csd.erase_size;
+
+	mmc_init_erase(card);
+}
+
 /*
  * Given a 128-bit response, decode to our card CSD structure.
  */
 static int mmc_decode_csd(struct mmc_card *card)
 {
 	struct mmc_csd *csd = &card->csd;
-	unsigned int e, m, csd_struct;
+	unsigned int e, m, a, b, csd_struct;
 	u32 *resp = card->raw_csd;
 
 	/*
@@ -121,7 +131,7 @@ static int mmc_decode_csd(struct mmc_card *card)
 	 * v1.2 has extra information in bits 15, 11 and 10.
 	 */
 	csd_struct = UNSTUFF_BITS(resp, 126, 2);
-	if (csd_struct != 1 && csd_struct != 2) {
+	if (csd_struct != 1 && csd_struct != 2 && csd_struct != 3) {
 		printk(KERN_ERR "%s: unrecognised CSD structure version %d\n",
 			mmc_hostname(card->host), csd_struct);
 		return -EINVAL;
@@ -149,6 +159,13 @@ static int mmc_decode_csd(struct mmc_card *card)
 	csd->r2w_factor = UNSTUFF_BITS(resp, 26, 3);
 	csd->write_blkbits = UNSTUFF_BITS(resp, 22, 4);
 	csd->write_partial = UNSTUFF_BITS(resp, 21, 1);
+
+	if (csd->write_blkbits >= 9) {
+		a = UNSTUFF_BITS(resp, 42, 5);
+		b = UNSTUFF_BITS(resp, 37, 5);
+		csd->erase_size = (a + 1) * (b + 1);
+		csd->erase_size <<= csd->write_blkbits - 9;
+	}
 
 	return 0;
 }
@@ -207,7 +224,7 @@ static int mmc_read_ext_csd(struct mmc_card *card)
 	}
 
 	card->ext_csd.rev = ext_csd[EXT_CSD_REV];
-	if (card->ext_csd.rev > 3) {
+	if (card->ext_csd.rev > 5) {
 		printk(KERN_ERR "%s: unrecognised EXT_CSD structure "
 			"version %d\n", mmc_hostname(card->host),
 			card->ext_csd.rev);
@@ -225,7 +242,7 @@ static int mmc_read_ext_csd(struct mmc_card *card)
 			mmc_card_set_blockaddr(card);
 	}
 
-	switch (ext_csd[EXT_CSD_CARD_TYPE]) {
+	switch (ext_csd[EXT_CSD_CARD_TYPE] & EXT_CSD_CARD_TYPE_MASK) {
 	case EXT_CSD_CARD_TYPE_52 | EXT_CSD_CARD_TYPE_26:
 		card->ext_csd.hs_max_dtr = 52000000;
 		break;
@@ -237,7 +254,6 @@ static int mmc_read_ext_csd(struct mmc_card *card)
 		printk(KERN_WARNING "%s: card is mmc v4 but doesn't "
 			"support any high-speed modes.\n",
 			mmc_hostname(card->host));
-		goto out;
 	}
 
 	if (card->ext_csd.rev >= 3) {
@@ -247,7 +263,30 @@ static int mmc_read_ext_csd(struct mmc_card *card)
 		if (sa_shift > 0 && sa_shift <= 0x17)
 			card->ext_csd.sa_timeout =
 					1 << ext_csd[EXT_CSD_S_A_TIMEOUT];
+		card->ext_csd.erase_group_def =
+			ext_csd[EXT_CSD_ERASE_GROUP_DEF];
+		card->ext_csd.hc_erase_timeout = 300 *
+			ext_csd[EXT_CSD_ERASE_TIMEOUT_MULT];
+		card->ext_csd.hc_erase_size =
+			ext_csd[EXT_CSD_HC_ERASE_GRP_SIZE] << 10;
 	}
+
+	if (card->ext_csd.rev >= 4) {
+		card->ext_csd.sec_trim_mult =
+			ext_csd[EXT_CSD_SEC_TRIM_MULT];
+		card->ext_csd.sec_erase_mult =
+			ext_csd[EXT_CSD_SEC_ERASE_MULT];
+		card->ext_csd.sec_feature_support =
+			ext_csd[EXT_CSD_SEC_FEATURE_SUPPORT];
+		card->ext_csd.trim_timeout = 300 *
+			ext_csd[EXT_CSD_TRIM_MULT];
+		card->ext_csd.rst_n_function = ext_csd[EXT_CSD_RST_N_FUNCTION];
+	}
+
+	if (ext_csd[EXT_CSD_ERASED_MEM_CONT])
+		card->erased_byte = 0xFF;
+	else
+		card->erased_byte = 0x0;
 
 out:
 	kfree(ext_csd);
@@ -260,6 +299,8 @@ MMC_DEV_ATTR(cid, "%08x%08x%08x%08x\n", card->raw_cid[0], card->raw_cid[1],
 MMC_DEV_ATTR(csd, "%08x%08x%08x%08x\n", card->raw_csd[0], card->raw_csd[1],
 	card->raw_csd[2], card->raw_csd[3]);
 MMC_DEV_ATTR(date, "%02d/%04d\n", card->cid.month, card->cid.year);
+MMC_DEV_ATTR(erase_size, "%u\n", card->erase_size << 9);
+MMC_DEV_ATTR(preferred_erase_size, "%u\n", card->pref_erase << 9);
 MMC_DEV_ATTR(fwrev, "0x%x\n", card->cid.fwrev);
 MMC_DEV_ATTR(hwrev, "0x%x\n", card->cid.hwrev);
 MMC_DEV_ATTR(manfid, "0x%06x\n", card->cid.manfid);
@@ -271,6 +312,8 @@ static struct attribute *mmc_std_attrs[] = {
 	&dev_attr_cid.attr,
 	&dev_attr_csd.attr,
 	&dev_attr_date.attr,
+	&dev_attr_erase_size.attr,
+	&dev_attr_preferred_erase_size.attr,
 	&dev_attr_fwrev.attr,
 	&dev_attr_hwrev.attr,
 	&dev_attr_manfid.attr,
@@ -293,6 +336,38 @@ static struct device_type mmc_type = {
 	.groups = mmc_attr_groups,
 };
 
+static int mmc_enable_hardware_reset(struct mmc_card *card)
+{
+	int err;
+	u8 r;
+
+	if (card->ext_csd.rev < 4)
+		return 0;
+
+	r = card->ext_csd.rst_n_function & EXT_CSD_RST_N_MASK;
+	if (r != EXT_CSD_RST_N_TEMP_DISABLED)
+		return 0;
+
+	r = (card->ext_csd.rst_n_function & ~EXT_CSD_RST_N_MASK) |
+	    EXT_CSD_RST_N_PERM_ENABLED;
+	err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
+			 EXT_CSD_RST_N_FUNCTION, r);
+
+	if (err && err != -EBADMSG)
+		return err;
+
+	if (err) {
+		printk(KERN_WARNING "%s: failed to enable hardware reset\n",
+			mmc_hostname(card->host));
+	} else {
+		printk(KERN_INFO "%s: hardware reset is now permanently "
+				 "enabled\n", mmc_hostname(card->host));
+		card->ext_csd.rst_n_function = r;
+	}
+
+	return 0;
+}
+
 /*
  * Handle the detection and initialisation of a card.
  *
@@ -304,7 +379,7 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 {
 	struct mmc_card *card;
 	int err;
-	u32 cid[4];
+	u32 cid[4], status;
 	unsigned int max_dtr;
 
 	BUG_ON(!host);
@@ -400,6 +475,28 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 			goto free_card;
 	}
 
+	/* Workaround for cards hanging when reading extended CSD */
+	if (!mmc_host_is_spi(host)) {
+		int i;
+
+		for (i = 0; i < 100; i++) {
+			err = mmc_send_status(card, &status);
+			if (err)
+				break;
+			/* Check for transfer state (4) */
+			if (R1_CURRENT_STATE(status) == 4 &&
+			    (status & R1_READY_FOR_DATA))
+				break;
+			err = -ETIMEDOUT;
+		}
+		if (err) {
+			printk(KERN_ERR "%s: mmc_init_card: card failed to "
+					"enter transfer state\n",
+					mmc_hostname(host));
+			goto free_card;
+		}
+	}
+
 	if (!oldcard) {
 		/*
 		 * Fetch and process extended CSD.
@@ -407,6 +504,13 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		err = mmc_read_ext_csd(card);
 		if (err)
 			goto free_card;
+		if (host->hw_reset_connected) {
+			err = mmc_enable_hardware_reset(card);
+			if (err)
+				goto free_card;
+		}
+		/* Erase size depends on CSD and Extended CSD */
+		mmc_set_erase_size(card);
 	}
 
 	/*
@@ -476,6 +580,17 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 
 	if (!oldcard)
 		host->card = card;
+
+	/* Workaround for Samsung eMMC power-up */
+	if (card->cid.manfid == 0x15 && mmc_card_can_sleep(host)) {
+		err = mmc_card_sleep(host);
+		if (err < 0) {
+			printk(KERN_ERR "%s: mmc_init_card: card sleep failed, "
+					"error %d\n", mmc_hostname(host), err);
+			return err;
+		}
+		mmc_card_awake(host);
+	}
 
 	return 0;
 

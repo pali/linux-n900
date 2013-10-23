@@ -97,6 +97,16 @@ config DEVKMEM
 	  kind of kernel debugging operations.
 	  When in doubt, say "N".
 
+config DEVMEM
+	bool "/dev/mem virtual device support"
+	default y
+	help
+	  Say Y here if you want to support the /dev/mem device. The
+	  /dev/mem device is standard, but rarely used, and may have
+	  security implications. See STRICT_DEVMEM before deciding
+	  you want this option.
+	  When in doubt, say "Y".
+
 config BFIN_JTAG_COMM
 	tristate "Blackfin JTAG Communication"
 	depends on BLACKFIN

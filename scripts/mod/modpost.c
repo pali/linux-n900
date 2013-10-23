@@ -32,6 +32,8 @@ static int warn_unresolved = 0;
 /* How a symbol is exported */
 static int sec_mismatch_count = 0;
 static int sec_mismatch_verbose = 1;
+/* Create the ELF hash tables */
+static int create_hash;
 
 enum export {
 	export_plain,      export_unused,     export_gpl,
@@ -86,7 +88,8 @@ static int is_vmlinux(const char *modname)
 		myname = modname;
 
 	return (strcmp(myname, "vmlinux") == 0) ||
-	       (strcmp(myname, "vmlinux.o") == 0);
+	       (strcmp(myname, "vmlinux.o") == 0) ||
+	       (strcmp(myname, ".tmp_vmlinux") == 0);
 }
 
 void *do_nofail(void *ptr, const char *expr)
@@ -141,6 +144,7 @@ static struct module *new_module(char *modname)
 
 struct symbol {
 	struct symbol *next;
+	struct symbol *link;
 	struct module *module;
 	unsigned int crc;
 	int crc_valid;
@@ -195,6 +199,14 @@ static struct symbol *new_symbol(const char *name, struct module *module,
 	new = symbolhash[hash] = alloc_symbol(name, 0, symbolhash[hash]);
 	new->module = module;
 	new->export = export;
+
+	if (!module->list_head) {
+		module->list_head = module->list_tail = new;
+	} else {
+		module->list_tail->link = new;
+		module->list_tail = new;
+	}
+
 	return new;
 }
 
@@ -211,6 +223,40 @@ static struct symbol *find_symbol(const char *name)
 			return s;
 	}
 	return NULL;
+}
+
+/**
+ * for_each_symbol - iterates over all symbols
+ * @mod: module whose symbols are iterated
+ * @export: export level we are interested in. If %export_unknown is given, all
+ *          symbols are traversed.
+ * @fn: callback which is called whenever symbol with given export level is
+ *      found. Can be %NULL.
+ * @data: private data passed for the @fn.
+ *
+ * Function iterates over all symbols in the same order which they appear in the
+ * actual ELF file. @export can be used to filter out symbols that are not in
+ * given export level.
+ *
+ * Returns number of symbols found in given export level.
+ */
+static int for_each_symbol(const struct module *mod,
+			   enum export export,
+			   void (*fn)(struct symbol *s, void *),
+			   void *data)
+{
+	struct symbol *s;
+	int n = 0;
+
+	for (s = mod->list_head; s; s = s->link) {
+		if (export == export_unknown || s->export == export) {
+			if (fn)
+				fn(s, data);
+			n++;
+		}
+	}
+
+	return n;
 }
 
 static struct {
@@ -951,6 +997,13 @@ static int section_mismatch(const char *fromsec, const char *tosec)
  *   fromsec = .data*
  *   atsym   =__param*
  *
+ * Pattern 1a:
+ *   module_param_call() ops can refer to __init set function if permissions=0
+ *   The pattern is identified by:
+ *   tosec   = .init.text
+ *   fromsec = .data*
+ *   atsym   = __param_ops_*
+ *
  * Pattern 2:
  *   Many drivers utilise a *driver container with references to
  *   add, remove, probe functions etc.
@@ -982,6 +1035,12 @@ static int secref_whitelist(const char *fromsec, const char *fromsym,
 	if (match(tosec, init_data_sections) &&
 	    match(fromsec, data_sections) &&
 	    (strncmp(fromsym, "__param", strlen("__param")) == 0))
+		return 0;
+
+	/* Check for pattern 1a */
+	if (strcmp(tosec, ".init.text") == 0 &&
+	    match(fromsec, data_sections) &&
+	    (strncmp(fromsym, "__param_ops_", strlen("__param_ops_")) == 0))
 		return 0;
 
 	/* Check for pattern 2 */
@@ -1727,9 +1786,16 @@ static void check_exports(struct module *mod)
  **/
 static void add_header(struct buffer *b, struct module *mod)
 {
+	if (is_vmlinux(mod->name)) {
+		buf_printf(b, "#include <linux/types.h>\n");
+		return;
+	}
+
 	buf_printf(b, "#include <linux/module.h>\n");
 	buf_printf(b, "#include <linux/vermagic.h>\n");
 	buf_printf(b, "#include <linux/compiler.h>\n");
+	if (create_hash)
+		buf_printf(b, "#include <linux/types.h>\n");
 	buf_printf(b, "\n");
 	buf_printf(b, "MODULE_INFO(vermagic, VERMAGIC_STRING);\n");
 	buf_printf(b, "\n");
@@ -2066,6 +2132,157 @@ static void write_markers(const char *fname)
 	write_if_changed(&buf, fname);
 }
 
+/*
+ * Array used to determine the number of hash table buckets to use based on the
+ * number of symbols there are. If there are fewer than 3 symbols we use 1
+ * bucket, fewer than 17 symbols we use 3 buckets, fewer than 37 we use 17
+ * buckets, and so forth.  We never use more than 32771 buckets.
+ *
+ * This is directly taken from binutils.
+ */
+static const size_t elf_buckets[] = {
+	1, 3, 17, 37, 67, 97, 131, 197, 263, 521, 1031, 2053, 4099, 8209,
+	16411, 32771, 0,
+};
+
+static size_t compute_bucket_count(int nsyms)
+{
+	size_t best_size = 0;
+	int i;
+
+	for (i = 0; elf_buckets[i] != 0; i++) {
+		best_size = elf_buckets[i];
+		if (nsyms < elf_buckets[i + 1])
+			break;
+	}
+
+	return best_size;
+}
+
+static unsigned long elf_hash(const char *sname)
+{
+	const unsigned char *name = (const unsigned char *)sname;
+	unsigned long h = 0, g;
+
+	while (*name != '\0') {
+		h = (h << 4) + *name++;
+		g = h & 0xf0000000;
+		if (g)
+			h ^= g >> 24;
+		h &= ~g;
+	}
+
+	return h;
+}
+
+/*
+ * STN_UNDEF is used to mark an invalid symbol table entry. This is normally
+ * defined to be 0. However, in kernel symbol tables entry 0 is valid so we use
+ * -1 instead.
+ */
+#ifdef STN_UNDEF
+#undef STN_UNDEF
+#endif
+#define STN_UNDEF	((unsigned int)-1)
+
+struct elf_htable {
+	Elf32_Word nbucket;
+	Elf32_Word nchain;
+	Elf32_Word *buckets;
+	Elf32_Word *chains;
+	size_t symidx;
+};
+
+static void add_symbol_to_hashtable(struct symbol *s, void *data)
+{
+	struct elf_htable *htable = data;
+	size_t h = elf_hash(s->name) % htable->nbucket;
+
+	/*
+	 * Store the index of the export symbol ksym in its related __ksymtable
+	 * in the hash table buckets for using during lookup.  If the slot is
+	 * already used (!= STN_UNDEF) then we have a collision it needs to
+	 * create an entry in the chain.
+	 */
+	if (htable->buckets[h] == STN_UNDEF) {
+		htable->buckets[h] = htable->symidx;
+	} else {
+		size_t symidx = htable->buckets[h];
+
+		while (htable->chains[symidx] != STN_UNDEF) {
+			symidx = htable->chains[symidx];
+			if (symidx >= htable->nchain)
+				fatal("modpost: failed to create hash table\n");
+		}
+		htable->chains[symidx] = htable->symidx;
+	}
+	htable->symidx++;
+}
+
+static void add_hashtable(struct buffer *b, const struct module *mod,
+			  enum export export, const char *table)
+{
+	struct elf_htable htable;
+	size_t nsyms, i;
+
+	nsyms = for_each_symbol(mod, export, NULL, NULL);
+	if (!nsyms)
+		return;
+
+	memset(&htable, 0, sizeof(htable));
+
+	htable.nbucket = compute_bucket_count(nsyms);
+	htable.buckets = malloc(htable.nbucket * sizeof(Elf32_Word));
+	if (!htable.buckets)
+		return;
+
+	htable.nchain = (Elf32_Word)nsyms;
+	htable.chains = malloc(htable.nchain * sizeof(Elf32_Word));
+	if (!htable.chains)
+		return;
+
+	/* initialize buckets and chains with STN_UNDEF */
+	memset(htable.buckets, STN_UNDEF, htable.nbucket * sizeof(Elf32_Word));
+	memset(htable.chains, STN_UNDEF, htable.nchain * sizeof(Elf32_Word));
+
+	/* add symbols to the hash table  */
+	for_each_symbol(mod, export, add_symbol_to_hashtable, &htable);
+
+	/* and output the hash table to the file */
+	buf_printf(b, "\n");
+	buf_printf(b, "static u32 htable%s[]\n", table);
+	buf_printf(b, "__used\n");
+	buf_printf(b, "__attribute__((section(\"%s.htable\"))) = {\n",
+		   table);
+	/* 1st entry is nbucket */
+	buf_printf(b, "\t%u, /* bucket length */\n", htable.nbucket);
+	/* 2nd entry is nchain */
+	buf_printf(b, "\t%u, /* chain length */\n", htable.nchain);
+	buf_printf(b, "\t/* the buckets */\n\t");
+	for (i = 0; i < htable.nbucket; i++) {
+		buf_printf(b, "%4d, ", htable.buckets[i]);
+		if ((i + 1) % 12 == 0)
+			buf_printf(b, "\n\t");
+	}
+	buf_printf(b, "\n\t/* the chains */\n\t");
+	for (i = 0; i < htable.nchain; i++) {
+		buf_printf(b, "%4d, ", htable.chains[i]);
+		if ((i + 1) % 12 == 0 && i < htable.nchain - 1)
+			buf_printf(b, "\n\t");
+	}
+	buf_printf(b, "\n};\n");
+
+	free(htable.buckets);
+	free(htable.chains);
+}
+
+static void add_hashtables(struct buffer *b, struct module *mod)
+{
+	add_hashtable(b, mod, export_plain, "__ksymtab");
+	add_hashtable(b, mod, export_gpl, "__ksymtab_gpl");
+	add_hashtable(b, mod, export_gpl_future, "__ksymtab_gpl_future");
+}
+
 struct ext_sym_list {
 	struct ext_sym_list *next;
 	const char *file;
@@ -2084,7 +2301,7 @@ int main(int argc, char **argv)
 	struct ext_sym_list *extsym_iter;
 	struct ext_sym_list *extsym_start = NULL;
 
-	while ((opt = getopt(argc, argv, "i:I:e:cmsSo:awM:K:")) != -1) {
+	while ((opt = getopt(argc, argv, "i:I:e:cmsSo:awM:K:H")) != -1) {
 		switch (opt) {
 		case 'i':
 			kernel_read = optarg;
@@ -2122,6 +2339,9 @@ int main(int argc, char **argv)
 		case 'w':
 			warn_unresolved = 1;
 			break;
+		case 'H':
+			create_hash = 1;
+			break;
 			case 'M':
 				markers_write = optarg;
 				break;
@@ -2153,6 +2373,18 @@ int main(int argc, char **argv)
 		check_exports(mod);
 	}
 
+	/* We have asked to create the ELF hash table for a vmlinux */
+	if (create_hash && is_vmlinux(modules->name)) {
+		char fname[strlen(modules->name) + 10];
+
+		buf.pos = 0;
+		add_header(&buf, modules);
+		add_hashtables(&buf, modules);
+		sprintf(fname, "%s.mod.c", modules->name);
+		write_if_changed(&buf, fname);
+		return 0;
+	}
+
 	err = 0;
 
 	for (mod = modules; mod; mod = mod->next) {
@@ -2169,6 +2401,8 @@ int main(int argc, char **argv)
 		add_depends(&buf, mod, modules);
 		add_moddevtable(&buf, mod);
 		add_srcversion(&buf, mod);
+		if (create_hash)
+			add_hashtables(&buf, mod);
 
 		sprintf(fname, "%s.mod.c", mod->name);
 		write_if_changed(&buf, fname);

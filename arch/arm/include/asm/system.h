@@ -69,6 +69,8 @@ struct task_struct;
 extern unsigned int system_rev;
 extern unsigned int system_serial_low;
 extern unsigned int system_serial_high;
+#define SYSTEM_SOC_INFO_SIZE			128
+extern char system_soc_info[SYSTEM_SOC_INFO_SIZE];
 extern unsigned int mem_fclk_21285;
 
 struct pt_regs;
@@ -218,6 +220,39 @@ do {									\
 	last = __switch_to(prev,task_thread_info(prev), task_thread_info(next));	\
 } while (0)
 
+static inline unsigned long __xchg_local_generic(unsigned long x,
+						 volatile void *ptr, int size)
+{
+	extern void __bad_xchg(volatile void *, int);
+	unsigned long ret;
+	unsigned long flags;
+
+	switch (size) {
+	case 1:
+		raw_local_irq_save(flags);
+		ret = *(volatile unsigned char *)ptr;
+		*(volatile unsigned char *)ptr = x;
+		raw_local_irq_restore(flags);
+		break;
+
+	case 2:
+		raw_local_irq_save(flags);
+		ret = *(volatile unsigned short *)ptr;
+		*(volatile unsigned short *)ptr = x;
+		raw_local_irq_restore(flags);
+		break;
+
+	case 4:
+		raw_local_irq_save(flags);
+		ret = *(volatile unsigned long *)ptr;
+		*(volatile unsigned long *)ptr = x;
+		raw_local_irq_restore(flags);
+		break;
+	}
+
+	return ret;
+}
+
 #if defined(CONFIG_CPU_SA1100) || defined(CONFIG_CPU_SA110)
 /*
  * On the StrongARM, "swp" is terminally broken since it bypasses the
@@ -262,6 +297,26 @@ static inline unsigned long __xchg(unsigned long x, volatile void *ptr, int size
 			: "r" (x), "r" (ptr)
 			: "memory", "cc");
 		break;
+#ifdef CONFIG_CPU_32v6K
+	case 2:
+		asm volatile("@	__xchg2\n"
+		"1:	ldrexh	%0, [%3]\n"
+		"	strexh	%1, %2, [%3]\n"
+		"	teq	%1, #0\n"
+		"	bne	1b"
+			: "=&r" (ret), "=&r" (tmp)
+			: "r" (x), "r" (ptr)
+			: "memory", "cc");
+		break;
+#else
+	case 2:
+#ifdef CONFIG_SMP
+		__bad_xchg(ptr, size), ret = 0;
+#else
+		ret = __xchg_local_generic(x, ptr, 2);
+#endif
+		break;
+#endif
 	case 4:
 		asm volatile("@	__xchg4\n"
 		"1:	ldrex	%0, [%3]\n"
@@ -277,17 +332,9 @@ static inline unsigned long __xchg(unsigned long x, volatile void *ptr, int size
 #error SMP is not supported on this platform
 #endif
 	case 1:
-		raw_local_irq_save(flags);
-		ret = *(volatile unsigned char *)ptr;
-		*(volatile unsigned char *)ptr = x;
-		raw_local_irq_restore(flags);
-		break;
-
+	case 2:
 	case 4:
-		raw_local_irq_save(flags);
-		ret = *(volatile unsigned long *)ptr;
-		*(volatile unsigned long *)ptr = x;
-		raw_local_irq_restore(flags);
+		ret = __xchg_local_generic(x, ptr, size);
 		break;
 #else
 	case 1:

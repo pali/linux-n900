@@ -498,7 +498,7 @@ int fat_alloc_clusters(struct inode *inode, int *cluster, int nr_cluster)
 				sbi->prev_free = entry;
 				if (sbi->free_clusters != -1)
 					sbi->free_clusters--;
-				sb->s_dirt = 1;
+				sb_mark_dirty(sb);
 
 				cluster[idx_clus] = entry;
 				idx_clus++;
@@ -520,7 +520,7 @@ int fat_alloc_clusters(struct inode *inode, int *cluster, int nr_cluster)
 	/* Couldn't allocate the free entries */
 	sbi->free_clusters = 0;
 	sbi->free_clus_valid = 1;
-	sb->s_dirt = 1;
+	sb_mark_dirty(sb);
 	err = -ENOSPC;
 
 out:
@@ -566,22 +566,27 @@ int fat_free_clusters(struct inode *inode, int cluster)
 			goto error;
 		}
 
-		/* 
-		 * Issue discard for the sectors we no longer care about,
-		 * batching contiguous clusters into one request
-		 */
-		if (cluster != fatent.entry + 1) {
-			int nr_clus = fatent.entry - first_cl + 1;
+		if (sbi->options.discard) {
+			/*
+			 * Issue discard for the sectors we no longer
+			 * care about, batching contiguous clusters
+			 * into one request
+			 */
+			if (cluster != fatent.entry + 1) {
+				int nr_clus = fatent.entry - first_cl + 1;
 
-			sb_issue_discard(sb, fat_clus_to_blknr(sbi, first_cl),
-					 nr_clus * sbi->sec_per_clus);
-			first_cl = cluster;
+				sb_issue_discard(sb,
+					fat_clus_to_blknr(sbi, first_cl),
+					nr_clus * sbi->sec_per_clus);
+
+				first_cl = cluster;
+			}
 		}
 
 		ops->ent_put(&fatent, FAT_ENT_FREE);
 		if (sbi->free_clusters != -1) {
 			sbi->free_clusters++;
-			sb->s_dirt = 1;
+			sb_mark_dirty(sb);
 		}
 
 		if (nr_bhs + fatent.nr_bhs > MAX_BUF_PER_PAGE) {
@@ -671,7 +676,7 @@ int fat_count_free_clusters(struct super_block *sb)
 	}
 	sbi->free_clusters = free;
 	sbi->free_clus_valid = 1;
-	sb->s_dirt = 1;
+	sb_mark_dirty(sb);
 	fatent_brelse(&fatent);
 out:
 	unlock_fat(sbi);

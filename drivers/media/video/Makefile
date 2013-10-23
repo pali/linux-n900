@@ -10,7 +10,8 @@ stkwebcam-objs	:=	stk-webcam.o stk-sensor.o
 
 omap2cam-objs	:=	omap24xxcam.o omap24xxcam-dma.o
 
-videodev-objs	:=	v4l2-dev.o v4l2-ioctl.o v4l2-device.o
+videodev-objs	:=	v4l2-dev.o v4l2-ioctl.o v4l2-device.o v4l2-subdev.o \
+			v4l2-fh.o v4l2-event.o v4l2-ctrls.o
 
 # V4L2 core modules
 
@@ -118,6 +119,10 @@ obj-$(CONFIG_VIDEO_CX2341X) += cx2341x.o
 
 obj-$(CONFIG_VIDEO_CAFE_CCIC) += cafe_ccic.o
 
+obj-$(CONFIG_VIDEO_OMAP3)	+= omap3isp/
+
+obj-$(CONFIG_VIDEO_SMIAPP_POWER) += smiapp-power.o
+
 obj-$(CONFIG_USB_DABUSB)        += dabusb.o
 obj-$(CONFIG_USB_OV511)         += ov511.o
 obj-$(CONFIG_USB_SE401)         += se401.o
@@ -125,6 +130,12 @@ obj-$(CONFIG_USB_STV680)        += stv680.o
 obj-$(CONFIG_USB_W9968CF)       += w9968cf.o
 obj-$(CONFIG_USB_ZR364XX)       += zr364xx.o
 obj-$(CONFIG_USB_STKWEBCAM)     += stkwebcam.o
+
+obj-$(CONFIG_VIDEO_AD5807)      += ad5807.o
+obj-$(CONFIG_VIDEO_AD58XX)      += ad58xx.o
+obj-$(CONFIG_VIDEO_AS3645A)     += as3645a.o
+smiapp-objs                      = smiapp-core.o smiapp-regs.o
+obj-$(CONFIG_VIDEO_SMIAPP)      += smiapp.o
 
 obj-$(CONFIG_USB_SN9C102)       += sn9c102/
 obj-$(CONFIG_USB_ET61X251)      += et61x251/
@@ -147,7 +158,7 @@ obj-$(CONFIG_VIDEO_VIVI) += vivi.o
 obj-$(CONFIG_VIDEO_CX23885) += cx23885/
 
 obj-$(CONFIG_VIDEO_OMAP2)		+= omap2cam.o
-obj-$(CONFIG_SOC_CAMERA)		+= soc_camera.o
+obj-$(CONFIG_SOC_CAMERA)		+= soc_camera.o soc_mediabus.o
 obj-$(CONFIG_SOC_CAMERA_PLATFORM)	+= soc_camera_platform.o
 # soc-camera host drivers have to be linked after camera drivers
 obj-$(CONFIG_VIDEO_MX1)			+= mx1_camera.o

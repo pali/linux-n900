@@ -1792,7 +1792,7 @@ static void at76_mac80211_stop(struct ieee80211_hw *hw)
 }
 
 static int at76_add_interface(struct ieee80211_hw *hw,
-			      struct ieee80211_if_init_conf *conf)
+			      struct ieee80211_vif *vif)
 {
 	struct at76_priv *priv = hw->priv;
 	int ret = 0;
@@ -1801,7 +1801,7 @@ static int at76_add_interface(struct ieee80211_hw *hw,
 
 	mutex_lock(&priv->mtx);
 
-	switch (conf->type) {
+	switch (vif->type) {
 	case NL80211_IFTYPE_STATION:
 		priv->iw_mode = IW_MODE_INFRA;
 		break;
@@ -1817,7 +1817,7 @@ exit:
 }
 
 static void at76_remove_interface(struct ieee80211_hw *hw,
-				  struct ieee80211_if_init_conf *conf)
+				  struct ieee80211_vif *vif)
 {
 	at76_dbg(DBG_MAC80211, "%s()", __func__);
 }

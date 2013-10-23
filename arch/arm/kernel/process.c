@@ -29,6 +29,7 @@
 #include <linux/tick.h>
 #include <linux/utsname.h>
 #include <linux/uaccess.h>
+#include <linux/pm_qos_params.h>
 
 #include <asm/leds.h>
 #include <asm/processor.h>
@@ -147,6 +148,12 @@ void cpu_idle(void)
 
 	/* endless idle loop with no priority at all */
 	while (1) {
+		if (pm_qos_requirement(PM_QOS_CPU_DMA_LATENCY) == 0) {
+			preempt_enable_no_resched();
+			schedule();
+			preempt_disable();
+			continue;
+		}
 		tick_nohz_stop_sched_tick(1);
 		leds_event(led_idle_start);
 		while (!need_resched()) {

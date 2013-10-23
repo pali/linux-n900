@@ -325,7 +325,7 @@ int load_nilfs(struct the_nilfs *nilfs, struct nilfs_sb_info *sbi)
 			goto failed;
 		}
 		if (ri.ri_need_recovery == NILFS_RECOVERY_SR_UPDATED)
-			sbi->s_super->s_dirt = 1;
+			sb_mark_dirty(sbi->s_super);
 	}
 
 	set_nilfs_loaded(nilfs);

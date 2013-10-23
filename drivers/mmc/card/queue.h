@@ -13,6 +13,7 @@ struct mmc_queue {
 	int			(*issue_fn)(struct mmc_queue *, struct request *);
 	void			*data;
 	struct request_queue	*queue;
+	make_request_fn		*saved_make_request_fn;
 	struct scatterlist	*sg;
 	char			*bounce_buf;
 	struct scatterlist	*bounce_sg;

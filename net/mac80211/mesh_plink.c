@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008 open80211s Ltd.
+ * Copyright (c) 2008, 2009 open80211s Ltd.
  * Author:     Luis Carlos Cobo <luisca@cozybit.com>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -18,9 +18,8 @@
 #define mpl_dbg(fmt, args...)	do { (void)(0); } while (0)
 #endif
 
-#define PLINK_GET_FRAME_SUBTYPE(p) (p)
-#define PLINK_GET_LLID(p) (p + 1)
-#define PLINK_GET_PLID(p) (p + 3)
+#define PLINK_GET_LLID(p) (p + 4)
+#define PLINK_GET_PLID(p) (p + 6)
 
 #define mod_plink_timer(s, t) (mod_timer(&s->plink_timer, \
 				jiffies + HZ * t / 1000))
@@ -65,6 +64,7 @@ void mesh_plink_inc_estab_count(struct ieee80211_sub_if_data *sdata)
 {
 	atomic_inc(&sdata->u.mesh.mshstats.estab_plinks);
 	mesh_accept_plinks_update(sdata);
+	ieee80211_bss_info_change_notify(sdata, BSS_CHANGED_BEACON);
 }
 
 static inline
@@ -72,12 +72,13 @@ void mesh_plink_dec_estab_count(struct ieee80211_sub_if_data *sdata)
 {
 	atomic_dec(&sdata->u.mesh.mshstats.estab_plinks);
 	mesh_accept_plinks_update(sdata);
+	ieee80211_bss_info_change_notify(sdata, BSS_CHANGED_BEACON);
 }
 
 /**
  * mesh_plink_fsm_restart - restart a mesh peer link finite state machine
  *
- * @sta: mes peer link to restart
+ * @sta: mesh peer link to restart
  *
  * Locking: this function must be called holding sta->lock
  */
@@ -101,7 +102,7 @@ static struct sta_info *mesh_plink_alloc(struct ieee80211_sub_if_data *sdata,
 	if (local->num_sta >= MESH_MAX_PLINKS)
 		return NULL;
 
-	sta = sta_info_alloc(sdata, hw_addr, GFP_ATOMIC);
+	sta = sta_info_alloc(sdata, hw_addr, GFP_KERNEL);
 	if (!sta)
 		return NULL;
 
@@ -152,6 +153,7 @@ static int mesh_plink_frame_tx(struct ieee80211_sub_if_data *sdata,
 	struct sk_buff *skb = dev_alloc_skb(local->hw.extra_tx_headroom + 400);
 	struct ieee80211_mgmt *mgmt;
 	bool include_plid = false;
+	static const u8 meshpeeringproto[] = { 0x00, 0x0F, 0xAC, 0x2A };
 	u8 *pos;
 	int ie_len;
 
@@ -167,9 +169,9 @@ static int mesh_plink_frame_tx(struct ieee80211_sub_if_data *sdata,
 	mgmt->frame_control = cpu_to_le16(IEEE80211_FTYPE_MGMT |
 					  IEEE80211_STYPE_ACTION);
 	memcpy(mgmt->da, da, ETH_ALEN);
-	memcpy(mgmt->sa, sdata->dev->dev_addr, ETH_ALEN);
+	memcpy(mgmt->sa, sdata->vif.addr, ETH_ALEN);
 	/* BSSID is left zeroed, wildcard value */
-	mgmt->u.action.category = PLINK_CATEGORY;
+	mgmt->u.action.category = MESH_PLINK_CATEGORY;
 	mgmt->u.action.u.plink_action.action_code = action;
 
 	if (action == PLINK_CLOSE)
@@ -179,7 +181,8 @@ static int mesh_plink_frame_tx(struct ieee80211_sub_if_data *sdata,
 		if (action == PLINK_CONFIRM) {
 			pos = skb_put(skb, 4);
 			/* two-byte status code followed by two-byte AID */
-			memset(pos, 0, 4);
+			memset(pos, 0, 2);
+			memcpy(pos + 2, &plid, 2);
 		}
 		mesh_mgmt_ies_add(skb, sdata);
 	}
@@ -187,18 +190,18 @@ static int mesh_plink_frame_tx(struct ieee80211_sub_if_data *sdata,
 	/* Add Peer Link Management element */
 	switch (action) {
 	case PLINK_OPEN:
-		ie_len = 3;
+		ie_len = 6;
 		break;
 	case PLINK_CONFIRM:
-		ie_len = 5;
+		ie_len = 8;
 		include_plid = true;
 		break;
 	case PLINK_CLOSE:
 	default:
 		if (!plid)
-			ie_len = 5;
+			ie_len = 8;
 		else {
-			ie_len = 7;
+			ie_len = 10;
 			include_plid = true;
 		}
 		break;
@@ -207,7 +210,8 @@ static int mesh_plink_frame_tx(struct ieee80211_sub_if_data *sdata,
 	pos = skb_put(skb, 2 + ie_len);
 	*pos++ = WLAN_EID_PEER_LINK;
 	*pos++ = ie_len;
-	*pos++ = action;
+	memcpy(pos, meshpeeringproto, sizeof(meshpeeringproto));
+	pos += 4;
 	memcpy(pos, &llid, 2);
 	if (include_plid) {
 		pos += 2;
@@ -218,7 +222,7 @@ static int mesh_plink_frame_tx(struct ieee80211_sub_if_data *sdata,
 		memcpy(pos, &reason, 2);
 	}
 
-	ieee80211_tx_skb(sdata, skb, 1);
+	ieee80211_tx_skb(sdata, skb);
 	return 0;
 }
 
@@ -230,14 +234,14 @@ void mesh_neighbour_update(u8 *hw_addr, u32 rates, struct ieee80211_sub_if_data 
 
 	rcu_read_lock();
 
-	sta = sta_info_get(local, hw_addr);
+	sta = sta_info_get(sdata, hw_addr);
 	if (!sta) {
+		rcu_read_unlock();
+
 		sta = mesh_plink_alloc(sdata, hw_addr, rates);
-		if (!sta) {
-			rcu_read_unlock();
+		if (!sta)
 			return;
-		}
-		if (sta_info_insert(sta)) {
+		if (sta_info_insert_rcu(sta)) {
 			rcu_read_unlock();
 			return;
 		}
@@ -395,6 +399,17 @@ void mesh_rx_plink_frame(struct ieee80211_sub_if_data *sdata, struct ieee80211_m
 	u8 ie_len;
 	u8 *baseaddr;
 	__le16 plid, llid, reason;
+#ifdef CONFIG_MAC80211_VERBOSE_MPL_DEBUG
+	static const char *mplstates[] = {
+		[PLINK_LISTEN] = "LISTEN",
+		[PLINK_OPN_SNT] = "OPN-SNT",
+		[PLINK_OPN_RCVD] = "OPN-RCVD",
+		[PLINK_CNF_RCVD] = "CNF_RCVD",
+		[PLINK_ESTAB] = "ESTAB",
+		[PLINK_HOLDING] = "HOLDING",
+		[PLINK_BLOCKED] = "BLOCKED"
+	};
+#endif
 
 	/* need action_code, aux */
 	if (len < IEEE80211_MIN_ACTION_SIZE + 3)
@@ -417,12 +432,13 @@ void mesh_rx_plink_frame(struct ieee80211_sub_if_data *sdata, struct ieee80211_m
 		return;
 	}
 
-	ftype = *((u8 *)PLINK_GET_FRAME_SUBTYPE(elems.peer_link));
+	ftype = mgmt->u.action.u.plink_action.action_code;
 	ie_len = elems.peer_link_len;
-	if ((ftype == PLINK_OPEN && ie_len != 3) ||
-	    (ftype == PLINK_CONFIRM && ie_len != 5) ||
-	    (ftype == PLINK_CLOSE && ie_len != 5 && ie_len != 7)) {
-		mpl_dbg("Mesh plink: incorrect plink ie length\n");
+	if ((ftype == PLINK_OPEN && ie_len != 6) ||
+	    (ftype == PLINK_CONFIRM && ie_len != 8) ||
+	    (ftype == PLINK_CLOSE && ie_len != 8 && ie_len != 10)) {
+		mpl_dbg("Mesh plink: incorrect plink ie length %d %d\n",
+		    ftype, ie_len);
 		return;
 	}
 
@@ -434,12 +450,12 @@ void mesh_rx_plink_frame(struct ieee80211_sub_if_data *sdata, struct ieee80211_m
 	 * from the point of view of this host.
 	 */
 	memcpy(&plid, PLINK_GET_LLID(elems.peer_link), 2);
-	if (ftype == PLINK_CONFIRM || (ftype == PLINK_CLOSE && ie_len == 7))
+	if (ftype == PLINK_CONFIRM || (ftype == PLINK_CLOSE && ie_len == 10))
 		memcpy(&llid, PLINK_GET_PLID(elems.peer_link), 2);
 
 	rcu_read_lock();
 
-	sta = sta_info_get(local, mgmt->sa);
+	sta = sta_info_get(sdata, mgmt->sa);
 	if (!sta && ftype != PLINK_OPEN) {
 		mpl_dbg("Mesh plink: cls or cnf from unknown peer\n");
 		rcu_read_unlock();
@@ -469,9 +485,11 @@ void mesh_rx_plink_frame(struct ieee80211_sub_if_data *sdata, struct ieee80211_m
 	} else if (!sta) {
 		/* ftype == PLINK_OPEN */
 		u32 rates;
+
+		rcu_read_unlock();
+
 		if (!mesh_plink_free_count(sdata)) {
 			mpl_dbg("Mesh plink error: no more free plinks\n");
-			rcu_read_unlock();
 			return;
 		}
 
@@ -479,10 +497,9 @@ void mesh_rx_plink_frame(struct ieee80211_sub_if_data *sdata, struct ieee80211_m
 		sta = mesh_plink_alloc(sdata, mgmt->sa, rates);
 		if (!sta) {
 			mpl_dbg("Mesh plink error: plink table full\n");
-			rcu_read_unlock();
 			return;
 		}
-		if (sta_info_insert(sta)) {
+		if (sta_info_insert_rcu(sta)) {
 			rcu_read_unlock();
 			return;
 		}
@@ -532,8 +549,8 @@ void mesh_rx_plink_frame(struct ieee80211_sub_if_data *sdata, struct ieee80211_m
 		}
 	}
 
-	mpl_dbg("Mesh plink (peer, state, llid, plid, event): %pM %d %d %d %d\n",
-		mgmt->sa, sta->plink_state,
+	mpl_dbg("Mesh plink (peer, state, llid, plid, event): %pM %s %d %d %d\n",
+		mgmt->sa, mplstates[sta->plink_state],
 		le16_to_cpu(sta->llid), le16_to_cpu(sta->plid),
 		event);
 	reason = 0;
@@ -727,7 +744,7 @@ void mesh_rx_plink_frame(struct ieee80211_sub_if_data *sdata, struct ieee80211_m
 		break;
 	default:
 		/* should not get here, PLINK_BLOCKED is dealt with at the
-		 * beggining of the function
+		 * beginning of the function
 		 */
 		spin_unlock_bh(&sta->lock);
 		break;

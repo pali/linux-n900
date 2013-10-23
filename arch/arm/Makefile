@@ -91,6 +91,9 @@ endif
 
 ifeq ($(CONFIG_ARM_UNWIND),y)
 CFLAGS_ABI	+=-funwind-tables
+else
+# These should be defaults anyway
+CFLAGS_ABI	+=-fno-unwind-tables
 endif
 
 ifeq ($(CONFIG_THUMB2_KERNEL),y)

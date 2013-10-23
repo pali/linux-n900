@@ -41,7 +41,7 @@ void __ieee80211_stop_rx_ba_session(struct sta_info *sta, u16 tid,
 	       sta->sta.addr, tid);
 #endif /* CONFIG_MAC80211_HT_DEBUG */
 
-	if (drv_ampdu_action(local, IEEE80211_AMPDU_RX_STOP,
+	if (drv_ampdu_action(local, sta->sdata, IEEE80211_AMPDU_RX_STOP,
 			     &sta->sta, tid, NULL))
 		printk(KERN_DEBUG "HW problem - can not stop rx "
 				"aggregation for tid %d\n", tid);
@@ -82,12 +82,11 @@ void __ieee80211_stop_rx_ba_session(struct sta_info *sta, u16 tid,
 void ieee80211_sta_stop_rx_ba_session(struct ieee80211_sub_if_data *sdata, u8 *ra, u16 tid,
 					u16 initiator, u16 reason)
 {
-	struct ieee80211_local *local = sdata->local;
 	struct sta_info *sta;
 
 	rcu_read_lock();
 
-	sta = sta_info_get(local, ra);
+	sta = sta_info_get(sdata, ra);
 	if (!sta) {
 		rcu_read_unlock();
 		return;
@@ -96,6 +95,39 @@ void ieee80211_sta_stop_rx_ba_session(struct ieee80211_sub_if_data *sdata, u8 *r
 	__ieee80211_stop_rx_ba_session(sta, tid, initiator, reason);
 
 	rcu_read_unlock();
+}
+
+/* There are devices support BT/WLAN co-existence algorithm.
+ * In order not to harm the system performance and user experience, the device
+ * may request not to allow any RX BA session and tear down existing RX BA
+ * sessions based on system constraints such as: For periodic BT activity
+ * limiting WLAN activity - For example: SCO / A2DP.
+ * In such cases, the intention is to limit the duration of the RX PPDU and
+ * therefore prevent the peer device to use A-MPDU aggregation.
+ */
+void ieee80211_stop_rx_ba_session(struct ieee80211_vif *vif,
+				  u16 ba_rx_bitmap, const u8 *addr)
+{
+	struct ieee80211_sub_if_data *sdata = vif_to_sdata(vif);
+	struct sta_info *sta = sta_info_get(sdata, addr);
+
+	sta->ampdu_mlme.stop_tid_bitmap = ba_rx_bitmap;
+
+	ieee80211_queue_work(&sta->local->hw, &sta->ampdu_mlme.stop_event_ba);
+}
+EXPORT_SYMBOL(ieee80211_stop_rx_ba_session);
+
+void ieee80211_stop_rx_ba_session_work(struct work_struct *work)
+{
+	struct sta_info *sta =
+		container_of(work, struct sta_info, ampdu_mlme.stop_event_ba);
+	u16 ba_rx_bitmap = sta->ampdu_mlme.stop_tid_bitmap;
+	int i;
+
+	for (i = 0; i < STA_TID_NUM; i++)
+		if (ba_rx_bitmap & BIT(i))
+			__ieee80211_stop_rx_ba_session(sta, i,
+				WLAN_BACK_INITIATOR, 0);
 }
 
 /*
@@ -135,7 +167,7 @@ static void ieee80211_send_addba_resp(struct ieee80211_sub_if_data *sdata, u8 *d
 
 	if (!skb) {
 		printk(KERN_DEBUG "%s: failed to allocate buffer "
-		       "for addba resp frame\n", sdata->dev->name);
+		       "for addba resp frame\n", sdata->name);
 		return;
 	}
 
@@ -143,10 +175,10 @@ static void ieee80211_send_addba_resp(struct ieee80211_sub_if_data *sdata, u8 *d
 	mgmt = (struct ieee80211_mgmt *) skb_put(skb, 24);
 	memset(mgmt, 0, 24);
 	memcpy(mgmt->da, da, ETH_ALEN);
-	memcpy(mgmt->sa, sdata->dev->dev_addr, ETH_ALEN);
+	memcpy(mgmt->sa, sdata->vif.addr, ETH_ALEN);
 	if (sdata->vif.type == NL80211_IFTYPE_AP ||
 	    sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
-		memcpy(mgmt->bssid, sdata->dev->dev_addr, ETH_ALEN);
+		memcpy(mgmt->bssid, sdata->vif.addr, ETH_ALEN);
 	else if (sdata->vif.type == NL80211_IFTYPE_STATION)
 		memcpy(mgmt->bssid, sdata->u.mgd.bssid, ETH_ALEN);
 
@@ -166,7 +198,7 @@ static void ieee80211_send_addba_resp(struct ieee80211_sub_if_data *sdata, u8 *d
 	mgmt->u.action.u.addba_resp.timeout = cpu_to_le16(timeout);
 	mgmt->u.action.u.addba_resp.status = cpu_to_le16(status);
 
-	ieee80211_tx_skb(sdata, skb, 1);
+	ieee80211_tx_skb(sdata, skb);
 }
 
 void ieee80211_process_addba_request(struct ieee80211_local *local,
@@ -206,9 +238,9 @@ void ieee80211_process_addba_request(struct ieee80211_local *local,
 	 * check if configuration can support the BA policy
 	 * and if buffer size does not exceeds max value */
 	/* XXX: check own ht delayed BA capability?? */
-	if (((ba_policy != 1)
-		&& (!(sta->sta.ht_cap.cap & IEEE80211_HT_CAP_DELAY_BA)))
-		|| (buf_size > IEEE80211_MAX_AMPDU_BUF)) {
+	if (((ba_policy != 1) &&
+	     (!(sta->sta.ht_cap.cap & IEEE80211_HT_CAP_DELAY_BA))) ||
+	    (buf_size > IEEE80211_MAX_AMPDU_BUF)) {
 		status = WLAN_STATUS_INVALID_QOS_PARAM;
 #ifdef CONFIG_MAC80211_HT_DEBUG
 		if (net_ratelimit())
@@ -228,6 +260,9 @@ void ieee80211_process_addba_request(struct ieee80211_local *local,
 		buf_size = buf_size << sband->ht_cap.ampdu_factor;
 	}
 
+	/* make sure the size doesn't exceed the maximum supported by the hw */
+	if (buf_size > local->hw.max_rx_aggregation_subframes)
+		buf_size = local->hw.max_rx_aggregation_subframes;
 
 	/* examine state machine */
 	spin_lock_bh(&sta->lock);
@@ -280,7 +315,7 @@ void ieee80211_process_addba_request(struct ieee80211_local *local,
 		goto end;
 	}
 
-	ret = drv_ampdu_action(local, IEEE80211_AMPDU_RX_START,
+	ret = drv_ampdu_action(local, sta->sdata, IEEE80211_AMPDU_RX_START,
 			       &sta->sta, tid, &start_seq_num);
 #ifdef CONFIG_MAC80211_HT_DEBUG
 	printk(KERN_DEBUG "Rx A-MPDU request on tid %d result %d\n", tid, ret);

@@ -209,6 +209,21 @@ ENDPROC(lookup_processor_type)
  *  r5 = mach_info pointer in physical address space
  */
 __lookup_machine_type:
+#if 1
+/*
+ * HACK: Support early boot loaders using unofficial mach type ids.
+ */
+	mov	r3, #6656
+	add	r3, #12				@ 6668 == early RM-680
+	cmp	r1, r3
+	moveq	r1, #3216
+	addeq	r1, #4				@ 3220 == RM-680
+	mov	r3, #6656
+	add	r3, #13				@ 6669 == early RM-696
+	cmp	r1, r3
+	moveq	r1, #3520
+	addeq	r1, #2				@ 3522 == RM-696
+#endif
 	adr	r3, 4b
 	ldmia	r3, {r4, r5, r6}
 	sub	r3, r3, r4			@ get offset between virt&phys

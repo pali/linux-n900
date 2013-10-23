@@ -2047,6 +2047,25 @@ static void prio_changed_fair(struct rq *rq, struct task_struct *p,
 		check_preempt_curr(rq, p, 0);
 }
 
+static void switched_from_fair(struct rq *rq, struct task_struct *p,
+			int running)
+{
+	struct sched_entity *se = &p->se;
+	struct cfs_rq *cfs_rq = cfs_rq_of(se);
+
+	/*
+	 * Ensure the task's vruntime is normalized, so that when its
+	 * switched back to the fair class the enqueue_entity(.flags=0) will
+	 * do the right thing.
+	 *
+	 * If it was on_rq, then the dequeue_entity(.flags=0) will already
+	 * have normalized the vruntime, if it was !on_rq, then only when
+	 * the task is sleeping will it still have non-normalized vruntime.
+	 */
+	if (!se->on_rq && p->state != TASK_RUNNING)
+		se->vruntime -= cfs_rq->min_vruntime;
+}
+
 /*
  * We switched to the sched_fair class.
  */
@@ -2147,6 +2166,7 @@ static const struct sched_class fair_sched_class = {
 
 	.prio_changed		= prio_changed_fair,
 	.switched_to		= switched_to_fair,
+	.switched_from		= switched_from_fair,
 
 	.get_rr_interval	= get_rr_interval_fair,
 

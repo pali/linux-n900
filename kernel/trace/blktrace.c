@@ -662,6 +662,9 @@ static void blk_add_trace_rq(struct request_queue *q, struct request *rq,
 	if (blk_discard_rq(rq))
 		rw |= (1 << BIO_RW_DISCARD);
 
+	if (blk_secure_rq(rq))
+		rw |= (1 << BIO_RW_SECURE);
+
 	if (blk_pc_request(rq)) {
 		what |= BLK_TC_ACT(BLK_TC_PC);
 		__blk_add_trace(bt, 0, blk_rq_bytes(rq), rw,
@@ -1746,6 +1749,8 @@ void blk_fill_rwbs(char *rwbs, u32 rw, int bytes)
 		rwbs[i++] = 'S';
 	if (rw & 1 << BIO_RW_META)
 		rwbs[i++] = 'M';
+	if (rw & 1 << BIO_RW_SECURE)
+		rwbs[i++] = 'E';
 
 	rwbs[i] = '\0';
 }
@@ -1757,6 +1762,9 @@ void blk_fill_rwbs_rq(char *rwbs, struct request *rq)
 
 	if (blk_discard_rq(rq))
 		rw |= (1 << BIO_RW_DISCARD);
+
+	if (blk_secure_rq(rq))
+		rw |= (1 << BIO_RW_SECURE);
 
 	bytes = blk_rq_bytes(rq);
 

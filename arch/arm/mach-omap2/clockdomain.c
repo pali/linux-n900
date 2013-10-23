@@ -28,14 +28,14 @@
 
 #include <linux/bitops.h>
 
-#include <mach/clock.h>
+#include <plat/clock.h>
 
 #include "prm.h"
 #include "prm-regbits-24xx.h"
 #include "cm.h"
 
-#include <mach/powerdomain.h>
-#include <mach/clockdomain.h>
+#include <plat/powerdomain.h>
+#include <plat/clockdomain.h>
 
 /* clkdm_list contains all registered struct clockdomains */
 static LIST_HEAD(clkdm_list);
@@ -474,6 +474,38 @@ int omap2_clkdm_wakeup(struct clockdomain *clkdm)
 	return 0;
 }
 
+
+/**
+ * omap2_clkdm_can_idle - check if clockdomain has any active clocks or not
+ * @clkdm: struct clockdomain *
+ *
+ * Checks if the clockdomain has any active clock or not, i.e. whether it
+ * can enter idle. Returns -EINVAL if clkdm is NULL; 0 if unable to idle;
+ * 1 if can idle.
+ */
+int omap2_clkdm_can_idle(struct clockdomain *clkdm)
+{
+	int i;
+
+	if (!clkdm)
+		return -EINVAL;
+
+	for (i = 0; i < clkdm->clk_reg_num; i++) {
+		u32 idlest, fclk;
+
+		fclk = cm_read_mod_reg(clkdm->pwrdm.ptr->prcm_offs,
+				CM_FCLKEN + 4 * i);
+		if (fclk & ~clkdm->idle_def[i].fclk_ignore)
+			return 0;
+
+		idlest = cm_read_mod_reg(clkdm->pwrdm.ptr->prcm_offs,
+				CM_IDLEST + 4 * i);
+		if (~idlest & clkdm->idle_def[i].idlest_mask)
+			return 0;
+	}
+	return 1;
+}
+
 /**
  * omap2_clkdm_allow_idle - enable hwsup idle transitions for clkdm
  * @clkdm: struct clockdomain *
@@ -561,7 +593,7 @@ int omap2_clkdm_clk_enable(struct clockdomain *clkdm, struct clk *clk)
 	 * downstream clocks for debugging purposes?
 	 */
 
-	if (!clkdm || !clk)
+	if (!clkdm || !clk || !clkdm->clktrctrl_mask)
 		return -EINVAL;
 
 	if (atomic_inc_return(&clkdm->usecount) > 1)
@@ -612,7 +644,7 @@ int omap2_clkdm_clk_disable(struct clockdomain *clkdm, struct clk *clk)
 	 * downstream clocks for debugging purposes?
 	 */
 
-	if (!clkdm || !clk)
+	if (!clkdm || !clk || !clkdm->clktrctrl_mask)
 		return -EINVAL;
 
 #ifdef DEBUG

@@ -410,7 +410,7 @@ int mmc_switch(struct mmc_card *card, u8 set, u8 index, u8 value)
 
 	/* Must check status to be sure of no errors */
 	do {
-		err = mmc_send_status(card, &status);
+		err = mmc_send_error_status(card, &status);
 		if (err)
 			return err;
 		if (card->host->caps & MMC_CAP_WAIT_WHILE_BUSY)
@@ -433,7 +433,8 @@ int mmc_switch(struct mmc_card *card, u8 set, u8 index, u8 value)
 	return 0;
 }
 
-int mmc_send_status(struct mmc_card *card, u32 *status)
+static int mmc_send_status_retries(struct mmc_card *card, u32 *status,
+				   int retries)
 {
 	int err;
 	struct mmc_command cmd;
@@ -448,7 +449,7 @@ int mmc_send_status(struct mmc_card *card, u32 *status)
 		cmd.arg = card->rca << 16;
 	cmd.flags = MMC_RSP_SPI_R2 | MMC_RSP_R1 | MMC_CMD_AC;
 
-	err = mmc_wait_for_cmd(card->host, &cmd, MMC_CMD_RETRIES);
+	err = mmc_wait_for_cmd(card->host, &cmd, retries);
 	if (err)
 		return err;
 
@@ -461,3 +462,28 @@ int mmc_send_status(struct mmc_card *card, u32 *status)
 	return 0;
 }
 
+int mmc_send_status(struct mmc_card *card, u32 *status)
+{
+	return mmc_send_status_retries(card, status, MMC_CMD_RETRIES);
+}
+
+int mmc_send_error_status(struct mmc_card *card, u32 *status)
+{
+	/*
+	 * Card status errors bits are cleared when read so do not do any
+	 * retries.
+	 */
+	return mmc_send_status_retries(card, status, 0);
+}
+
+void mmc_hw_reset(struct mmc_host *host)
+{
+	if (!host->hw_reset_connected || !host->ops->hw_reset)
+		return;
+
+	host->ops->hw_reset(host, 0);
+	udelay(10);
+	host->ops->hw_reset(host, 1);
+	msleep(1);
+	printk(KERN_INFO "%s: hardware reset done\n", mmc_hostname(host));
+}

@@ -317,4 +317,26 @@ config INPUT_PCAP
 	  To compile this driver as a module, choose M here: the
 	  module will be called pcap_keys.
 
+config INPUT_ECI
+	tristate "AV ECI (Enhancement Control Interface) Driver"
+	help
+	  The Enhancement Control Interface functionality
+	  ECI is smart headset for phones with many buttons
+
+	  ECI provides the following features:
+	  - ECI configuration memory
+	  - ECI buttons handling
+
+	  Say 'y' here to statically link this module into the kernel or 'm'
+	  to build it as a dynamically loadable module. The module will be
+	  called eci.ko
+
+config INPUT_VIBRA_SPI
+        tristate "Support for SPI driven Vibra module"
+        help
+          Support for Vibra module that is connected to SPI bus.
+
+          To compile this driver as a module, choose M here: the
+          module will be called vibra_spi.
+
 endif

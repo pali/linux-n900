@@ -291,6 +291,9 @@ struct spi_master {
 	int			(*transfer)(struct spi_device *spi,
 						struct spi_message *mesg);
 
+	int			(*transfer_sync)(struct spi_device *spi,
+						struct spi_message *mesg);
+
 	/* called on release() to free memory provided by spi_master */
 	void			(*cleanup)(struct spi_device *spi);
 };

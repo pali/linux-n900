@@ -1,0 +1,177 @@
+PowerVR pdump:
+--------------
+
+Imaginations graphics driver stack provides pdump infrastructure. PDump is
+useful for replaying rendering, from the lowest level, on Imagination
+Technologies' simulator. Imagination might ask you to create pdump logs to
+help them debug your issues.
+
+PDump collects a log and data of most things relevant for the sgx hardware,
+this includes memory management, register accesses, microcode, shaders and
+textures.
+
+In the pvr driver here, the pdump infrastructure is different from the pdump
+infrastructure Imagination ships. It can be exposed by building both kernel
+and userspace with pdump support, and then loading debugfs. Standard unix
+tools can be used to retrieve this data, but the Nokia style pdump has had
+to change formats from the Imagination style (mainly, log and data are
+interleaved) and a conversion utility (imgtec.c) is provided.
+
+How to enable PDUMP support:
+----------------------------
+
+In kernel config, set the "Build type" to "Debug", and then enable
+"Extra Debugging info":
+
+            Build type (Debug)  --->
+      [ ]   Extra debugging info
+
+Then you can enable "PDUMP debug support".
+
+            Build type (Debug)  --->
+      [*]   Extra debugging info
+      [ ]   PDUMP debug support
+
+Two further options will then appear:
+                Pdump initial debugging mode (Standard)  --->
+      (16)      Pdump max frame count
+
+Pdump initial debugging mode choses which mode the driver is in when
+booting the kernel, this can be altered later on through debugfs.
+
+The different modes are Disabled, Standard, and Full.
+
+'Disabled' means that, while frames keep on getting counted, no more data is
+being written into them. After a while, there will be no data kept in kernel
+memory anymore.
+
+'Full' produces a complete dump of all data provided by both kernel and
+userspace, and is the mode needed to run successfully on the simulator.
+
+In comparison, 'Standard' retains only part of the information, mostly limited
+to memory allocation, but this mode also keeps the amount of overhead low.
+
+Max frame count sets the maximum amount of pdump frames that are stored at any
+given time inside the kernel. This too can be altered through debugfs.
+
+Currently, userspace also needs to be compiled with the PDUMP option, as
+otherwise the IOCTLs are out of sync, which leads to interesting crashes.
+Make sure that you also build userspace in "Debug" mode, otherwise there will
+be further ABI issues.
+
+The PDUMP debugfs interface:
+----------------------------
+
+Mount debugfs:
+
+# mount -t debugfs none /sys/kernel/debug/
+
+The pdump debugfs files will then live in /sys/kernel/debug/pvr/pdump
+
+An ls -l reveals:
+-r--------    1 root     root             0 Jan  1  1970 current_frame
+-rw-------    1 root     root             0 Jan  1  1970 frame_count_max
+-r--------    1 root     root             0 Jan  1  1970 init_frame
+-rw-------    1 root     root             0 Jan  1  1970 mode
+-r--------    1 root     root             0 Jan  1  1970 modes_possible
+-r--------    1 root     root             0 Jan  1  1970 stream_frames
+
+* mode (rw), modes_possible (r), and frame_count_max:
+
+These files are the equivalent of the "Pdump initial debugging mode" and "Pdump
+max frame count" options in the kernel. modes_possible lists the modes
+that can be written to mode.
+
+* current_frame, init_frame and stream_frames (r):
+
+These files contain the actual debug information stored.
+
+The init_frame file contains the information retained from hardware
+initialisation, capture is stopped as soon as the first new frame was started.
+Once created, this frame remains present, even when dumping is disabled later
+on. This frame contains initial memory allocations, especially the information
+shared between all users of the hardware, and also has the microcode
+initialisation.
+
+current_frame contains the information of the current frame. Once opened,
+this frames data remains accessible until closed, even though newer frames are
+created all the time.
+
+stream_frames contains the last frame_count_max frames. There can only be a
+single process opening this, as the amount of frames kept depends on the last
+used file position of this one process, this is done to reduce the chance of
+losing data. When frames do vanish while reading (there is a hard limit to the
+number of frames kept), the removed data is replaced with '.' to at least flag
+missing data as such. For an example of reading out stream_frames, check the
+next section.
+
+Dumping 4G+ files:
+------------------
+
+When using filesystems which cannot handle bigger than 4G files, one has to
+take special precautions when reading out stream_frames. Luckily, the standard
+shell tools make this easily possible.
+
+ Here is an example of how to read out stream_frames:
+
+# tail -f /sys/kernel/debug/pvr/pdump/stream_frames | \
+split -b4000000000 - stream_frames.
+
+This creates the following:
+
+# ls -al stream_frames.*
+-rw-r--r--    1 user     root     4000000000 Jul  1 15:20 stream_frames.aa
+-rw-r--r--    1 user     root     1308106752 Jul  1 15:22 stream_frames.ab
+
+cat can then recombine these files on filesystems which do handle files
+bigger than 4G.
+
+The pdump logs do compress very well, so piping them through lzop or so
+is another option.
+
+Creating pdumps for Imaginations simulator:
+-------------------------------------------
+
+The imagination simulator only functions with full dumps, which include
+everything from your current context plus the initialisation frame. Running
+pdump logs on the simulator is very slow, so it is better to limit the amount
+of data captured by providing a small test utility instead of capturing
+everything from the boot of the device.
+
+Here is one full example of how to create a valid PDump log which runs on the
+simulator, by running a test case:
+
+# mount -t debugfs none /sys/kernel/debug/
+
+Make sure everything is clean; reload and reinitialize:
+
+# rmmod omaplfb pvrsrvkm
+# modprobe omaplfb
+# pvrsrvinit
+
+Grab the initialisation frame (can also be done afterwards, but
+should sit in front of the pdump log):
+
+# cat /sys/kernel/debug/pvr/pdump/init_frame > pdump.log
+
+Set the mode needed for the simulator:
+
+# echo "full" > /sys/kernel/debug/pvr/pdump/mode
+
+In a different session, or in the background, run:
+
+# tail -f /sys/kernel/debug/pvr/pdump/stream_frames >> pdump.log
+
+Now run your test:
+
+# ./testcase
+
+Once that is done, ^C the tail, and convert the dump:
+
+# ./pdump_imgtec pdump.log
+
+This creates the out2.txt and out2.prm files that Imagination needs.
+
+You can also capture a full log by adding the debugfs mount, the catting of
+the init frame and the tail of the stream after pvrsrvinit in your boot
+scripts, but you better take care to manage the size of the data.

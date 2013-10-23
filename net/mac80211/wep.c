@@ -228,7 +228,7 @@ static int ieee80211_wep_decrypt(struct ieee80211_local *local,
 
 	keyidx = skb->data[hdrlen + 3] >> 6;
 
-	if (!key || keyidx != key->conf.keyidx || key->conf.alg != ALG_WEP)
+	if (!key || keyidx != key->conf.keyidx)
 		return -1;
 
 	klen = 3 + key->conf.keylen;
@@ -281,16 +281,18 @@ bool ieee80211_wep_is_weak_iv(struct sk_buff *skb, struct ieee80211_key *key)
 ieee80211_rx_result
 ieee80211_crypto_wep_decrypt(struct ieee80211_rx_data *rx)
 {
-	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)rx->skb->data;
+	struct sk_buff *skb = rx->skb;
+	struct ieee80211_rx_status *status = IEEE80211_SKB_RXCB(skb);
+	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
 
 	if (!ieee80211_is_data(hdr->frame_control) &&
 	    !ieee80211_is_auth(hdr->frame_control))
 		return RX_CONTINUE;
 
-	if (!(rx->status->flag & RX_FLAG_DECRYPTED)) {
+	if (!(status->flag & RX_FLAG_DECRYPTED)) {
 		if (ieee80211_wep_decrypt(rx->local, rx->skb, rx->key))
 			return RX_DROP_UNUSABLE;
-	} else if (!(rx->status->flag & RX_FLAG_IV_STRIPPED)) {
+	} else if (!(status->flag & RX_FLAG_IV_STRIPPED)) {
 		ieee80211_wep_remove_iv(rx->local, rx->skb, rx->key);
 		/* remove ICV */
 		skb_trim(rx->skb, rx->skb->len - WEP_ICV_LEN);
@@ -303,20 +305,19 @@ static int wep_encrypt_skb(struct ieee80211_tx_data *tx, struct sk_buff *skb)
 {
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 
-	if (!(tx->key->flags & KEY_FLAG_UPLOADED_TO_HARDWARE)) {
+	if (!info->control.hw_key) {
 		if (ieee80211_wep_encrypt(tx->local, skb, tx->key->conf.key,
 					  tx->key->conf.keylen,
 					  tx->key->conf.keyidx))
 			return -1;
-	} else {
-		info->control.hw_key = &tx->key->conf;
-		if (tx->key->conf.flags & IEEE80211_KEY_FLAG_GENERATE_IV) {
-			if (!ieee80211_wep_add_iv(tx->local, skb,
-						  tx->key->conf.keylen,
-						  tx->key->conf.keyidx))
-				return -1;
-		}
+	} else if (info->control.hw_key->flags &
+			IEEE80211_KEY_FLAG_GENERATE_IV) {
+		if (!ieee80211_wep_add_iv(tx->local, skb,
+					  tx->key->conf.keylen,
+					  tx->key->conf.keyidx))
+			return -1;
 	}
+
 	return 0;
 }
 

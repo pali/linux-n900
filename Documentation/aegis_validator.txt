@@ -1,0 +1,391 @@
+
+Aegis Validator kernel module
+-----------------------------
+
+Markku Kylänpää <ext-markku.kylanpaa@nokia.com>
+12.11. 2010
+
+
+Introduction
+============
+
+Aegis Validator is a kernel-based integrity protection framework.
+Userspace applications, shared libraries, certain data files and kernel
+modules are verified during loading. SHA1 hash of the object to be loaded
+is calculated in Linux Security Module (LSM) hook function and the result
+is compared to a stored reference value. The list of the reference values
+is loaded into kernel during boot. Positive verification results are cached
+(and indexed by inode number). An object is verified only once after each
+boot and an attempt to write to a cached entry removes the entry from the
+cache forcing revalidation.
+
+Aegis Platform Security Framework
+==================================
+
+Aegis Validator is a part of Aegis Platform Security framework, which
+was published in October 2009 Maemo Summit in Amsterdam. Brief description
+about concepts is available in:
+
+  http://www.slideshare.net/peterschneider/maemo-6-platform-security
+
+Aegis Validator relies on OMAP Secure Environment services provided
+by security driver component (Documentation/arm/OMAP/omap_sec.txt)
+and Aegis Runtime Policy Framework access control mechanism. SHA1 hash
+calculation is utilizing OMAP SHA1 accelerator. Aegis Validator is a
+built-in kernel module and there is a securityfs interface to control
+the module and also to update new reference hash values. Securityfs is
+a pseudo-filesystem (like sysfs) and is commonly used by security
+modules to allow the kernel module to interact with userspace.
+
+Userspace Debian dpkg installer has been modified to update the reference
+hash list via securityfs. The initial list is generated and signed by
+firmware image generation system. Kernel invokes statically linked userspce
+helper application that loads and verifies the reference hashlist file and
+translates (pathname,sha1) values into (inode, sha1) values. Bootloader
+should pass the SHA1 hash of the userspace helper application to kernel
+as command-line parameter. The value is used to authorize userspapce helper
+application. When the installer updates the reference hash list it is using
+OMAP Secure Environment services to create device specific HMAC signature.
+
+DigSig
+======
+
+The original code is based on DigSig open source software (available in
+http://disec.sourceforge.net/). DigSig relied solely on signed binaries and
+tried to sign all ELF executables by adding special signature section to
+executable files. DigSig project added RSA code from gnupg project to Linux
+kernel to do the verification. This feature is removed from Aegis Validator.
+It is using the stored list of reference hashes for verification.
+
+The original DigSig is meant to be used as Tripwire-like tool for system
+administrator to verify integrity of installed binaries. System administrators
+can RSA sign ELF applications and libraries and execution of non-signed ELF
+code can be prevented. Verification result is cached. Aegis Validator is
+using LSM hooks to catch executable code loading. The original DigSig was
+implemented as a loadable kernel module and verification public key is
+inserted using init script via sysfs kernel interface. Aegis Validator is
+mainly used to protect the system against offline tampering attempts and
+malware.
+
+Code structure and interfaces
+=============================
+
+All code is in its own subtree (security/aegis/validator) except small
+LSM hook addon that was added for kernel module verification. Most of the
+code is generic. OMAP Security Environment specific code is in separate
+module (platsec.c). There are dependencies to kernel-based Aegis Runtime
+Policy Framework. Runtime Policy Framework source origin check is
+triggered by Aegis Validator. Validator is also using Runtime Policy
+Framework services for access checking. This functionality is separated
+in sidcheck.c module.
+
+Securityfs configuration interface is in /sys/kernel/security/validator. There
+are entries to enable and disable functionality and also to insert new
+reference hashes to the kernel. Cache and reference hash list content can
+also be dumped for debugging purpose. Validator securityfs entries are:
+
+  hashlist - load new reference hash entries (write), print hashlist (read)
+  cache    - print verification cache (read)
+  flush    - flush verification cache (write)
+  enabled  - enable validator functionality (write), show value (read)
+  enforce  - set validator to enforcing mode (write), show value (read)
+  modlist  - authorize kernel modules (write), show value (read)
+
+Both enable and enforce allow integrity protection features to be enabled
+and enforced separately. The value is treated as a bit mask with fields
+(enforce control includes bits 0-3):
+
+  bit 0: enable/enforce SHA1 hash calculation
+  bit 1: enable/enforce source origin checking
+  bit 2: enable/enforce data file checking
+  bit 3: enable/enforce file attribute checking
+  bit 4: invoke userspace helper to load more hashes
+  bit 5: check only entries that are listed in the reference hash list
+  bit 6: if set require the client to own "tcb" Runtime Policy Framework
+         credential to allow adding new reference hashes.
+  bit 7: if set then only allow loading of new hashes but no mode changes
+  bit 8: if set then allow only whitelisted kernel modules
+
+The following LSM hooks are used to interface with the kernel:
+
+  .netlink_send
+  .file_mmap
+  .file_free_security
+  .dentry_open
+  .inode_permission
+  .inode_unlink
+  .inode_create
+  .inode_rename
+  .bprm_check_security
+  .inode_free_security
+  .sb_free_security
+
+Reference hashlist values are loaded into kernel by invoking userspace
+helper application from kernel. The helper application is reading, verifying
+and parsing the reference hashlist file and creates the list of records to
+be sent into kernel via securityfs. The list consist of records having SHA1
+hash, inode number, mount volume identifier and source origin identifier of
+the component. Software installer is also using securityfs interface to add
+new reference hashes into kernel.
+
+There is also netlink-based validation error notification mechanism to
+userspace. If Validator blocks loading then this error with some context
+information is also logged to netlink multicast socket (25).
+
+Features
+========
+
+SHA1 integrity check for executables
+Enable/Enforce: BIT(0) "HASH_CHECK_BIT"
+
+This is basic functionality of Aegis Validator. Applications and shared
+libraries are verified. The check is triggered by LSM hooks .file_mmap
+and .bprm_check_security. The object is read, SHA1 hash is calculated and
+positive verification result is cached. The object is only verified once
+in each boot session and later invocations only lookup verification result
+from cache.
+
+Source origin checking
+Enable/Enforce: BIT(1) SID_CHECK_BIT
+
+All executable objects are bound to some source origin. The origin is
+typically a repository which contains the Debian package having the
+executable object. Source origins can have different trust level, which
+means that applications from certain repository are allowed to grant more
+credentials like POSIX capabilities and resource tokens (concept of Aegis
+Runtime Policy Framework). When an object is loaded to execution Aegis
+Vaölidator is calling one Aegis Runtime Policy Framework kernel function
+to verify that the current process is allowed to load the object.
+
+Data file checking
+Enable/Enforce: BIT(2) DATA_CHECK_BIT
+
+There is also limited support to protect data files. Certain directories
+can be specified in the reference hash list to be protected directories
+and files in those directories should have matching reference hash. The
+hash value is checked in file open operation. If the hash does not match
+opening of the file is prevented. It is also possible to declare some
+files in the protected to be dynamic, which means that those files are
+not verified.
+
+Use cases for data file protection are:
+  * Protection of upstart configuration files in /etc/init
+  * Protection of kernel modules in /lib/modules/*
+  * Protection of Perl libraries
+
+File attribute checking
+Enable/Enforce: BIT(3) ATTRIB_CHECK_BIT
+
+Aegis Validator also records file attributes (user, group, mode) and can
+verify that file attributes are still the same.
+
+Request to load more hashes
+Enable: BIT(4) HASH_REQ_BIT
+
+The hash list of the root filesystem is loaded during boot. If other
+volumes are mounted and something is executed from the mounted volume
+then userspace helper application is invoked to load new reference hashes
+to authorize execution of executables.
+
+Checking only listed files
+Enable: BIT(5) LISTED_ONLY_BIT
+
+It is also possible to limit reference hash checking to only those files
+that are listed in the reference hashlist. If source origin checking is
+configured then unlisted executables are treated to come from unknown
+source origin.
+
+Use "tcb" resource token to protect hash loading
+Enable: BIT(6) SECFS_BIT
+
+Userspace helper can configure Validator to require "tcb" resource
+token for clients loading new reference hashes.
+
+Sealing operation mode
+Enable: BIT(7) SEAL_BIT
+
+If the seal bit is set during configuration then further configuration
+changes (modifications to enable and enforce settings) are not allowed.
+It is still possible to load new reference hashes, but loading requires
+possession of tcb resource token.
+
+Kernel module whitelist mode
+Enable BIT(8) KMOD_BIT
+
+SHA1 hashes of authorized kernel modules can be loaded via modlist
+securityfs entry. If this bit is set then all kernel modules are verified
+when the module is loaded and only those that are in the whitelist are
+accepted.
+
+Hash input message format
+=========================
+
+Securityfs entry /sys/kernel/security/validator/hashlist is used to load
+reference hashes to Aegis Validator. This is done either during startup
+or afterwards if the installer installs new software. There can be four
+different messages. The message can be:
+
+1. Old format reference hash message (a)
+
+This message type is still supported because of backwards compatibility.
+When all userspace components and other tools have been updated this
+message can be deprecated. This message has been replaced by the new
+format message, which also includes file metadata fields and source
+identifier is numeric instead of string.
+
+2. New format reference hash message (s|t)
+
+This message type adds file metadata fields and source identifier is also
+given as numeric identifier instead of textual string value. Exactly same
+format is used for executables (s) and static data (t). However those
+objects are still separately labeled in the hashlist.
+
+3. Dynamic file entry (x)
+
+Integrity protected directories can also contain configuration files
+whose value can change. These files should be declared as dynamic. Those
+files are not integrity protected but writing can be controlled and
+file attributes can be verified. Note that this message does not include
+any hash value, because integrity of dynamic files is not verified.
+
+4. Immutable directory entry (d)
+
+This message type specifies immutable directories. Also this message
+does not contain reference hash value. There are two additional fields
+that specify resource token and capability mask requirements for writing
+to the directory. If those values are zero writing is not controlled.
+
+5. Protected directory entry (p)
+
+This message type specifies directories that should be protected against
+unauthorized renaming, removal and the use as a mount poinyt. Also this
+message does not contain reference hash value. There are two additional
+fields that specify resource token and capability mask requirements for
+writing to the directory. If those values are zero writing is not
+controlled.
+
+Field     Description                          Length
+-----     -----------                          ------
+a         = Code byte for old hash format       (1)
+SHA1      = 20 bytes of SHA1 hash               (20)
+blank     = One blank character                 (1)
+devid     = Device id as integer string         (>=1)
+blank     = One blank character                 (1)
+ino       = inode number as integer string      (>=1)
+blank     = One blank character                 (1)
+sid       = Source identifier string            (>=1)
+null      = '\0' character                      (1)
+newline   = '\n' character                      (1)
+
+Field     Description                          Length
+-----     -----------                          ------
+s|t       = Code byte for new hash format       (1)
+SHA1      = 20 bytes of SHA1 hash               (20)
+blank     = One blank character                 (1)
+devid     = Device id as integer string         (>=1)
+blank     = One blank character                 (1)
+ino       = inode number as integer string      (>=1)
+blank     = One blank character                 (1)
+uid       = uid number as integer string        (>=1)
+blank     = One blank character                 (1)
+gid       = gid number as integer string        (>=1)
+blank     = One blank character                 (1)
+mode      = filemode number integer string      (>=1)
+blank     = One blank character                 (1)
+sid       = Sid identifier as integer string    (>=1)
+blank     = One blank character                 (1)
+crednum   = Number of credtype/credvalue pairs  (>=1)
+
+Multiple credtype/credvalue pairs depending on crednum value
+If crednum was 0 then there won't be these fields
+
+blank     = One blank character                 (1)
+id        = Policy identifier as integer string (>=1)
+blank     = One blank character                 (1)
+credtype  = Credential type as integer string   (>=1)
+blank     = One blank character                 (1)
+credvalue = Credential value as integer string  (>=1)
+null      = '\0' character                      (1)
+newline   = '\n' character                      (1)
+
+Field     Description                          Length
+-----     -----------                          ------
+x         = Code byte for dynamic files         (1)
+devid     = Device id as integer string         (>=1)
+blank     = One blank character                 (1)
+ino       = inode number as integer string      (>=1)
+blank     = One blank character                 (1)
+uid       = uid number as integer string        (>=1)
+blank     = One blank character                 (1)
+gid       = gid number as integer string        (>=1)
+blank     = One blank character                 (1)
+mode      = filemode number integer string      (>=1)
+blank     = One blank character                 (1)
+sid       = Sid identifier as integer string    (>=1)
+blank     = One blank character                 (1)
+
+Multiple credtype/credvalue pairs depending on crednum value
+If crednum was 0 then there won't be these fields
+
+blank     = One blank character                 (1)
+id        = Policy identifier as integer string (>=1)
+blank     = One blank character                 (1)
+credtype  = Credential type as integer string   (>=1)
+blank     = One blank character                 (1)
+credvalue = Credential value as integer string  (>=1)
+
+null      = '\0' character                      (1)
+newline   = '\n' character                      (1)
+
+Field     Description                          Length
+-----     -----------                          ------
+d|p       = Code byte for directory entry       (1)
+devid     = Device id as integer string         (>=1)
+blank     = One blank character                 (1)
+ino       = inode number as integer string      (>=1)
+blank     = One blank character                 (1)
+uid       = uid number as integer string        (>=1)
+blank     = One blank character                 (1)
+gid       = gid number as integer string        (>=1)
+blank     = One blank character                 (1)
+mode      = filemode number integer string      (>=1)
+blank     = One blank character                 (1)
+sid       = Sid identifier as integer string    (>=1)
+blank     = One blank character                 (1)
+
+Multiple credtype/credvalue pairs depending on crednum value
+If crednum was 0 then there won't be these fields
+
+blank     = One blank character                 (1)
+id        = Policy identifier as integer string (>=1)
+blank     = One blank character                 (1)
+credtype  = Credential type as integer string   (>=1)
+blank     = One blank character                 (1)
+credvalue = Credential value as integer string  (>=1)
+
+null      = '\0' character                      (1)
+newline   = '\n' character                      (1)
+
+So the minimum length of the message should be at least 14 bytes.
+There is odd message termination with "\0\n". The change requires
+changes to userspace tools as well.
+
+Potential future work
+=====================
+
+Linux kernel version 2.6.30 introduced a new framework called Integrity
+Measurement Architecture (IMA). IMA framework partly overlaps with
+Aegis Validator as both are measuring loaded executables. However,
+IMA is just doing measurements and its purpose is to provide Trusted
+Platform Module (TPM) backed measurement agent inside Linux kernel,
+which can be used to generate signed replies (signed PCR registers +
+measurement log) to remote attestation requests. There is no local
+integrity enforcement in IMA, but there are plans to add such module
+called EVM.
+
+IMA code could be extended to provide an interface for integrity
+enforcement modules. This should be proposed. If succesful then Aegis
+Validator measurement code can be dropped in favor of IMA measurement
+code. As LSM hooks are not in general stackable it also makes sense
+to minimize the use of LSM hooks if there is a need to run another
+framework that relies on LSM.

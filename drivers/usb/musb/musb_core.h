@@ -42,6 +42,7 @@
 #include <linux/timer.h>
 #include <linux/clk.h>
 #include <linux/device.h>
+#include <linux/notifier.h>
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
 #include <linux/usb.h>
@@ -116,7 +117,7 @@ struct musb_ep;
 
 extern irqreturn_t musb_g_ep0_irq(struct musb *);
 extern void musb_g_tx(struct musb *, u8);
-extern void musb_g_rx(struct musb *, u8);
+extern void musb_g_rx(struct musb *, u8, bool);
 extern void musb_g_reset(struct musb *);
 extern void musb_g_suspend(struct musb *);
 extern void musb_g_resume(struct musb *);
@@ -135,6 +136,9 @@ static inline void musb_g_wakeup(struct musb *m) {}
 static inline void musb_g_disconnect(struct musb *m) {}
 
 #endif
+
+extern int musb_platform_resume(struct musb *musb);
+extern int musb_platform_suspend(struct musb *musb);
 
 /****************************** HOST ROLE ***********************************/
 
@@ -295,7 +299,7 @@ struct musb_hw_ep {
 #endif
 };
 
-static inline struct usb_request *next_in_request(struct musb_hw_ep *hw_ep)
+static inline struct musb_request *next_in_request(struct musb_hw_ep *hw_ep)
 {
 #ifdef CONFIG_USB_GADGET_MUSB_HDRC
 	return next_request(&hw_ep->ep_in);
@@ -304,7 +308,7 @@ static inline struct usb_request *next_in_request(struct musb_hw_ep *hw_ep)
 #endif
 }
 
-static inline struct usb_request *next_out_request(struct musb_hw_ep *hw_ep)
+static inline struct musb_request *next_out_request(struct musb_hw_ep *hw_ep)
 {
 #ifdef CONFIG_USB_GADGET_MUSB_HDRC
 	return next_request(&hw_ep->ep_out);
@@ -319,9 +323,21 @@ static inline struct usb_request *next_out_request(struct musb_hw_ep *hw_ep)
 struct musb {
 	/* device lock */
 	spinlock_t		lock;
+	struct notifier_block	nb;
 	struct clk		*clock;
 	irqreturn_t		(*isr)(int, void *);
 	struct work_struct	irq_work;
+
+	struct work_struct	pm_work;
+	unsigned		enable_pm:1;
+#define MUSB_HWVERS_MAJOR(x)	((x >> 10) & 0x1f)
+#define MUSB_HWVERS_MINOR(x)	(x & 0x3ff)
+#define MUSB_HWVERS_RC		0x8000
+#define MUSB_HWVERS_1300	0x52C
+#define MUSB_HWVERS_1400	0x590
+#define MUSB_HWVERS_1800	0x720
+#define MUSB_HWVERS_2000	0x800
+	u16			hwvers;
 
 /* this hub status bit is reserved by USB 2.0 and not seen by usbcore */
 #define MUSB_PORT_STAT_RESUME	(1 << 31)
@@ -383,10 +399,9 @@ struct musb {
 	u16 epmask;
 	u8 nr_endpoints;
 
+	struct musb_board_data  *board;
 	u8 board_mode;		/* enum musb_mode */
 	int			(*board_set_power)(int state);
-
-	int			(*set_clock)(struct clk *clk, int is_active);
 
 	u8			min_power;	/* vbus for periph, in mA/2 */
 
@@ -403,26 +418,26 @@ struct musb {
 
 	unsigned		hb_iso_rx:1;	/* high bandwidth iso rx? */
 	unsigned		hb_iso_tx:1;	/* high bandwidth iso tx? */
+	unsigned		dyn_fifo:1;	/* dynamic FIFO supported? */
 
-#ifdef C_MP_TX
-	unsigned bulk_split:1;
+	unsigned		bulk_split:1;
 #define	can_bulk_split(musb,type) \
-		(((type) == USB_ENDPOINT_XFER_BULK) && (musb)->bulk_split)
-#else
-#define	can_bulk_split(musb, type)	0
-#endif
+	(((type) == USB_ENDPOINT_XFER_BULK) && (musb)->bulk_split)
 
-#ifdef C_MP_RX
-	unsigned bulk_combine:1;
+	unsigned		bulk_combine:1;
 #define	can_bulk_combine(musb,type) \
-		(((type) == USB_ENDPOINT_XFER_BULK) && (musb)->bulk_combine)
-#else
-#define	can_bulk_combine(musb, type)	0
-#endif
+	(((type) == USB_ENDPOINT_XFER_BULK) && (musb)->bulk_combine)
 
 #ifdef CONFIG_USB_GADGET_MUSB_HDRC
 	/* is_suspended means USB B_PERIPHERAL suspend */
 	unsigned		is_suspended:1;
+	/*
+	 * a flag to not issue disconnect on both xceiv
+	 * and musb controller interrupt.
+	 * It's a HACK, workaround of missing musb DISCONNECT
+	 * interrupt in some cases
+	 */
+	unsigned		is_disconnected:1;
 
 	/* may_wakeup means remote wakeup is enabled */
 	unsigned		may_wakeup:1;
@@ -437,6 +452,8 @@ struct musb {
 	unsigned		set_address:1;
 	unsigned		test_mode:1;
 	unsigned		softconnect:1;
+	unsigned		allow_connect:1;
+	unsigned		autoclear_wa:1;
 
 	u8			address;
 	u8			test_mode_nr;
@@ -446,6 +463,9 @@ struct musb {
 	struct usb_gadget_driver *gadget_driver;	/* its driver */
 #endif
 
+	/* true if we're using dma */
+	unsigned		use_dma:1;
+
 	struct musb_hdrc_config	*config;
 
 #ifdef MUSB_CONFIG_PROC_FS
@@ -453,9 +473,68 @@ struct musb {
 #endif
 };
 
+#ifdef CONFIG_PM
+struct musb_csr_regs {
+	/* FIFO registers */
+	u16 txmaxp, txcsr, rxmaxp, rxcsr;
+	u16 rxfifoadd, txfifoadd;
+	u8 txtype, txinterval, rxtype, rxinterval;
+	u8 rxfifosz, txfifosz;
+	u8 txfunaddr, txhubaddr, txhubport;
+	u8 rxfunaddr, rxhubaddr, rxhubport;
+};
+
+struct musb_context_registers {
+
+#if defined(CONFIG_ARCH_OMAP34XX)
+	u32 otg_sysconfig, otg_forcestandby;
+#endif
+	u8 power;
+	u16 intrtxe, intrrxe;
+	u8 intrusbe;
+	u16 frame;
+	u8 index, testmode;
+
+	u8 devctl, misc;
+
+	struct musb_csr_regs index_regs[MUSB_C_NUM_EPS];
+};
+
+#if defined(CONFIG_ARCH_OMAP34XX) || defined(CONFIG_ARCH_OMAP2430)
+extern void musb_platform_save_context(struct musb *musb,
+		struct musb_context_registers *musb_context);
+extern void musb_platform_restore_context(struct musb *musb,
+		struct musb_context_registers *musb_context);
+#else
+#define musb_platform_save_context(m, x)	do {} while (0)
+#define musb_platform_restore_context(m, x)	do {} while (0)
+#endif
+
+void musb_save_context(struct musb *musb, u8 platform_context);
+void musb_restore_context(struct musb *musb, u8 platform_context);
+extern void musb_platform_power_on(struct musb *musb);
+extern void musb_platform_power_off(struct musb *musb);
+#else
+static inline void musb_save_context(struct musb *musb,
+					u8 platform_context) {};
+static inline void musb_restore_context(struct musb *musb,
+					u8 platform_context) {};
+static inline void musb_platform_power_on(struct musb *musb) {
+#ifdef CONFIG_USB_GADGET_MUSB_HDRC
+	musb_pullup(musb, 1);
+#endif
+};
+static inline void musb_platform_power_off(struct musb *musb) {
+#ifdef CONFIG_USB_GADGET_MUSB_HDRC
+	musb_pullup(musb, 0);
+#endif
+};
+#endif
+
 static inline void musb_set_vbus(struct musb *musb, int is_on)
 {
-	musb->board_set_vbus(musb, is_on);
+	if (musb->board_set_vbus)
+		musb->board_set_vbus(musb, is_on);
 }
 
 #ifdef CONFIG_USB_GADGET_MUSB_HDRC

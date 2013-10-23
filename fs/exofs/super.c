@@ -239,7 +239,7 @@ int exofs_sync_fs(struct super_block *sb, int wait)
 		EXOFS_ERR("exofs_write_super: exofs_sync_op failed.\n");
 		goto out;
 	}
-	sb->s_dirt = 0;
+	sb_mark_clean(sb);
 
 out:
 	if (or)
@@ -254,7 +254,7 @@ static void exofs_write_super(struct super_block *sb)
 	if (!(sb->s_flags & MS_RDONLY))
 		exofs_sync_fs(sb, 1);
 	else
-		sb->s_dirt = 0;
+		sb_mark_clean(sb);
 }
 
 /*
@@ -266,7 +266,7 @@ static void exofs_put_super(struct super_block *sb)
 	int num_pend;
 	struct exofs_sb_info *sbi = sb->s_fs_info;
 
-	if (sb->s_dirt)
+	if (sb_is_dirty(sb))
 		exofs_write_super(sb);
 
 	/* make sure there are no pending commands */

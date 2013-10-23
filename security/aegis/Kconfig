@@ -1,0 +1,18 @@
+#
+# Maemo Aegis security configuration
+#
+
+
+config SECURITY_AEGIS
+        bool "Maemo Aegis Security Framework"
+        default n
+        help
+          This selects the Maemo Aegis Security Framework.
+          Aegis contains access control and integrity validation
+          components.
+          If you are unsure how to answer this question, answer N.
+
+source security/aegis/validator/Kconfig
+source security/aegis/restok/Kconfig
+source security/aegis/creds/Kconfig
+source security/aegis/credp/Kconfig

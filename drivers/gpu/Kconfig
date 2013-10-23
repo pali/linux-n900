@@ -1,0 +1,3 @@
+source drivers/gpu/pvr/Kconfig
+source drivers/gpu/drm/Kconfig
+
