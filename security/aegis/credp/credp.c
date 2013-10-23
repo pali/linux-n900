@@ -1545,9 +1545,15 @@ long credp_kconfine2(const char *path, int flags,
 	mutex_lock(&mutex);
 	policy = find_policy_bypath(path);
 
-	if (policy)
+	if (policy) {
+		/* If the caller allows inheritance, but the policy
+		 * does not, disallow inheritance of credentials.
+		 */
+		if ((flags & CREDP_TYPE_INHERITABLE) &&
+		    !(policy->flags & CREDP_TYPE_INHERITABLE))
+		    flags &= ~CREDP_TYPE_INHERITABLE;
 		ret = set_current_from_pcreds(flags, &policy->pcreds);
-	else {
+	} else {
 		struct policy_creds pcreds;
 
 		ret = pcreds_from_user(&pcreds, list, list_length);

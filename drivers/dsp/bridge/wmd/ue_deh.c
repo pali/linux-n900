@@ -53,11 +53,6 @@
 #include "_tiomap_pwr.h"
 #include <dspbridge/io_sm.h>
 
-static struct hw_mmu_map_attrs_t map_attrs = { HW_LITTLE_ENDIAN,
-	HW_ELEM_SIZE16BIT,
-	HW_MMU_CPUES
-};
-
 #define VIRT_TO_PHYS(x)       ((x) - PAGE_OFFSET + PHYS_OFFSET)
 
 /*
@@ -184,7 +179,6 @@ void bridge_deh_notify(struct deh_mgr *hdeh_mgr, u32 ulEventMask, u32 dwErrInfo)
 	u32 hw_mmu_max_tlb_count = 31;
 	extern u32 fault_addr;
 	struct cfg_hostres resources;
-	hw_status hw_status_obj;
 
 	status = cfg_get_host_resources((struct cfg_devnode *)
 					drv_get_first_dev_extension(),
@@ -236,12 +230,17 @@ void bridge_deh_notify(struct deh_mgr *hdeh_mgr, u32 ulEventMask, u32 dwErrInfo)
 				dev_context->num_tlb_entries =
 				    dev_context->fixed_tlb_entries;
 			}
+#ifdef CONFIG_BRIDGE_DEBUG
 			if (DSP_SUCCEEDED(status)) {
-				hw_status_obj =
-				    hw_mmu_tlb_add(resources.dw_dmmu_base,
-						   0, fault_addr,
-						   HW_PAGE_SIZE4KB, 1,
-						   &map_attrs, HW_SET, HW_SET);
+				struct hw_mmu_map_attrs_t map_attrs = { HW_LITTLE_ENDIAN,
+					HW_ELEM_SIZE16BIT,
+					HW_MMU_CPUES
+				};
+
+				hw_mmu_tlb_add(resources.dw_dmmu_base,
+						0, fault_addr,
+						HW_PAGE_SIZE4KB, 1,
+						&map_attrs, HW_SET, HW_SET);
 			}
 			/* send an interrupt to DSP */
 			omap_mbox_msg_send(dev_context->mbox,
@@ -249,6 +248,7 @@ void bridge_deh_notify(struct deh_mgr *hdeh_mgr, u32 ulEventMask, u32 dwErrInfo)
 			/* Clear MMU interrupt */
 			hw_mmu_event_ack(resources.dw_dmmu_base,
 					 HW_MMU_TRANSLATION_FAULT);
+#endif
 			break;
 #ifdef CONFIG_BRIDGE_NTFY_PWRERR
 		case DSP_PWRERROR:
@@ -288,8 +288,10 @@ void bridge_deh_notify(struct deh_mgr *hdeh_mgr, u32 ulEventMask, u32 dwErrInfo)
 		dev_context->dw_brd_state = BRD_ERROR;
 		/* Disable all the clocks that were enabled by DSP */
 		(void)dsp_peripheral_clocks_disable(dev_context, NULL);
+#ifdef CONFIG_BRIDGE_DEBUG
 		/* Call DSP Trace Buffer */
 		print_dsp_trace_buffer(hdeh_mgr->hwmd_context);
+#endif
 		/*
 		* Avoid the subsequent WDT if it happens once,
 		* also if fatal error occurs.

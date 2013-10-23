@@ -52,14 +52,14 @@ struct eci_platform_data {
 	void (*jack_report) (int status);
 };
 
-struct enchancement_features_fixed {
+struct enhancement_features_fixed {
 	u8	block_id;
 	u8	length;
 	u8	connector_conf;
 	u8	number_of_features;
 };
 
-struct enchancement_features_variable {
+struct enhancement_features_variable {
 	u8	*io_support;
 	u8	*io_functionality;
 	u8	*active_state;
@@ -82,8 +82,8 @@ struct eci_data {
 	bool                                    mem_ok;
 	u16                                     mem_size;
 	u8                                      memory[ECI_MAX_MEM_SIZE];
-	struct enchancement_features_fixed      *e_features_fix;
-	struct enchancement_features_variable   e_features_var;
+	struct enhancement_features_fixed      *e_features_fix;
+	struct enhancement_features_variable   e_features_var;
 	u8					port_reg_count;
 	struct eci_buttons_data			buttons_data;
 	struct eci_hw_ops                       *eci_hw_ops;

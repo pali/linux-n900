@@ -110,7 +110,7 @@ struct io_mgr {
 	struct mgr_processorextinfo ext_proc_info;
 	struct cmm_object *hcmm_mgr;	/* Shared Mem Mngr */
 	struct work_struct io_workq;	/* workqueue */
-#ifndef DSP_TRACEBUF_DISABLED
+#ifdef CONFIG_BRIDGE_DEBUG
 	u32 ul_trace_buffer_begin;	/* Trace message start address */
 	u32 ul_trace_buffer_end;	/* Trace message end address */
 	u32 ul_trace_buffer_current;	/* Trace message current address */
@@ -148,7 +148,7 @@ static u32 read_data(struct wmd_dev_context *hDevContext, void *dest,
 static u32 write_data(struct wmd_dev_context *hDevContext, void *dest,
 		      void *pSrc, u32 usize);
 
-#ifndef DSP_TRACEBUF_DISABLED
+#ifdef CONFIG_BRIDGE_DEBUG
 void print_dsp_debug_trace(struct io_mgr *hio_mgr);
 #endif
 
@@ -211,7 +211,7 @@ dsp_status bridge_io_create(OUT struct io_mgr **phIOMgr,
 	}
 
 	/* Initialize chnl_mgr object */
-#ifndef DSP_TRACEBUF_DISABLED
+#ifdef CONFIG_BRIDGE_DEBUG
 	pio_mgr->pmsg = NULL;
 #endif
 	pio_mgr->hchnl_mgr = hchnl_mgr;
@@ -275,7 +275,7 @@ dsp_status bridge_io_destroy(struct io_mgr *hio_mgr)
 		/* Free IO DPC object */
 		tasklet_kill(&hio_mgr->dpc_tasklet);
 
-#ifndef DSP_TRACEBUF_DISABLED
+#ifdef CONFIG_BRIDGE_DEBUG
 		kfree(hio_mgr->pmsg);
 #endif
 		sync_delete_cs(hio_mgr->hcs_obj);	/* Leak Fix. */
@@ -405,7 +405,7 @@ dsp_status bridge_io_on_loaded(struct io_mgr *hio_mgr)
 		status = CHNL_E_NOMEMMAP;
 	}
 	if (DSP_SUCCEEDED(status)) {
-#ifndef DSP_TRACEBUF_DISABLED
+#ifdef CONFIG_BRIDGE_DEBUG
 		status =
 		    cod_get_sym_value(cod_man, DSP_TRACESEC_END, &shm0_end);
 #else
@@ -750,7 +750,7 @@ dsp_status bridge_io_on_loaded(struct io_mgr *hio_mgr)
 		hmsg_mgr->max_msgs);
 	memset((void *)hio_mgr->shared_mem, 0, sizeof(struct shm));
 
-#ifndef DSP_TRACEBUF_DISABLED
+#ifdef CONFIG_BRIDGE_DEBUG
 	/* Get the start address of trace buffer */
 	status = cod_get_sym_value(cod_man, SYS_PUTCBEG,
 				   &hio_mgr->ul_trace_buffer_begin);
@@ -954,7 +954,7 @@ void io_dpc(IN OUT unsigned long pRefData)
 		if (MEM_IS_VALID_HANDLE(msg_mgr_obj, MSGMGR_SIGNATURE))
 			io_dispatch_msg(pio_mgr, msg_mgr_obj);
 #endif
-#ifndef DSP_TRACEBUF_DISABLED
+#ifdef CONFIG_BRIDGE_DEBUG
 		if (pio_mgr->intr_val & MBX_DBG_SYSPRINTF) {
 			/* Notify DSP Trace message */
 			print_dsp_debug_trace(pio_mgr);
@@ -1803,7 +1803,7 @@ dsp_status bridge_io_get_proc_load(IN struct io_mgr *hio_mgr,
 	return DSP_SOK;
 }
 
-#ifndef DSP_TRACEBUF_DISABLED
+#ifdef CONFIG_BRIDGE_DEBUG
 void print_dsp_debug_trace(struct io_mgr *hio_mgr)
 {
 	u32 ul_new_message_length = 0, ul_gpp_cur_pointer;
@@ -1862,7 +1862,6 @@ void print_dsp_debug_trace(struct io_mgr *hio_mgr)
 		}
 	}
 }
-#endif
 
 /*
  *  ======== pack_trace_buffer ========
@@ -2014,6 +2013,7 @@ dsp_status print_dsp_trace_buffer(struct wmd_dev_context *hwmd_context)
 	}
 	return status;
 }
+#endif
 
 void io_sm_init(void)
 {

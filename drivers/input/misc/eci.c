@@ -19,7 +19,6 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
  * 02110-1301 USA
- *
  */
 
 /* #define DEBUG */
@@ -99,8 +98,7 @@
 #define ECI_TERMINAL_APP_CTRL_OUT	0x91 /* Terminal Applicat Ctrl Output */
 
 /*
- * most of these are keys
- * switch codes are put on top of keys (KEY_MAX ->)
+ * Most of these are switch codes that are put on top of keys (KEY_MAX ->).
  */
 static int eci_codes[] = {
 	KEY_UNKNOWN,		/* 0  ECI_NIL_FEATURE */
@@ -111,7 +109,7 @@ static int eci_codes[] = {
 	KEY_RESERVED,		/* 5  ECI feature not defined */
 	KEY_AUDIO,		/* 6  ECI_EXT_AUD_IN */
 	KEY_PHONE,		/* 7  ECI_SEND_END_VR */
-	KEY_MAX + SW_HEADPHONE_INSERT,	/* 8  ECI_HD_PLUG, type switchs */
+	KEY_MAX + SW_HEADPHONE_INSERT,	/* 8  ECI_HD_PLUG, type switch */
 	KEY_RESERVED,		/* 9  ECI feature not defined */
 	KEY_UNKNOWN,		/* 10 ECI_DEV_POWER_REQ */
 	KEY_VOLUMEUP,		/* 11 ECI_VOL_UP */
@@ -148,7 +146,7 @@ static struct dfl61audio_hsmic_event hsmic_event;
 
 static struct eci_data *the_eci;
 
-/* returns size of accessory memory or error */
+/* Returns size of accessory memory or error. */
 static int eci_get_ekey(struct eci_data *eci, int *key)
 {
 	u8 buf[4];
@@ -159,7 +157,7 @@ static int eci_get_ekey(struct eci_data *eci, int *key)
 	} *ekey = (void *)buf;
 	int ret;
 
-	/* read always four bytes */
+	/* Read always four bytes. */
 	ret = eci->eci_hw_ops->acc_read_direct(0, buf);
 	if (ret)
 		return ret;
@@ -194,7 +192,7 @@ static struct attribute_group eci_attr_group = {
 	.attrs = eci_attributes
 };
 
-/* read ECI device memory into buffer */
+/* Read ECI device memory into buffer. */
 static int eci_get_memory(struct eci_data *eci, int *restart)
 {
 	int i, ret;
@@ -210,11 +208,11 @@ static int eci_get_memory(struct eci_data *eci, int *restart)
 }
 
 /*
- * this should be really init_features, but most oftens these are just buttons
+ * This should be really init_features, but most often these are just buttons.
  */
 static int eci_init_buttons(struct eci_data *eci)
 {
-	struct enchancement_features_fixed *eff = eci->e_features_fix;
+	struct enhancement_features_fixed *eff = eci->e_features_fix;
 	u8 n, mireg;
 	int ret;
 	u8 buf[4];
@@ -251,8 +249,8 @@ static int eci_init_buttons(struct eci_data *eci)
 	return ret;
 }
 
-/* find "enchangement features" block from buffer */
-static int eci_get_enchancement_features(struct eci_data *eci)
+/* Find "enhancement features" block from buffer. */
+static int eci_get_enhancement_features(struct eci_data *eci)
 {
 	u8 *mem = (void *)eci->memory;
 	struct block {
@@ -283,19 +281,18 @@ static int eci_get_enchancement_features(struct eci_data *eci)
 }
 
 /*
- * find out ECI features
- * all ECI memory block parsing is done here, be carefull as
- * pointers to memory tend to go wrong easily
- * ECI "Enhancement Features block is variable size, so we try to
- * catch pointers out of block due memory reading errors etc
+ * Find out ECI features:
+ * All ECI memory block parsing is done here, be careful as pointers to memory
+ * tend to go wrong easily. ECI "Enhancement Features" block is variable size,
+ * so we try to catch out of block pointers due memory reading errors etc.
  *
- * I/O support field is not implemented
- * data direction field is not implemented, nor writing to the ECI I/O
+ * I/O support field is not implemented, data direction field is not
+ * implemented, nor writing to the ECI I/O.
  */
-static int eci_parse_enchancement_features(struct eci_data *eci)
+static int eci_parse_enhancement_features(struct eci_data *eci)
 {
-	struct enchancement_features_fixed *eff = eci->e_features_fix;
-	struct enchancement_features_variable *efv = &eci->e_features_var;
+	struct enhancement_features_fixed *eff = eci->e_features_fix;
+	struct enhancement_features_variable *efv = &eci->e_features_var;
 	int i;
 	u8 n, k;
 	void *mem_end = (void *)((u8 *)eff + eff->length);
@@ -329,14 +326,14 @@ static int eci_parse_enchancement_features(struct eci_data *eci)
 			(*(u32 *)efv->active_state)) & (BIT_MASK(n + 1) - 1);
 	dev_dbg(eci->dev, "buttons mask 0x%08x\n",
 			eci->buttons_data.buttons_up_mask);
-
-	/* ECI accessory responces as many bytes needed for used I/O pins
-	 * up to four bytes, when lines 24..31 are used
-	 * all tested ECI accessories how ever return two data bytes
-	 * event though there are less than eight I/O pins
+	/*
+	 * ECI accessory responses use as many bytes needed for I/O pins
+	 * up to four bytes, when lines 24..31 are used. All tested ECI
+	 * accessories, however, return two data bytes event though there
+	 * are less than eight I/O pins.
 	 *
-	 * so we get alway reading error if there are less than eight I/Os
-	 * meanwhile just use this kludge, FIXME
+	 * So we get always a reading error if there are less than eight I/Os.
+	 * Meanwhile just use this kludge, FIXME.
 	 */
 	k = DIV_ROUND_UP(n + 1, 8);
 	if (k == 1)
@@ -355,6 +352,11 @@ static int eci_init_accessory(struct eci_data *eci)
 	usleep_range(ECI_WAIT_BUS_SETTLE_LO, ECI_WAIT_BUS_SETTLE_HI);
 
 	ret = eci->eci_hw_ops->acc_reset();
+	if (ret) {
+		dev_err(eci->dev, "Acc_reset fails\n");
+		return ret;
+	}
+
 	usleep_range(ECI_WAIT_BUS_SETTLE_LO, ECI_WAIT_BUS_SETTLE_HI);
 
 	ret = eci->eci_hw_ops->acc_write_reg(ECICMD_MIC_CTRL, ECI_MIC_OFF);
@@ -363,7 +365,7 @@ static int eci_init_accessory(struct eci_data *eci)
 		return ret;
 	}
 
-	/* get ECI ekey block to determine memory size */
+	/* Get ECI ekey block to determine memory size. */
 	future = jiffies + msecs_to_jiffies(ECI_TRY_GET_MEMORY);
 	do {
 		ret = eci_get_ekey(eci, &key);
@@ -371,14 +373,18 @@ static int eci_init_accessory(struct eci_data *eci)
 			break;
 	} while (ret);
 
-	if (ret)
+	if (ret) {
+		dev_err(eci->dev, "Unable to get ekey\n");
 		return ret;
+	}
 
 	eci->mem_size = key;
-	if (eci->mem_size > ECI_MAX_MEM_SIZE)
+	if (eci->mem_size > ECI_MAX_MEM_SIZE) {
+		dev_err(eci->dev, "eci->mem_size too big: %d\n", eci->mem_size);
 		return -EINVAL;
+	}
 
-	/* get ECI memory */
+	/* Get ECI memory. */
 	future = jiffies + msecs_to_jiffies(ECI_TRY_GET_MEMORY);
 	do {
 		ret = eci_get_memory(eci, &restart);
@@ -386,18 +392,24 @@ static int eci_init_accessory(struct eci_data *eci)
 			break;
 	} while (ret);
 
-	if (ret)
+	if (ret) {
+		dev_err(eci->dev, "Unable to get memory\n");
 		return ret;
+	}
 
-	if (eci_get_enchancement_features(eci))
+	if (eci_get_enhancement_features(eci)) {
+		dev_err(eci->dev, "Cannot get enhancement features\n");
 		return -EIO;
+	}
 
-	if (eci_parse_enchancement_features(eci))
+	if (eci_parse_enhancement_features(eci)) {
+		dev_err(eci->dev, "Cannot parse enhancement features\n");
 		return -EIO;
+	}
 
 	/*
-	 * configure ECI buttons now when we know how after parsing
-	 * enchancement features
+	 * Configure ECI buttons now when we know how after parsing
+	 * enhancement features.
 	 */
 	usleep_range(ECI_WAIT_BUS_SETTLE_LO, ECI_WAIT_BUS_SETTLE_HI);
 	future = jiffies + msecs_to_jiffies(ECI_TRY_INIT_IO);
@@ -434,7 +446,7 @@ static int init_accessory_input(struct eci_data *eci)
 
 	eci->acc_input->name = "ECI Accessory";
 
-	/* codes on top of KEY_MAX are switch events */
+	/* Codes on top of KEY_MAX are switch events. */
 	for (i = 0; i < ARRAY_SIZE(eci_codes); i++) {
 		code = eci_codes[i];
 		if (code >= KEY_MAX) {
@@ -456,7 +468,7 @@ static int init_accessory_input(struct eci_data *eci)
 		goto err_free_dev;
 	}
 
-	/* must set after input_register_device() */
+	/* Must set after input_register_device(). */
 	eci->acc_input->rep[REP_PERIOD] = ECI_KEY_REPEAT_INTERVAL;
 
 	return 0;
@@ -471,7 +483,7 @@ static void remove_accessory_input(struct eci_data *eci)
 	input_unregister_device(eci->acc_input);
 }
 
-/* press/release button */
+/* Press/release button */
 static int eci_get_button(struct eci_data *eci)
 {
 	struct eci_buttons_data *b = &eci->buttons_data;
@@ -490,7 +502,7 @@ static int eci_get_button(struct eci_data *eci)
 	return 0;
 }
 
-/* intended to use ONLY inside eci_parse_button() ! */
+/* Intended to be used ONLY inside eci_parse_button() ! */
 #define ACTIVE_STATE(x) (be32_to_cpu(*(u32 *)efv->active_state) & BIT(x-1))
 #define BUTTON_STATE(x) ((buttons & BIT(x))>>1)
 
@@ -498,8 +510,8 @@ static void eci_parse_button(struct eci_data *eci, u32 buttons)
 {
 	int pin, code, state = 0;
 	u8 n, io_fun;
-	struct enchancement_features_variable *efv = &eci->e_features_var;
-	struct enchancement_features_fixed *eff = eci->e_features_fix;
+	struct enhancement_features_variable *efv = &eci->e_features_var;
+	struct enhancement_features_fixed *eff = eci->e_features_fix;
 
 	n = eff->number_of_features;
 
@@ -532,7 +544,7 @@ static void eci_parse_button(struct eci_data *eci, u32 buttons)
 static int eci_send_button(struct eci_data *eci)
 {
 	int i;
-	struct enchancement_features_fixed *eff = eci->e_features_fix;
+	struct enhancement_features_fixed *eff = eci->e_features_fix;
 	struct eci_buttons_data *b = &eci->buttons_data;
 	u8 n;
 
@@ -541,10 +553,9 @@ static int eci_send_button(struct eci_data *eci)
 	if (n > ECI_MAX_FEATURE_COUNT)
 		return -EINVAL;
 	/*
-	 * codes on top of KEY_MAX are switch events
-	 * let input system take care multiple key events
+	 * Codes on top of KEY_MAX are switch events, let the input
+	 * system take care multiple key events.
 	 */
-
 	for (i = 0; i < ECI_BUTTON_BUF_SIZE; i++) {
 		if (b->buttons_buf[b->rindex] == 0)
 			break;
@@ -575,7 +586,7 @@ static void aci_button_event(bool button_down, void *priv)
 	input_sync(eci->acc_input);
 }
 
-/* ACI driver call this in ECI accessory event */
+/* ACI driver calls this in ECI accessory event. */
 static void eci_accessory_event(int event, void *priv)
 {
 	struct eci_data *eci = priv;
@@ -650,14 +661,14 @@ static void eci_hsmic_event(void *priv, bool on)
 		dev_err(eci->dev, "Unable to control headset microphone\n");
 }
 
-/*
- * eci_ws
- * general work func for several tasks
- */
+/* General work function for several tasks. */
 static void eci_work(struct work_struct *ws)
 {
 	struct eci_data *eci = container_of(ws, struct eci_data, eci_ws.work);
 	int ret;
+
+	if (!eci->mem_ok)
+		return;
 
 	ret = eci_send_button(eci);
 	if (ret)
@@ -751,7 +762,7 @@ static int __init eci_probe(struct platform_device *pdev)
 	eci->mem_ok = false;
 	eci->mic_state = ECI_MIC_OFF;
 
-	/* init buttons_data indexes and buffer */
+	/* Init buttons_data indexes and buffer. */
 	memset(&eci->buttons_data, 0, sizeof(struct eci_buttons_data));
 	eci->buttons_data.buttons = 0xffffffff;
 

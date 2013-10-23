@@ -2574,7 +2574,7 @@ long tty_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case TIOCGICOUNT:
 		retval = tty_tiocgicount(tty, p);
 		/* For the moment allow fall through to the old method */
-		if (retval != -EINVAL)
+        	if (retval != -EINVAL)
 			return retval;
 		break;
 	case TCFLSH:
