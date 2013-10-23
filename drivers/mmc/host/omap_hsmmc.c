@@ -115,6 +115,7 @@
 /* Timeouts for entering power saving states on inactivity, msec */
 #define OMAP_MMC_DISABLED_TIMEOUT	100
 #define OMAP_MMC_SLEEP_TIMEOUT		1000
+#define OMAP_MMC_OFF_NOSLP_TIMEOUT	3000
 #define OMAP_MMC_OFF_TIMEOUT		8000
 
 /*
@@ -1249,21 +1250,21 @@ static void omap_hsmmc_conf_bus_power(struct omap_hsmmc_host *host)
 
 /*
  * Dynamic power saving handling, FSM:
- *   ENABLED -> DISABLED -> CARDSLEEP / REGSLEEP -> OFF
- *     ^___________|          |                      |
- *     |______________________|______________________|
+ *   ENABLED -> DISABLED -> EXTDISABLED / CARDSLEEP / REGSLEEP -> OFF
+ *     ^___________|                        |                      |
+ *     |____________________________________|______________________|
  *
- * ENABLED:   mmc host is fully functional
- * DISABLED:  fclk is off
- * CARDSLEEP: fclk is off, card is asleep, voltage regulator is asleep
- * REGSLEEP:  fclk is off, voltage regulator is asleep
- * OFF:       fclk is off, voltage regulator is off
+ * ENABLED:       mmc host is fully functional
+ * (EXT)DISABLED: fclk is off
+ * CARDSLEEP:     fclk is off, card is asleep, voltage regulator is asleep
+ * REGSLEEP:      fclk is off, voltage regulator is asleep
+ * OFF:           fclk is off, voltage regulator is off
  *
  * Transition handlers return the timeout for the next state transition
  * or negative error.
  */
 
-enum {ENABLED = 0, DISABLED, CARDSLEEP, REGSLEEP, OFF};
+enum {ENABLED = 0, DISABLED, EXTDISABLED, CARDSLEEP, REGSLEEP, OFF};
 
 /* Handler for [ENABLED -> DISABLED] transition */
 static int omap_hsmmc_enabled_to_disabled(struct omap_hsmmc_host *host)
@@ -1300,7 +1301,21 @@ static int omap_hsmmc_full_sleep(struct mmc_card *card)
 	return 1;
 }
 
-/* Handler for [DISABLED -> REGSLEEP / CARDSLEEP] transition */
+/* Big SD cards (16GiB) are prohibited from
+   switching voltage regulator to asleep
+   because of high current consumption */
+static int omap_hsmmc_support_sleep(struct mmc_host *mmc)
+{
+	if (!(mmc->caps & MMC_CAP_NONREMOVABLE) &&
+	    ((u64)mmc->card->csd.capacity << mmc->card->csd.read_blkbits) >
+	    14ULL * 1024 * 1024 * 1024) {
+		return 0;
+	}
+
+	return 1;
+}
+
+/* Handler for [DISABLED -> EXTDISABLED / REGSLEEP / CARDSLEEP] transition */
 static int omap_hsmmc_disabled_to_sleep(struct omap_hsmmc_host *host)
 {
 	int err, new_state, sleep;
@@ -1319,12 +1334,12 @@ static int omap_hsmmc_disabled_to_sleep(struct omap_hsmmc_host *host)
 		}
 		new_state = CARDSLEEP;
 	} else {
-		new_state = REGSLEEP;
+		new_state = omap_hsmmc_support_sleep(host->mmc) ? REGSLEEP : EXTDISABLED;
 	}
 
 	sleep = omap_hsmmc_full_sleep(host->mmc->card) &&
 		(new_state == CARDSLEEP);
-	if (mmc_slot(host).set_sleep)
+	if (mmc_slot(host).set_sleep && new_state != EXTDISABLED)
 		mmc_slot(host).set_sleep(host->dev, host->slot_id, 1, 0,
 					sleep);
 	/* FIXME: turn off bus power and perhaps interrupts too */
@@ -1334,18 +1349,20 @@ static int omap_hsmmc_disabled_to_sleep(struct omap_hsmmc_host *host)
 	mmc_release_host(host->mmc);
 
 	dev_dbg(mmc_dev(host->mmc), "DISABLED -> %s\n",
-		host->dpm_state == CARDSLEEP ? "CARDSLEEP" : "REGSLEEP");
+		host->dpm_state == CARDSLEEP ? "CARDSLEEP" :
+		host->dpm_state == REGSLEEP ?  "REGSLEEP" : "EXTDISABLED");
 
 	if ((host->mmc->caps & MMC_CAP_NONREMOVABLE) ||
 	    mmc_slot(host).card_detect ||
 	    (mmc_slot(host).get_cover_state &&
 	     mmc_slot(host).get_cover_state(host->dev, host->slot_id)))
-		return msecs_to_jiffies(OMAP_MMC_OFF_TIMEOUT);
+		return msecs_to_jiffies(new_state == EXTDISABLED ?
+		       OMAP_MMC_OFF_NOSLP_TIMEOUT : OMAP_MMC_OFF_TIMEOUT);
 
 	return 0;
 }
 
-/* Handler for [REGSLEEP / CARDSLEEP -> OFF] transition */
+/* Handler for [EXTDISABLED / REGSLEEP / CARDSLEEP -> OFF] transition */
 static int omap_hsmmc_sleep_to_off(struct omap_hsmmc_host *host)
 {
 	if (!mmc_try_claim_host(host->mmc))
@@ -1364,7 +1381,8 @@ static int omap_hsmmc_sleep_to_off(struct omap_hsmmc_host *host)
 	host->power_mode = MMC_POWER_OFF;
 
 	dev_dbg(mmc_dev(host->mmc), "%s -> OFF\n",
-		host->dpm_state == CARDSLEEP ? "CARDSLEEP" : "REGSLEEP");
+		host->dpm_state == CARDSLEEP ? "CARDSLEEP" :
+		host->dpm_state == REGSLEEP ?  "REGSLEEP" : "EXTDISABLED");
 
 	host->dpm_state = OFF;
 
@@ -1405,14 +1423,15 @@ static int omap_hsmmc_sleep_to_enabled(struct omap_hsmmc_host *host)
 	omap_hsmmc_context_restore(host);
 	asleep = omap_hsmmc_full_sleep(host->mmc->card) &&
 		(host->dpm_state == CARDSLEEP);
-	if (mmc_slot(host).set_sleep)
+	if (mmc_slot(host).set_sleep && host->dpm_state != EXTDISABLED)
 		mmc_slot(host).set_sleep(host->dev, host->slot_id, 0,
 					host->vdd, asleep);
 	if (mmc_card_can_sleep(host->mmc))
 		mmc_card_awake(host->mmc);
 
 	dev_dbg(mmc_dev(host->mmc), "%s -> ENABLED\n",
-		host->dpm_state == CARDSLEEP ? "CARDSLEEP" : "REGSLEEP");
+		host->dpm_state == CARDSLEEP ? "CARDSLEEP" :
+		host->dpm_state == REGSLEEP ?  "REGSLEEP" : "EXTDISABLED");
 
 	if (host->pdata->set_pm_constraints)
 		host->pdata->set_pm_constraints(host->dev, 1);
@@ -1454,6 +1473,7 @@ static int omap_hsmmc_enable(struct mmc_host *mmc)
 	switch (host->dpm_state) {
 	case DISABLED:
 		return omap_hsmmc_disabled_to_enabled(host);
+	case EXTDISABLED:
 	case CARDSLEEP:
 	case REGSLEEP:
 		return omap_hsmmc_sleep_to_enabled(host);
@@ -1484,6 +1504,7 @@ static int omap_hsmmc_disable(struct mmc_host *mmc, int lazy)
 	}
 	case DISABLED:
 		return omap_hsmmc_disabled_to_sleep(host);
+	case EXTDISABLED:
 	case CARDSLEEP:
 	case REGSLEEP:
 		return omap_hsmmc_sleep_to_off(host);

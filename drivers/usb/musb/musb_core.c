@@ -297,28 +297,23 @@ static int musb_charger_detect(struct musb *musb)
 			break;
 	}
 
-	if (vdat) {
-		/* REVISIT: This code works only with dedicated chargers!
-		 * When support for HOST/HUB chargers is added, don't
-		 * forget this.
-		 */
+	/* enable interrupts */
+	musb_writeb(musb->mregs, MUSB_INTRUSBE, ctx.intrusbe);
+
+	/* Make sure the communication starts normally */
+	r = musb_readb(musb->mregs, MUSB_POWER);
+	musb_writeb(musb->mregs, MUSB_POWER,
+			r | MUSB_POWER_RESUME);
+	msleep(10);
+	musb_writeb(musb->mregs, MUSB_POWER,
+			r & ~MUSB_POWER_RESUME);
+	if (vdat && musb->xceiv->state != OTG_STATE_B_IDLE) {
 		musb_stop(musb);
 		/* Regulators off */
 		otg_set_suspend(musb->xceiv, 1);
-		musb->is_charger = 1;
-	} else {
-		/* enable interrupts */
-		musb_writeb(musb->mregs, MUSB_INTRUSBE, ctx.intrusbe);
-
-		/* Make sure the communication starts normally */
-		r = musb_readb(musb->mregs, MUSB_POWER);
-		musb_writeb(musb->mregs, MUSB_POWER,
-				r | MUSB_POWER_RESUME);
-		msleep(10);
-		musb_writeb(musb->mregs, MUSB_POWER,
-				r & ~MUSB_POWER_RESUME);
 	}
 
+	musb->is_charger = vdat;
 	check_charger = 0;
 
 	return vdat;

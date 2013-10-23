@@ -517,11 +517,12 @@ DSP_STATUS DRV_ProcFreeDMMRes(HANDLE hPCtxt)
 		pDMMRes = pDMMList;
 		pDMMList = pDMMList->next;
 		if (pDMMRes->dmmAllocated) {
-			status = PROC_UnMap(pDMMRes->hProcessor,
-				 (void *)pDMMRes->ulDSPResAddr, pCtxt);
-			status = PROC_UnReserveMemory(pDMMRes->hProcessor,
-				 (void *)pDMMRes->ulDSPResAddr);
-			pDMMRes->dmmAllocated = 0;
+			/* PROC_UnMap frees pDMMRes */
+			void *processor = pDMMRes->hProcessor;
+			void *map_addr = (void*)pDMMRes->ulDSPAddr;
+			void *rsv_addr = (void*)pDMMRes->ulDSPResAddr;
+			status = PROC_UnMap(processor, map_addr, pCtxt);
+			status = PROC_UnReserveMemory(processor, rsv_addr);
 		}
 	}
 	return status;

@@ -750,6 +750,7 @@ static int memory_sync_vma(unsigned long start, u32 len,
 			break;
 
 		start = vma->vm_end;
+		len -= size;
 	}
 
 	if (!vma)

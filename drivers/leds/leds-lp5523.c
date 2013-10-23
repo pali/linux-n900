@@ -32,6 +32,7 @@
 #include <linux/wait.h>
 #include <linux/leds.h>
 #include <linux/leds-lp5523.h>
+#include <linux/workqueue.h>
 
 #define LP5523_DRIVER_NAME		"lp5523"
 #define LP5523_REG_ENABLE		0x00
@@ -120,6 +121,8 @@ struct lp5523_led {
 	u8			led_nr;
 	u8			led_current;
 	struct led_classdev     cdev;
+	struct work_struct brightness_work;
+	u8			brightness;
 };
 
 struct lp5523_chip {
@@ -160,6 +163,8 @@ static int lp5523_load_program(struct lp5523_engine *engine, u8 *pattern);
 
 static void lp5523_work(struct work_struct  *work);
 static irqreturn_t lp5523_irq(int irq, void *_chip);
+
+static void lp5523_led_brightness_work(struct work_struct *work);
 
 
 static int lp5523_write(struct i2c_client *client, u8 reg, u8 value)
@@ -476,6 +481,16 @@ static void lp5523_set_brightness(struct led_classdev *cdev,
 			     enum led_brightness brightness)
 {
 	struct lp5523_led *led = cdev_to_led(cdev);
+	led->brightness = (u8)brightness;
+
+	schedule_work(&led->brightness_work);
+}
+
+static void lp5523_led_brightness_work(struct work_struct *work)
+{
+	struct lp5523_led *led = container_of(work,
+					      struct lp5523_led,
+					      brightness_work);
 	struct lp5523_chip *chip = led_to_lp5523(led);
 	struct i2c_client *client = chip->client;
 
@@ -483,7 +498,7 @@ static void lp5523_set_brightness(struct led_classdev *cdev,
 
 	lp5523_write(client,
 		     LP5523_REG_LED_PWM_BASE + led->led_nr,
-		     (u8)brightness);
+		     led->brightness);
 
 	mutex_unlock(&chip->lock);
 }
@@ -907,6 +922,8 @@ static int lp5523_probe(struct i2c_client *client,
 			dev_err(&client->dev, "error initializing leds\n");
 			goto fail2;
 		}
+		INIT_WORK(&(chip->leds[i].brightness_work),
+			  lp5523_led_brightness_work);
 	}
 
 	ret = lp5523_register_sysfs(client);
@@ -916,8 +933,10 @@ static int lp5523_probe(struct i2c_client *client,
 	}
 	return ret;
 fail2:
-	for (i = 0; i < pdata->num_leds; i++)
+	for (i = 0; i < pdata->num_leds; i++) {
 		led_classdev_unregister(&chip->leds[i].cdev);
+		cancel_work_sync(&chip->leds[i].brightness_work);
+		}
 
 fail1:
 	kfree(chip);
@@ -931,8 +950,10 @@ static int lp5523_remove(struct i2c_client *client)
 
 	lp5523_unregister_sysfs(client);
 
-	for (i = 0; i < chip->num_leds; i++)
+	for (i = 0; i < chip->num_leds; i++) {
 		led_classdev_unregister(&chip->leds[i].cdev);
+		cancel_work_sync(&chip->leds[i].brightness_work);
+		}
 
 	kfree(chip);
 

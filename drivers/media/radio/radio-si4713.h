@@ -21,6 +21,9 @@
 #define SI4713_I2C_ADDR_BUSEN_HIGH	0x63
 #define SI4713_I2C_ADDR_BUSEN_LOW	0x11
 
+#define LOCK_LOW_POWER		_IOW('v', BASE_VIDIOC_PRIVATE + 0, unsigned int)
+#define RELEASE_LOW_POWER	_IOW('v', BASE_VIDIOC_PRIVATE + 1, unsigned int)
+
 /*
  * Platform dependent definition
  */

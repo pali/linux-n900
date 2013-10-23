@@ -1833,6 +1833,7 @@ static int omap34xxcam_release(struct inode *inode, struct file *file)
 	struct omap34xxcam_videodev *vdev = fh->vdev;
 	struct device *isp = vdev->cam->isp;
 	int i;
+	int streamoff = 0;
 
 	if (omap34xxcam_daemon_release(vdev, file))
 		goto daemon_out;
@@ -1844,6 +1845,7 @@ static int omap34xxcam_release(struct inode *inode, struct file *file)
 		omap34xxcam_slave_power_set(vdev, V4L2_POWER_STANDBY,
 					    OMAP34XXCAM_SLAVE_POWER_ALL);
 		vdev->streaming = NULL;
+		streamoff = 1;
 	}
 
 	if (atomic_dec_return(&vdev->users) == 0) {
@@ -1852,6 +1854,10 @@ static int omap34xxcam_release(struct inode *inode, struct file *file)
 		isp_put();
 	}
 	mutex_unlock(&vdev->mutex);
+
+	if (streamoff)
+		omap34xxcam_daemon_req_hw_reconfig(
+			vdev, OMAP34XXCAM_DAEMON_HW_RECONFIG_STREAMOFF);
 
 daemon_out:
 	file->private_data = NULL;

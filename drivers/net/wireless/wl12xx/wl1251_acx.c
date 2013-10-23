@@ -910,7 +910,7 @@ int wl1251_acx_tsf_info(struct wl1251 *wl, u64 *mactime)
 	}
 
 	*mactime = tsf_info->current_tsf_lsb |
-		(tsf_info->current_tsf_msb << 31);
+		((unsigned long long) tsf_info->current_tsf_msb << 32);
 
 out:
 	kfree(tsf_info);

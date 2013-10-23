@@ -996,11 +996,55 @@ static void drain_mmlist(void)
 	spin_unlock(&mmlist_lock);
 }
 
+void gaps_rbtree_insert(struct swap_info_struct *sis,
+			struct swap_gap_node *node)
+{
+	struct rb_node **p = &sis->gaps_tree.rb_node;
+	struct rb_node *parent = NULL;
+	struct swap_gap_node *tmp;
+
+	while (*p) {
+		parent = *p;
+		tmp = rb_entry(parent, struct swap_gap_node, rb_node);
+		if (swap_gap_len(node) < swap_gap_len(tmp))
+			p = &(*p)->rb_left;
+		else
+			p = &(*p)->rb_right;
+	}
+	rb_link_node(&node->rb_node, parent, p);
+	rb_insert_color(&node->rb_node, &sis->gaps_tree);
+}
+
+void gaps_rbtree_add(struct swap_info_struct *sis,
+				unsigned int next, unsigned int end,
+				struct swap_gap_node **gap_min, int *pos)
+{
+	struct swap_gap_node *gap_node;
+	if (*pos < SWAP_GAP_TREE_SIZE) {
+		gap_node = &sis->gap_pool_arr[*pos];
+		*pos += 1;
+	} else if (swap_gap_len(*gap_min) > end - next) {
+		return;
+	} else {
+		gap_node = *gap_min;
+		rb_erase(&gap_node->rb_node, &sis->gaps_tree);
+		*gap_min = swap_gap_rb_entry(rb_first(&sis->gaps_tree));
+	}
+	gap_node->next = next;
+	gap_node->end = end;
+	if (gap_min && (*gap_min == NULL ||
+			swap_gap_len(*gap_min) > swap_gap_len(gap_node)))
+		*gap_min = gap_node;
+	gaps_rbtree_insert(sis, gap_node);
+}
+
 /* Find the largest sequence of free pages */
 int find_gap(struct swap_info_struct *sis)
 {
 	unsigned i, uninitialized_var(start), uninitialized_var(gap_next);
-	unsigned uninitialized_var(gap_end), gap_size = 0;
+	unsigned uninitialized_var(gap_end);
+	struct swap_gap_node *gap_max, *gap_min = NULL;
+	int pos = 0;
 	int in_gap = 0;
 
 	spin_unlock(&sis->remap_lock);
@@ -1017,6 +1061,11 @@ int find_gap(struct swap_info_struct *sis)
 		mutex_unlock(&sis->remap_mutex);
 		return -1;
 	}
+	if (time_after(jiffies, sis->gap_last_scan +
+			msecs_to_jiffies(SWAP_GAP_RESCAN_TIMEO_MSEC)))
+		sis->gaps_tree = RB_ROOT;
+	if (!RB_EMPTY_ROOT(&sis->gaps_tree))
+		goto out;
 	spin_unlock(&sis->remap_lock);
 
 	/*
@@ -1028,11 +1077,7 @@ int find_gap(struct swap_info_struct *sis)
 		if (in_gap) {
 			if (!(sis->swap_remap[i] & 0x80000000))
 				continue;
-			if (i - start > gap_size) {
-				gap_next = start;
-				gap_end = i - 1;
-				gap_size = i - start;
-			}
+			gaps_rbtree_add(sis, start, i - 1, &gap_min, &pos);
 			in_gap = 0;
 		} else {
 			if (sis->swap_remap[i] & 0x80000000)
@@ -1043,13 +1088,14 @@ int find_gap(struct swap_info_struct *sis)
 		cond_resched();
 	}
 	spin_lock(&sis->remap_lock);
-	if (in_gap && i - start > gap_size) {
-		sis->gap_next = start;
-		sis->gap_end = i - 1;
-	} else {
-		sis->gap_next = gap_next;
-		sis->gap_end = gap_end;
-	}
+	if (in_gap)
+		gaps_rbtree_add(sis, start, i - 1, &gap_min, &pos);
+	sis->gap_last_scan = jiffies;
+out:
+	gap_max = swap_gap_rb_entry(rb_last(&sis->gaps_tree));
+	rb_erase(&gap_max->rb_node, &sis->gaps_tree);
+	sis->gap_next = gap_max->next;
+	sis->gap_end = gap_max->end;
 	mutex_unlock(&sis->remap_mutex);
 	return 0;
 }
@@ -1471,6 +1517,7 @@ asmlinkage long sys_swapoff(const char __user * specialfile)
 	p->flags = 0;
 	spin_unlock(&swap_lock);
 	mutex_unlock(&swapon_mutex);
+	kfree(p->gap_pool_arr);
 	vfree(p->swap_remap);
 	vfree(swap_map);
 	inode = mapping->host;
@@ -1824,6 +1871,14 @@ asmlinkage long sys_swapon(const char __user * specialfile, int swap_flags)
 		error = -EINVAL;
 		goto bad_swap;
 	}
+
+	p->gap_pool_arr = kmalloc(sizeof(struct swap_gap_node)*
+				SWAP_GAP_TREE_SIZE, GFP_KERNEL);
+	if (!p->gap_pool_arr) {
+		error = -ENOMEM;
+		goto bad_swap;
+	}
+	p->gaps_tree = RB_ROOT;
 
 	mutex_lock(&swapon_mutex);
 	spin_lock(&swap_lock);

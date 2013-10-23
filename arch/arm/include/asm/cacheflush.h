@@ -138,16 +138,16 @@
  *	Please note that the implementation of these, and the required
  *	effects are cache-type (VIVT/VIPT/PIPT) specific.
  *
- *	flush_cache_kern_all()
+ *	flush_kern_all()
  *
  *		Unconditionally clean and invalidate the entire cache.
  *
- *	flush_cache_user_mm(mm)
+ *	flush_user_all()
  *
  *		Clean and invalidate all user space cache entries
  *		before a change of page tables.
  *
- *	flush_cache_user_range(start, end, flags)
+ *	flush_user_range(start, end, flags)
  *
  *		Clean and invalidate a range of cache entries in the
  *		specified address space before a change of page tables.
@@ -162,6 +162,20 @@
  *		Harvard caches, you need to implement this function.
  *		- start  - virtual start address
  *		- end    - virtual end address
+ *
+ *	coherent_user_range(start, end)
+ *
+ *		Ensure coherency between the Icache and the Dcache in the
+ *		region described by start, end.  If you have non-snooping
+ *		Harvard caches, you need to implement this function.
+ *		- start  - virtual start address
+ *		- end    - virtual end address
+ *
+ *	flush_kern_dcache_area(kaddr, size)
+ *
+ *		Ensure that the data held in page is written back.
+ *		- kaddr  - page address
+ *		- size   - region size
  *
  *	DMA Cache Coherency
  *	===================
@@ -375,7 +389,7 @@ extern void flush_ptrace_access(struct vm_area_struct *vma, struct page *page,
  * Harvard caches are synchronised for the user space address range.
  * This is used for the ARM private sys_cacheflush system call.
  */
-#define flush_cache_user_range(vma,start,end) \
+#define flush_cache_user_range(start,end) \
 	__cpuc_coherent_user_range((start) & PAGE_MASK, PAGE_ALIGN(end))
 
 /*

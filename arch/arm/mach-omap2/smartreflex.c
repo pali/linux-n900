@@ -890,7 +890,7 @@ int sr_voltagescale_vcbypass(u32 target_opp, u32 current_opp,
 		return SR_FAIL;
 	}
 
-	if (sr->is_autocomp_active) {
+	if (sr->is_autocomp_active && !sr->is_sr_reset) {
 		WARN(1, "SR: Must not transmit VCBYPASS command while SR is "
 		     "active");
 		return SR_FAIL;

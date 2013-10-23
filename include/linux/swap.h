@@ -130,6 +130,17 @@ enum {
 #define SWAP_MAP_MAX	0x7fff
 #define SWAP_MAP_BAD	0x8000
 
+#define SWAP_GAP_TREE_SIZE 10
+#define SWAP_GAP_RESCAN_TIMEO_MSEC 2000
+#define swap_gap_len(gap) ((gap)->end - (gap)->next)
+#define swap_gap_rb_entry(node) rb_entry(node, struct swap_gap_node, rb_node)
+/* Struct to store gaps info */
+struct swap_gap_node {
+	struct rb_node rb_node;
+	unsigned int next;
+	unsigned int end;
+};
+
 /*
  * The in-memory structure used to track swap areas.
  */
@@ -157,6 +168,9 @@ struct swap_info_struct {
 	unsigned int gap_next;
 	unsigned int gap_end;
 	unsigned int gaps_exist;
+	struct rb_root gaps_tree;
+	struct swap_gap_node *gap_pool_arr;
+	unsigned long gap_last_scan;
 	unsigned int lowest_bit;
 	unsigned int highest_bit;
 	unsigned int cluster_next;

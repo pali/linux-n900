@@ -54,6 +54,25 @@
 /* module parameters */
 static int radio_nr = -1;	/* radio device minor (-1 ==> auto assign) */
 
+/* properties lock for write operations */
+static int config_locked;
+
+/* saved power levels */
+static unsigned int max_pl;
+static unsigned int min_pl;
+
+/* structure for pid registration */
+struct pid_list {
+	pid_t pid;
+	struct list_head plist;
+};
+
+#define APP_MAX_NUM	2
+
+static int pid_count;
+static LIST_HEAD(pid_list_head);
+static struct si4713_device *si4713_dev;
+
 /*
  * Sysfs properties
  * Read and write functions
@@ -167,6 +186,37 @@ static DEVICE_ATTR(prop, S_IRUGO | S_IWUSR, si4713_##prop##_read,	\
 					si4713_##prop##_write);
 
 /*
+ * Config lock property
+ */
+static ssize_t si4713_lock_write(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf,
+				size_t count)
+{
+	int l;
+
+	if (config_locked)
+		return -EPERM;
+
+	sscanf(buf, "%d", &l);
+
+	if (l != 0)
+		config_locked = 1;
+
+	return count;
+}
+
+static ssize_t si4713_lock_read(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	return sprintf(buf, "%d\n", config_locked);
+}
+
+static DEVICE_ATTR(lock, S_IRUGO | S_IWUSR, si4713_lock_read,
+			si4713_lock_write);
+
+/*
  * Power level property
  */
 /* power_level (rw) 88 - 115 or 0 */
@@ -178,6 +228,9 @@ static ssize_t si4713_power_level_write(struct device *dev,
 	struct si4713_device *sdev = dev_get_drvdata(dev);
 	unsigned int p;
 	int rval, pl;
+
+	if (config_locked)
+		return -EPERM;
 
 	if (!sdev) {
 		rval = -ENODEV;
@@ -320,6 +373,7 @@ DEFINE_SYSFS_PROPERTY(tone_off_time, unsigned, int, "%u",
 			value > MAX_TONE_OFF_TIME)
 
 static struct attribute *attrs[] = {
+	&dev_attr_lock.attr,
 	&dev_attr_power_level.attr,
 	&dev_attr_antenna_capacitor.attr,
 	&dev_attr_rds_pi.attr,
@@ -366,13 +420,118 @@ static irqreturn_t si4713_handler(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
+static int register_pid(pid_t pid)
+{
+	struct pid_list *pitem;
+
+	list_for_each_entry(pitem, &pid_list_head, plist) {
+		if (pitem->pid == pid)
+			return -EINVAL;
+	}
+
+	pitem = kmalloc(sizeof(struct pid_list), GFP_KERNEL);
+
+	if (!pitem)
+		return -ENOMEM;
+
+	pitem->pid = pid;
+
+	list_add(&(pitem->plist), &pid_list_head);
+	pid_count++;
+
+	return 0;
+}
+
+static int unregister_pid(pid_t pid)
+{
+	struct pid_list *pitem, *n;
+
+	list_for_each_entry_safe(pitem, n, &pid_list_head, plist) {
+		if (pitem->pid == pid) {
+			list_del(&(pitem->plist));
+			pid_count--;
+
+			kfree(pitem);
+
+			return 0;
+		}
+	}
+	return -EINVAL;
+}
+
+static int si4713_priv_ioctl(struct inode *inode, struct file *file,
+		unsigned int cmd, unsigned long arg)
+{
+	unsigned int pow;
+	int pl, rval;
+
+	if (cmd != LOCK_LOW_POWER && cmd != RELEASE_LOW_POWER)
+		return video_ioctl2(inode, file, cmd, arg);
+
+	pl = si4713_get_power_level(si4713_dev);
+
+	if (pl < 0) {
+		rval = pl;
+		goto exit;
+	}
+
+	if (copy_from_user(&pow, (void __user *)arg, sizeof(pow))) {
+		rval = -EFAULT;
+		goto exit;
+	}
+
+	if (cmd == LOCK_LOW_POWER) {
+
+		if (pid_count == APP_MAX_NUM) {
+			rval = -EPERM;
+			goto exit;
+		}
+
+		if (pid_count == 0) {
+			if (pow > pl) {
+				rval = -EINVAL;
+				goto exit;
+			} else {
+				/* Set max possible power level */
+				max_pl = pl;
+				min_pl = pow;
+			}
+		}
+
+		rval = register_pid(current->pid);
+
+		if (rval)
+			goto exit;
+
+		/* Lower min power level if asked */
+		if (pow < min_pl)
+			min_pl = pow;
+		else
+			pow = min_pl;
+
+	} else { /* RELEASE_LOW_POWER */
+		rval = unregister_pid(current->pid);
+
+		if (rval)
+			goto exit;
+
+		if (pid_count == 0) {
+			if (pow > max_pl)
+				pow = max_pl;
+		}
+	}
+	rval = si4713_set_power_level(si4713_dev, pow);
+exit:
+	return rval;
+}
+
 /*
  * si4713_fops - file operations interface
  */
 static const struct file_operations si4713_fops = {
 	.owner		= THIS_MODULE,
 	.llseek		= no_llseek,
-	.ioctl		= video_ioctl2,
+	.ioctl		= si4713_priv_ioctl,
 	.compat_ioctl	= v4l_compat_ioctl32,
 };
 
@@ -746,6 +905,9 @@ static int si4713_i2c_driver_probe(struct i2c_client *client,
 		dev_dbg(&client->dev, "Failed to probe device information.\n");
 		goto free_sysfs;
 	}
+
+	/* save to global pointer for it to be accesible from ioctl() call */
+	si4713_dev = sdev;
 
 	return 0;
 

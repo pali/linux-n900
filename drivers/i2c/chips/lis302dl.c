@@ -44,6 +44,7 @@
 #	define LIS302_CTRL1_Y		(1 << 1)
 #	define LIS302_CTRL1_X		(1 << 0)
 #define LIS302_CTRL_2			0x21
+#	define LIS302_CTRL2_BOOT	(1 << 6)
 #define LIS302_CTRL_3			0x22
 #	define	LIS302_CTRL3_GND	0x00
 #	define	LIS302_CTRL3_FF_WU_1	0x01
@@ -161,8 +162,13 @@ static int lis302dl_configure(struct i2c_client *c)
 	if (ret < 0)
 		goto out;
 
-	/* REG 2 */
-	/* Control High Pass filter selection. not used */
+	/* REG 2
+	 * Boot is used to refresh internal registers
+	 * Control High Pass filter selection. not used
+	 */
+	ret = lis302dl_write(c, LIS302_CTRL_2, LIS302_CTRL2_BOOT);
+	if (ret < 0)
+		goto out;
 
 	/* REG 3
 	 * Interrupt CTRL register. One interrupt pin is used for
