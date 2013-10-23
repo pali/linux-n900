@@ -120,8 +120,25 @@ static int ehci_bus_suspend (struct usb_hcd *hcd)
 	del_timer_sync(&ehci->watchdog);
 	del_timer_sync(&ehci->iaa_watchdog);
 
-	port = HCS_N_PORTS (ehci->hcs_params);
 	spin_lock_irq (&ehci->lock);
+
+	/* Once the controller is stopped, port resumes that are already
+	 * in progress won't complete.  Hence if remote wakeup is enabled
+	 * for the root hub and any ports are in the middle of a resume or
+	 * remote wakeup, we must fail the suspend.
+	 */
+	if (hcd->self.root_hub->do_remote_wakeup) {
+		port = HCS_N_PORTS(ehci->hcs_params);
+		while (port--) {
+			if (ehci->reset_done[port] != 0) {
+				spin_unlock_irq(&ehci->lock);
+				ehci_dbg(ehci, "suspend failed because "
+						"port %d is resuming\n",
+						port + 1);
+				return -EBUSY;
+			}
+		}
+	}
 
 	/* stop schedules, clean any completed work */
 	if (HC_IS_RUNNING(hcd->state)) {
@@ -138,6 +155,7 @@ static int ehci_bus_suspend (struct usb_hcd *hcd)
 	 */
 	ehci->bus_suspended = 0;
 	ehci->owned_ports = 0;
+	port = HCS_N_PORTS(ehci->hcs_params);
 	while (port--) {
 		u32 __iomem	*reg = &ehci->regs->port_status [port];
 		u32		t1 = ehci_readl(ehci, reg) & ~PORT_RWC_BITS;
@@ -274,6 +292,16 @@ static int ehci_bus_resume (struct usb_hcd *hcd)
 	/* manually resume the ports we suspended during bus_suspend() */
 	i = HCS_N_PORTS (ehci->hcs_params);
 	while (i--) {
+		/* clear phy low power mode before resume */
+		if (ehci->has_hostpc) {
+			u32 __iomem	*hostpc_reg =
+				(u32 __iomem *)((u8 *)ehci->regs
+				+ HOSTPC0 + 4 * (i & 0xff));
+			temp = ehci_readl(ehci, hostpc_reg);
+			ehci_writel(ehci, temp & ~HOSTPC_PHCD,
+				hostpc_reg);
+			mdelay(5);
+		}
 		temp = ehci_readl(ehci, &ehci->regs->port_status [i]);
 		temp &= ~(PORT_RWC_BITS | PORT_WAKE_BITS);
 		if (test_bit(i, &ehci->bus_suspended) &&
@@ -658,6 +686,13 @@ static int ehci_hub_control (
 			if (temp & PORT_SUSPEND) {
 				if ((temp & PORT_PE) == 0)
 					goto error;
+				/* clear phy low power mode before resume */
+				if (hostpc_reg) {
+					temp1 = ehci_readl(ehci, hostpc_reg);
+					ehci_writel(ehci, temp1 & ~HOSTPC_PHCD,
+						hostpc_reg);
+					mdelay(5);
+				}
 				/* resume signaling for 20 msec */
 				temp &= ~(PORT_RWC_BITS | PORT_WAKE_BITS);
 				ehci_writel(ehci, temp | PORT_RESUME,

@@ -31,8 +31,10 @@ MODULE_PARM_DESC(rx_frag_size, "Size of a fragment that holds rcvd data.");
 
 static DEFINE_PCI_DEVICE_TABLE(be_dev_ids) = {
 	{ PCI_DEVICE(BE_VENDOR_ID, BE_DEVICE_ID1) },
+	{ PCI_DEVICE(BE_VENDOR_ID, BE_DEVICE_ID2) },
 	{ PCI_DEVICE(BE_VENDOR_ID, OC_DEVICE_ID1) },
 	{ PCI_DEVICE(BE_VENDOR_ID, OC_DEVICE_ID2) },
+	{ PCI_DEVICE(BE_VENDOR_ID, OC_DEVICE_ID3) },
 	{ 0 }
 };
 MODULE_DEVICE_TABLE(pci, be_dev_ids);
@@ -144,13 +146,10 @@ void netdev_stats_update(struct be_adapter *adapter)
 	struct net_device_stats *dev_stats = &adapter->stats.net_stats;
 	struct be_erx_stats *erx_stats = &hw_stats->erx;
 
-	dev_stats->rx_packets = port_stats->rx_total_frames;
-	dev_stats->tx_packets = port_stats->tx_unicastframes +
-		port_stats->tx_multicastframes + port_stats->tx_broadcastframes;
-	dev_stats->rx_bytes = (u64) port_stats->rx_bytes_msd << 32 |
-				(u64) port_stats->rx_bytes_lsd;
-	dev_stats->tx_bytes = (u64) port_stats->tx_bytes_msd << 32 |
-				(u64) port_stats->tx_bytes_lsd;
+	dev_stats->rx_packets = drvr_stats(adapter)->be_rx_pkts;
+	dev_stats->tx_packets = drvr_stats(adapter)->be_tx_pkts;
+	dev_stats->rx_bytes = drvr_stats(adapter)->be_rx_bytes;
+	dev_stats->tx_bytes = drvr_stats(adapter)->be_tx_bytes;
 
 	/* bad pkts received */
 	dev_stats->rx_errors = port_stats->rx_crc_errors +
@@ -307,12 +306,13 @@ static void be_tx_rate_update(struct be_adapter *adapter)
 }
 
 static void be_tx_stats_update(struct be_adapter *adapter,
-			u32 wrb_cnt, u32 copied, bool stopped)
+			u32 wrb_cnt, u32 copied, u32 gso_segs, bool stopped)
 {
 	struct be_drvr_stats *stats = drvr_stats(adapter);
 	stats->be_tx_reqs++;
 	stats->be_tx_wrbs += wrb_cnt;
 	stats->be_tx_bytes += copied;
+	stats->be_tx_pkts += (gso_segs ? gso_segs : 1);
 	if (stopped)
 		stats->be_tx_stops++;
 }
@@ -460,7 +460,8 @@ static netdev_tx_t be_xmit(struct sk_buff *skb,
 
 		be_txq_notify(adapter, txq->id, wrb_cnt);
 
-		be_tx_stats_update(adapter, wrb_cnt, copied, stopped);
+		be_tx_stats_update(adapter, wrb_cnt, copied,
+				skb_shinfo(skb)->gso_segs, stopped);
 	} else {
 		txq->head = start;
 		dev_kfree_skb_any(skb);
@@ -603,6 +604,7 @@ static void be_rx_stats_update(struct be_adapter *adapter,
 	stats->be_rx_compl++;
 	stats->be_rx_frags += numfrags;
 	stats->be_rx_bytes += pktsize;
+	stats->be_rx_pkts++;
 }
 
 static inline bool do_pkt_csum(struct be_eth_rx_compl *rxcp, bool cso)
@@ -1942,6 +1944,7 @@ static void be_unmap_pci_bars(struct be_adapter *adapter)
 static int be_map_pci_bars(struct be_adapter *adapter)
 {
 	u8 __iomem *addr;
+	int pcicfg_reg;
 
 	addr = ioremap_nocache(pci_resource_start(adapter->pdev, 2),
 			pci_resource_len(adapter->pdev, 2));
@@ -1955,8 +1958,13 @@ static int be_map_pci_bars(struct be_adapter *adapter)
 		goto pci_map_err;
 	adapter->db = addr;
 
-	addr = ioremap_nocache(pci_resource_start(adapter->pdev, 1),
-			pci_resource_len(adapter->pdev, 1));
+	if (adapter->generation == BE_GEN2)
+		pcicfg_reg = 1;
+	else
+		pcicfg_reg = 0;
+
+	addr = ioremap_nocache(pci_resource_start(adapter->pdev, pcicfg_reg),
+			pci_resource_len(adapter->pdev, pcicfg_reg));
 	if (addr == NULL)
 		goto pci_map_err;
 	adapter->pcicfg = addr;
@@ -2026,6 +2034,7 @@ static int be_stats_init(struct be_adapter *adapter)
 	cmd->va = pci_alloc_consistent(adapter->pdev, cmd->size, &cmd->dma);
 	if (cmd->va == NULL)
 		return -1;
+	memset(cmd->va, 0, cmd->size);
 	return 0;
 }
 
@@ -2099,6 +2108,20 @@ static int __devinit be_probe(struct pci_dev *pdev,
 		goto rel_reg;
 	}
 	adapter = netdev_priv(netdev);
+
+	switch (pdev->device) {
+	case BE_DEVICE_ID1:
+	case OC_DEVICE_ID1:
+		adapter->generation = BE_GEN2;
+		break;
+	case BE_DEVICE_ID2:
+	case OC_DEVICE_ID2:
+		adapter->generation = BE_GEN3;
+		break;
+	default:
+		adapter->generation = 0;
+	}
+
 	adapter->pdev = pdev;
 	pci_set_drvdata(pdev, adapter);
 	adapter->netdev = netdev;

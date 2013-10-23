@@ -482,14 +482,24 @@ static bool e1000_clean_rx_irq(struct e1000_adapter *adapter,
 
 		length = le16_to_cpu(rx_desc->length);
 
-		/* !EOP means multiple descriptors were used to store a single
-		 * packet, also make sure the frame isn't just CRC only */
-		if (!(status & E1000_RXD_STAT_EOP) || (length <= 4)) {
+		/*
+		 * !EOP means multiple descriptors were used to store a single
+		 * packet, if that's the case we need to toss it.  In fact, we
+		 * need to toss every packet with the EOP bit clear and the
+		 * next frame that _does_ have the EOP bit set, as it is by
+		 * definition only a frame fragment
+		 */
+		if (unlikely(!(status & E1000_RXD_STAT_EOP)))
+			adapter->flags2 |= FLAG2_IS_DISCARDING;
+
+		if (adapter->flags2 & FLAG2_IS_DISCARDING) {
 			/* All receives must fit into a single buffer */
 			e_dbg("%s: Receive packet consumed multiple buffers\n",
 			      netdev->name);
 			/* recycle */
 			buffer_info->skb = skb;
+			if (status & E1000_RXD_STAT_EOP)
+				adapter->flags2 &= ~FLAG2_IS_DISCARDING;
 			goto next_desc;
 		}
 
@@ -655,6 +665,8 @@ static bool e1000_clean_tx_irq(struct e1000_adapter *adapter)
 				i = 0;
 		}
 
+		if (i == tx_ring->next_to_use)
+			break;
 		eop = tx_ring->buffer_info[i].next_to_watch;
 		eop_desc = E1000_TX_DESC(*tx_ring, eop);
 	}
@@ -747,10 +759,16 @@ static bool e1000_clean_rx_irq_ps(struct e1000_adapter *adapter,
 				 PCI_DMA_FROMDEVICE);
 		buffer_info->dma = 0;
 
-		if (!(staterr & E1000_RXD_STAT_EOP)) {
+		/* see !EOP comment in other rx routine */
+		if (!(staterr & E1000_RXD_STAT_EOP))
+			adapter->flags2 |= FLAG2_IS_DISCARDING;
+
+		if (adapter->flags2 & FLAG2_IS_DISCARDING) {
 			e_dbg("%s: Packet Split buffers didn't pick up the "
 			      "full packet\n", netdev->name);
 			dev_kfree_skb_irq(skb);
+			if (staterr & E1000_RXD_STAT_EOP)
+				adapter->flags2 &= ~FLAG2_IS_DISCARDING;
 			goto next_desc;
 		}
 
@@ -1120,6 +1138,7 @@ static void e1000_clean_rx_ring(struct e1000_adapter *adapter)
 
 	rx_ring->next_to_clean = 0;
 	rx_ring->next_to_use = 0;
+	adapter->flags2 &= ~FLAG2_IS_DISCARDING;
 
 	writel(0, adapter->hw.hw_addr + rx_ring->head);
 	writel(0, adapter->hw.hw_addr + rx_ring->tail);
@@ -2330,18 +2349,6 @@ static void e1000_setup_rctl(struct e1000_adapter *adapter)
 	rctl &= ~E1000_RCTL_SZ_4096;
 	rctl |= E1000_RCTL_BSEX;
 	switch (adapter->rx_buffer_len) {
-	case 256:
-		rctl |= E1000_RCTL_SZ_256;
-		rctl &= ~E1000_RCTL_BSEX;
-		break;
-	case 512:
-		rctl |= E1000_RCTL_SZ_512;
-		rctl &= ~E1000_RCTL_BSEX;
-		break;
-	case 1024:
-		rctl |= E1000_RCTL_SZ_1024;
-		rctl &= ~E1000_RCTL_BSEX;
-		break;
 	case 2048:
 	default:
 		rctl |= E1000_RCTL_SZ_2048;
@@ -3066,13 +3073,18 @@ static int e1000_test_msi(struct e1000_adapter *adapter)
 
 	/* disable SERR in case the MSI write causes a master abort */
 	pci_read_config_word(adapter->pdev, PCI_COMMAND, &pci_cmd);
-	pci_write_config_word(adapter->pdev, PCI_COMMAND,
-			      pci_cmd & ~PCI_COMMAND_SERR);
+	if (pci_cmd & PCI_COMMAND_SERR)
+		pci_write_config_word(adapter->pdev, PCI_COMMAND,
+				      pci_cmd & ~PCI_COMMAND_SERR);
 
 	err = e1000_test_msi_interrupt(adapter);
 
-	/* restore previous setting of command word */
-	pci_write_config_word(adapter->pdev, PCI_COMMAND, pci_cmd);
+	/* re-enable SERR */
+	if (pci_cmd & PCI_COMMAND_SERR) {
+		pci_read_config_word(adapter->pdev, PCI_COMMAND, &pci_cmd);
+		pci_cmd |= PCI_COMMAND_SERR;
+		pci_write_config_word(adapter->pdev, PCI_COMMAND, pci_cmd);
+	}
 
 	/* success ! */
 	if (!err)
@@ -4321,13 +4333,7 @@ static int e1000_change_mtu(struct net_device *netdev, int new_mtu)
 	 * fragmented skbs
 	 */
 
-	if (max_frame <= 256)
-		adapter->rx_buffer_len = 256;
-	else if (max_frame <= 512)
-		adapter->rx_buffer_len = 512;
-	else if (max_frame <= 1024)
-		adapter->rx_buffer_len = 1024;
-	else if (max_frame <= 2048)
+	if (max_frame <= 2048)
 		adapter->rx_buffer_len = 2048;
 	else
 		adapter->rx_buffer_len = 4096;
@@ -5180,7 +5186,8 @@ static int __devinit e1000_probe(struct pci_dev *pdev,
 		/* APME bit in EEPROM is mapped to WUC.APME */
 		eeprom_data = er32(WUC);
 		eeprom_apme_mask = E1000_WUC_APME;
-		if (eeprom_data & E1000_WUC_PHY_WAKE)
+		if ((hw->mac.type > e1000_ich10lan) &&
+		    (eeprom_data & E1000_WUC_PHY_WAKE))
 			adapter->flags2 |= FLAG2_HAS_PHY_WAKEUP;
 	} else if (adapter->flags & FLAG_APME_IN_CTRL3) {
 		if (adapter->flags & FLAG_APME_CHECK_PORT_B &&
@@ -5361,6 +5368,7 @@ static struct pci_device_id e1000_pci_tbl[] = {
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_ICH8_IGP_C), board_ich8lan },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_ICH8_IGP_M), board_ich8lan },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_ICH8_IGP_M_AMT), board_ich8lan },
+	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_ICH8_82567V_3), board_ich8lan },
 
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_ICH9_IFE), board_ich9lan },
 	{ PCI_VDEVICE(INTEL, E1000_DEV_ID_ICH9_IFE_G), board_ich9lan },

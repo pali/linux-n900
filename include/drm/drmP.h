@@ -1016,7 +1016,7 @@ struct drm_device {
 	struct pci_controller *hose;
 #endif
 	struct drm_sg_mem *sg;	/**< Scatter gather memory */
-	int num_crtcs;                  /**< Number of CRTCs on this device */
+	unsigned int num_crtcs;                  /**< Number of CRTCs on this device */
 	void *dev_private;		/**< device private data */
 	void *mm_private;
 	struct address_space *dev_mapping;
@@ -1295,6 +1295,7 @@ extern u32 drm_vblank_count(struct drm_device *dev, int crtc);
 extern void drm_handle_vblank(struct drm_device *dev, int crtc);
 extern int drm_vblank_get(struct drm_device *dev, int crtc);
 extern void drm_vblank_put(struct drm_device *dev, int crtc);
+extern void drm_vblank_off(struct drm_device *dev, int crtc);
 extern void drm_vblank_cleanup(struct drm_device *dev);
 /* Modesetting support */
 extern void drm_vblank_pre_modeset(struct drm_device *dev, int crtc);
@@ -1401,7 +1402,7 @@ extern int drm_ati_pcigart_cleanup(struct drm_device *dev,
 				   struct drm_ati_pcigart_info * gart_info);
 
 extern drm_dma_handle_t *drm_pci_alloc(struct drm_device *dev, size_t size,
-				       size_t align, dma_addr_t maxaddr);
+				       size_t align);
 extern void __drm_pci_free(struct drm_device *dev, drm_dma_handle_t * dmah);
 extern void drm_pci_free(struct drm_device *dev, drm_dma_handle_t * dmah);
 

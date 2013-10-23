@@ -1078,23 +1078,31 @@ static bitmap_counter_t *bitmap_get_counter(struct bitmap *bitmap,
  *			out to disk
  */
 
-void bitmap_daemon_work(struct bitmap *bitmap)
+void bitmap_daemon_work(mddev_t *mddev)
 {
+	struct bitmap *bitmap;
 	unsigned long j;
 	unsigned long flags;
 	struct page *page = NULL, *lastpage = NULL;
 	int blocks;
 	void *paddr;
 
-	if (bitmap == NULL)
+	/* Use a mutex to guard daemon_work against
+	 * bitmap_destroy.
+	 */
+	mutex_lock(&mddev->bitmap_mutex);
+	bitmap = mddev->bitmap;
+	if (bitmap == NULL) {
+		mutex_unlock(&mddev->bitmap_mutex);
 		return;
+	}
 	if (time_before(jiffies, bitmap->daemon_lastrun + bitmap->daemon_sleep*HZ))
 		goto done;
 
 	bitmap->daemon_lastrun = jiffies;
 	if (bitmap->allclean) {
 		bitmap->mddev->thread->timeout = MAX_SCHEDULE_TIMEOUT;
-		return;
+		goto done;
 	}
 	bitmap->allclean = 1;
 
@@ -1203,6 +1211,7 @@ void bitmap_daemon_work(struct bitmap *bitmap)
  done:
 	if (bitmap->allclean == 0)
 		bitmap->mddev->thread->timeout = bitmap->daemon_sleep * HZ;
+	mutex_unlock(&mddev->bitmap_mutex);
 }
 
 static bitmap_counter_t *bitmap_get_counter(struct bitmap *bitmap,
@@ -1308,7 +1317,8 @@ void bitmap_endwrite(struct bitmap *bitmap, sector_t offset, unsigned long secto
 {
 	if (!bitmap) return;
 	if (behind) {
-		atomic_dec(&bitmap->behind_writes);
+		if (atomic_dec_and_test(&bitmap->behind_writes))
+			wake_up(&bitmap->behind_wait);
 		PRINTK(KERN_DEBUG "dec write-behind count %d/%d\n",
 		  atomic_read(&bitmap->behind_writes), bitmap->max_write_behind);
 	}
@@ -1541,9 +1551,9 @@ void bitmap_flush(mddev_t *mddev)
 	 */
 	sleep = bitmap->daemon_sleep;
 	bitmap->daemon_sleep = 0;
-	bitmap_daemon_work(bitmap);
-	bitmap_daemon_work(bitmap);
-	bitmap_daemon_work(bitmap);
+	bitmap_daemon_work(mddev);
+	bitmap_daemon_work(mddev);
+	bitmap_daemon_work(mddev);
 	bitmap->daemon_sleep = sleep;
 	bitmap_update_sb(bitmap);
 }
@@ -1574,6 +1584,7 @@ static void bitmap_free(struct bitmap *bitmap)
 	kfree(bp);
 	kfree(bitmap);
 }
+
 void bitmap_destroy(mddev_t *mddev)
 {
 	struct bitmap *bitmap = mddev->bitmap;
@@ -1581,7 +1592,9 @@ void bitmap_destroy(mddev_t *mddev)
 	if (!bitmap) /* there was no bitmap */
 		return;
 
+	mutex_lock(&mddev->bitmap_mutex);
 	mddev->bitmap = NULL; /* disconnect from the md device */
+	mutex_unlock(&mddev->bitmap_mutex);
 	if (mddev->thread)
 		mddev->thread->timeout = MAX_SCHEDULE_TIMEOUT;
 
@@ -1617,6 +1630,7 @@ int bitmap_create(mddev_t *mddev)
 	atomic_set(&bitmap->pending_writes, 0);
 	init_waitqueue_head(&bitmap->write_wait);
 	init_waitqueue_head(&bitmap->overflow_wait);
+	init_waitqueue_head(&bitmap->behind_wait);
 
 	bitmap->mddev = mddev;
 

@@ -564,6 +564,9 @@ void pcibios_align_resource(void *, struct resource *, resource_size_t,
 				resource_size_t);
 void pcibios_update_irq(struct pci_dev *, int irq);
 
+/* Weak but can be overriden by arch */
+void pci_fixup_cardbus(struct pci_bus *);
+
 /* Generic PCI functions used internally */
 
 extern struct pci_bus *pci_find_bus(int domain, int busnr);
@@ -941,6 +944,11 @@ static inline int pci_proc_domain(struct pci_bus *bus)
 	return 0;
 }
 #endif /* CONFIG_PCI_DOMAINS */
+
+/* some architectures require additional setup to direct VGA traffic */
+typedef int (*arch_set_vga_state_t)(struct pci_dev *pdev, bool decode,
+		      unsigned int command_bits, bool change_bridge);
+extern void pci_register_set_vga_state(arch_set_vga_state_t func);
 
 #else /* CONFIG_PCI is not enabled */
 

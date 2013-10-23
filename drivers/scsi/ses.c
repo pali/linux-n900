@@ -389,9 +389,9 @@ static void ses_enclosure_data_process(struct enclosure_device *edev,
 		len = (desc_ptr[2] << 8) + desc_ptr[3];
 		/* skip past overall descriptor */
 		desc_ptr += len + 4;
-		if (ses_dev->page10)
-			addl_desc_ptr = ses_dev->page10 + 8;
 	}
+	if (ses_dev->page10)
+		addl_desc_ptr = ses_dev->page10 + 8;
 	type_ptr = ses_dev->page1 + 12 + ses_dev->page1[11];
 	components = 0;
 	for (i = 0; i < types; i++, type_ptr += 4) {
@@ -591,8 +591,6 @@ static int ses_intf_add(struct device *cdev,
 		ses_dev->page10_len = len;
 		buf = NULL;
 	}
-	kfree(hdr_buf);
-
 	scomp = kzalloc(sizeof(struct ses_component) * components, GFP_KERNEL);
 	if (!scomp)
 		goto err_free;
@@ -603,6 +601,8 @@ static int ses_intf_add(struct device *cdev,
 		err = PTR_ERR(edev);
 		goto err_free;
 	}
+
+	kfree(hdr_buf);
 
 	edev->scratch = ses_dev;
 	for (i = 0; i < components; i++)

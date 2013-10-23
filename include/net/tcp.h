@@ -259,11 +259,21 @@ static inline int between(__u32 seq1, __u32 seq2, __u32 seq3)
 	return seq3 - seq2 >= seq1 - seq2;
 }
 
-static inline int tcp_too_many_orphans(struct sock *sk, int num)
+static inline bool tcp_too_many_orphans(struct sock *sk, int shift)
 {
-	return (num > sysctl_tcp_max_orphans) ||
-		(sk->sk_wmem_queued > SOCK_MIN_SNDBUF &&
-		 atomic_read(&tcp_memory_allocated) > sysctl_tcp_mem[2]);
+	struct percpu_counter *ocp = sk->sk_prot->orphan_count;
+	int orphans = percpu_counter_read_positive(ocp);
+
+	if (orphans << shift > sysctl_tcp_max_orphans) {
+		orphans = percpu_counter_sum_positive(ocp);
+		if (orphans << shift > sysctl_tcp_max_orphans)
+			return true;
+	}
+
+	if (sk->sk_wmem_queued > SOCK_MIN_SNDBUF &&
+	    atomic_read(&tcp_memory_allocated) > sysctl_tcp_mem[2])
+		return true;
+	return false;
 }
 
 /* syncookies: remember time of last synqueue overflow */
@@ -501,8 +511,22 @@ extern unsigned int tcp_current_mss(struct sock *sk);
 /* Bound MSS / TSO packet size with the half of the window */
 static inline int tcp_bound_to_half_wnd(struct tcp_sock *tp, int pktsize)
 {
-	if (tp->max_window && pktsize > (tp->max_window >> 1))
-		return max(tp->max_window >> 1, 68U - tp->tcp_header_len);
+	int cutoff;
+
+	/* When peer uses tiny windows, there is no use in packetizing
+	 * to sub-MSS pieces for the sake of SWS or making sure there
+	 * are enough packets in the pipe for fast recovery.
+	 *
+	 * On the other hand, for extremely large MSS devices, handling
+	 * smaller than MSS windows in this way does make sense.
+	 */
+	if (tp->max_window >= 512)
+		cutoff = (tp->max_window >> 1);
+	else
+		cutoff = tp->max_window;
+
+	if (cutoff && pktsize > cutoff)
+		return max_t(int, cutoff, 68U - tp->tcp_header_len);
 	else
 		return pktsize;
 }
@@ -1263,13 +1287,19 @@ static inline struct sk_buff *tcp_write_queue_prev(struct sock *sk, struct sk_bu
  * TCP connection after "boundary" unsucessful, exponentially backed-off
  * retransmissions with an initial RTO of TCP_RTO_MIN.
  */
-static inline bool retransmits_timed_out(const struct sock *sk,
+static inline bool retransmits_timed_out(struct sock *sk,
 					 unsigned int boundary)
 {
 	unsigned int timeout, linear_backoff_thresh;
+	unsigned int start_ts;
 
 	if (!inet_csk(sk)->icsk_retransmits)
 		return false;
+
+	if (unlikely(!tcp_sk(sk)->retrans_stamp))
+		start_ts = TCP_SKB_CB(tcp_write_queue_head(sk))->when;
+	else
+		start_ts = tcp_sk(sk)->retrans_stamp;
 
 	linear_backoff_thresh = ilog2(TCP_RTO_MAX/TCP_RTO_MIN);
 
@@ -1279,7 +1309,7 @@ static inline bool retransmits_timed_out(const struct sock *sk,
 		timeout = ((2 << linear_backoff_thresh) - 1) * TCP_RTO_MIN +
 			  (boundary - linear_backoff_thresh) * TCP_RTO_MAX;
 
-	return (tcp_time_stamp - tcp_sk(sk)->retrans_stamp) >= timeout;
+	return (tcp_time_stamp - start_ts) >= timeout;
 }
 
 static inline struct sk_buff *tcp_send_head(struct sock *sk)

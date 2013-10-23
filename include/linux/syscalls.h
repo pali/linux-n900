@@ -153,7 +153,8 @@ static void prof_sysexit_disable_##sname(void)				       \
 #define __SC_STR_TDECL6(t, a, ...)	#t, __SC_STR_TDECL5(__VA_ARGS__)
 
 #define SYSCALL_TRACE_ENTER_EVENT(sname)				\
-	static struct ftrace_event_call event_enter_##sname;		\
+	static struct ftrace_event_call					\
+	__attribute__((__aligned__(4))) event_enter_##sname;		\
 	struct trace_event enter_syscall_print_##sname = {		\
 		.trace                  = print_syscall_enter,		\
 	};								\
@@ -189,7 +190,8 @@ static void prof_sysexit_disable_##sname(void)				       \
 	}
 
 #define SYSCALL_TRACE_EXIT_EVENT(sname)					\
-	static struct ftrace_event_call event_exit_##sname;		\
+	static struct ftrace_event_call					\
+	__attribute__((__aligned__(4))) event_exit_##sname;		\
 	struct trace_event exit_syscall_print_##sname = {		\
 		.trace                  = print_syscall_exit,		\
 	};								\
@@ -879,4 +881,8 @@ int kernel_execve(const char *filename, char *const argv[], char *const envp[]);
 asmlinkage long sys_perf_event_open(
 		struct perf_event_attr __user *attr_uptr,
 		pid_t pid, int cpu, int group_fd, unsigned long flags);
+
+asmlinkage long sys_mmap_pgoff(unsigned long addr, unsigned long len,
+			unsigned long prot, unsigned long flags,
+			unsigned long fd, unsigned long pgoff);
 #endif

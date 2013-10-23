@@ -774,12 +774,9 @@ static inline int nfsd_dosync(struct file *filp, struct dentry *dp,
 	int (*fsync) (struct file *, struct dentry *, int);
 	int err;
 
-	err = filemap_fdatawrite(inode->i_mapping);
+	err = filemap_write_and_wait(inode->i_mapping);
 	if (err == 0 && fop && (fsync = fop->fsync))
 		err = fsync(filp, dp, 0);
-	if (err == 0)
-		err = filemap_fdatawait(inode->i_mapping);
-
 	return err;
 }
 
@@ -826,7 +823,7 @@ nfsd_get_raparms(dev_t dev, ino_t ino)
 		if (ra->p_count == 0)
 			frap = rap;
 	}
-	depth = nfsdstats.ra_size*11/10;
+	depth = nfsdstats.ra_size;
 	if (!frap) {	
 		spin_unlock(&rab->pb_lock);
 		return NULL;

@@ -404,7 +404,7 @@ static int oom_kill_process(struct task_struct *p, gfp_t gfp_mask, int order,
 		cpuset_print_task_mems_allowed(current);
 		task_unlock(current);
 		dump_stack();
-		mem_cgroup_print_oom_info(mem, current);
+		mem_cgroup_print_oom_info(mem, p);
 		show_mem();
 		if (sysctl_oom_dump_tasks)
 			dump_tasks(mem);
@@ -425,6 +425,8 @@ static int oom_kill_process(struct task_struct *p, gfp_t gfp_mask, int order,
 	/* Try to kill a child first */
 	list_for_each_entry(c, &p->children, sibling) {
 		if (c->mm == p->mm)
+			continue;
+		if (mem && !task_in_mem_cgroup(c, mem))
 			continue;
 		if (!oom_kill_task(c))
 			return 0;

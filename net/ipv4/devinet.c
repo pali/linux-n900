@@ -1025,6 +1025,21 @@ static inline bool inetdev_valid_mtu(unsigned mtu)
 	return mtu >= 68;
 }
 
+static void inetdev_send_gratuitous_arp(struct net_device *dev,
+					struct in_device *in_dev)
+
+{
+	struct in_ifaddr *ifa = in_dev->ifa_list;
+
+	if (!ifa)
+		return;
+
+	arp_send(ARPOP_REQUEST, ETH_P_ARP,
+		 ifa->ifa_address, dev,
+		 ifa->ifa_address, NULL,
+		 dev->dev_addr, NULL);
+}
+
 /* Called only under RTNL semaphore */
 
 static int inetdev_event(struct notifier_block *this, unsigned long event,
@@ -1077,16 +1092,12 @@ static int inetdev_event(struct notifier_block *this, unsigned long event,
 		ip_mc_up(in_dev);
 		/* fall through */
 	case NETDEV_CHANGEADDR:
+		if (!IN_DEV_ARP_NOTIFY(in_dev))
+			break;
+		/* fall through */
+	case NETDEV_NOTIFY_PEERS:
 		/* Send gratuitous ARP to notify of link change */
-		if (IN_DEV_ARP_NOTIFY(in_dev)) {
-			struct in_ifaddr *ifa = in_dev->ifa_list;
-
-			if (ifa)
-				arp_send(ARPOP_REQUEST, ETH_P_ARP,
-					 ifa->ifa_address, dev,
-					 ifa->ifa_address, NULL,
-					 dev->dev_addr, NULL);
-		}
+		inetdev_send_gratuitous_arp(dev, in_dev);
 		break;
 	case NETDEV_DOWN:
 		ip_mc_down(in_dev);
@@ -1351,14 +1362,19 @@ static int devinet_sysctl_forward(ctl_table *ctl, int write,
 {
 	int *valp = ctl->data;
 	int val = *valp;
+	loff_t pos = *ppos;
 	int ret = proc_dointvec(ctl, write, buffer, lenp, ppos);
 
 	if (write && *valp != val) {
 		struct net *net = ctl->extra2;
 
 		if (valp != &IPV4_DEVCONF_DFLT(net, FORWARDING)) {
-			if (!rtnl_trylock())
+			if (!rtnl_trylock()) {
+				/* Restore the original values before restarting */
+				*valp = val;
+				*ppos = pos;
 				return restart_syscall();
+			}
 			if (valp == &IPV4_DEVCONF_ALL(net, FORWARDING)) {
 				inet_forward_change(net);
 			} else if (*valp) {
@@ -1450,6 +1466,7 @@ static struct devinet_sysctl_table {
 		DEVINET_SYSCTL_RW_ENTRY(SEND_REDIRECTS, "send_redirects"),
 		DEVINET_SYSCTL_RW_ENTRY(ACCEPT_SOURCE_ROUTE,
 					"accept_source_route"),
+		DEVINET_SYSCTL_RW_ENTRY(SRC_VMARK, "src_valid_mark"),
 		DEVINET_SYSCTL_RW_ENTRY(PROXY_ARP, "proxy_arp"),
 		DEVINET_SYSCTL_RW_ENTRY(MEDIUM_ID, "medium_id"),
 		DEVINET_SYSCTL_RW_ENTRY(BOOTP_RELAY, "bootp_relay"),

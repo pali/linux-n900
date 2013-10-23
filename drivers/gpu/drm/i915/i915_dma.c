@@ -123,7 +123,7 @@ static int i915_init_phys_hws(struct drm_device *dev)
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	/* Program Hardware Status Page */
 	dev_priv->status_page_dmah =
-		drm_pci_alloc(dev, PAGE_SIZE, PAGE_SIZE, 0xffffffff);
+		drm_pci_alloc(dev, PAGE_SIZE, PAGE_SIZE);
 
 	if (!dev_priv->status_page_dmah) {
 		DRM_ERROR("Can not allocate hardware status page\n");
@@ -683,8 +683,10 @@ static int i915_batchbuffer(struct drm_device *dev, void *data,
 		ret = copy_from_user(cliprects, batch->cliprects,
 				     batch->num_cliprects *
 				     sizeof(struct drm_clip_rect));
-		if (ret != 0)
+		if (ret != 0) {
+			ret = -EFAULT;
 			goto fail_free;
+		}
 	}
 
 	mutex_lock(&dev->struct_mutex);
@@ -725,8 +727,10 @@ static int i915_cmdbuffer(struct drm_device *dev, void *data,
 		return -ENOMEM;
 
 	ret = copy_from_user(batch_data, cmdbuf->buf, cmdbuf->sz);
-	if (ret != 0)
+	if (ret != 0) {
+		ret = -EFAULT;
 		goto fail_batch_free;
+	}
 
 	if (cmdbuf->num_cliprects) {
 		cliprects = kcalloc(cmdbuf->num_cliprects,
@@ -737,8 +741,10 @@ static int i915_cmdbuffer(struct drm_device *dev, void *data,
 		ret = copy_from_user(cliprects, cmdbuf->cliprects,
 				     cmdbuf->num_cliprects *
 				     sizeof(struct drm_clip_rect));
-		if (ret != 0)
+		if (ret != 0) {
+			ret = -EFAULT;
 			goto fail_clip_free;
+		}
 	}
 
 	mutex_lock(&dev->struct_mutex);
@@ -1111,7 +1117,8 @@ static void i915_setup_compression(struct drm_device *dev, int size)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct drm_mm_node *compressed_fb, *compressed_llb;
-	unsigned long cfb_base, ll_base;
+	unsigned long cfb_base;
+	unsigned long ll_base = 0;
 
 	/* Leave 1M for line length buffer & misc. */
 	compressed_fb = drm_mm_search_free(&dev_priv->vram, size, 4096, 0);
@@ -1251,6 +1258,8 @@ static int i915_load_modeset_init(struct drm_device *dev,
 	if (ret)
 		goto destroy_ringbuffer;
 
+	intel_modeset_init(dev);
+
 	ret = drm_irq_install(dev);
 	if (ret)
 		goto destroy_ringbuffer;
@@ -1264,8 +1273,6 @@ static int i915_load_modeset_init(struct drm_device *dev,
 	 */
 
 	I915_WRITE(INSTPM, (1 << 5) | (1 << 21));
-
-	intel_modeset_init(dev);
 
 	drm_helper_initial_config(dev);
 
@@ -1525,6 +1532,15 @@ int i915_driver_unload(struct drm_device *dev)
 	}
 
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
+		/*
+		 * free the memory space allocated for the child device
+		 * config parsed from VBT
+		 */
+		if (dev_priv->child_dev && dev_priv->child_dev_num) {
+			kfree(dev_priv->child_dev);
+			dev_priv->child_dev = NULL;
+			dev_priv->child_dev_num = 0;
+		}
 		drm_irq_uninstall(dev);
 		vga_client_register(dev->pdev, NULL, NULL, NULL);
 	}

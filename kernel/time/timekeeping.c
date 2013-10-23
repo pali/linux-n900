@@ -177,7 +177,7 @@ void timekeeping_leap_insert(int leapsecond)
 {
 	xtime.tv_sec += leapsecond;
 	wall_to_monotonic.tv_sec -= leapsecond;
-	update_vsyscall(&xtime, timekeeper.clock);
+	update_vsyscall(&xtime, timekeeper.clock, timekeeper.mult);
 }
 
 #ifdef CONFIG_GENERIC_TIME
@@ -337,7 +337,7 @@ int do_settimeofday(struct timespec *tv)
 	timekeeper.ntp_error = 0;
 	ntp_clear();
 
-	update_vsyscall(&xtime, timekeeper.clock);
+	update_vsyscall(&xtime, timekeeper.clock, timekeeper.mult);
 
 	write_sequnlock_irqrestore(&xtime_lock, flags);
 
@@ -485,6 +485,17 @@ int timekeeping_valid_for_hres(void)
 	} while (read_seqretry(&xtime_lock, seq));
 
 	return ret;
+}
+
+/**
+ * timekeeping_max_deferment - Returns max time the clocksource can be deferred
+ *
+ * Caller must observe xtime_lock via read_seqbegin/read_seqretry to
+ * ensure that the clocksource does not change!
+ */
+u64 timekeeping_max_deferment(void)
+{
+	return timekeeper.clock->max_idle_ns;
 }
 
 /**
@@ -811,7 +822,7 @@ void update_wall_time(void)
 	update_xtime_cache(nsecs);
 
 	/* check to see if there is a new clocksource to use */
-	update_vsyscall(&xtime, timekeeper.clock);
+	update_vsyscall(&xtime, timekeeper.clock, timekeeper.mult);
 }
 
 /**
@@ -834,6 +845,7 @@ void getboottime(struct timespec *ts)
 
 	set_normalized_timespec(ts, -boottime.tv_sec, -boottime.tv_nsec);
 }
+EXPORT_SYMBOL_GPL(getboottime);
 
 /**
  * monotonic_to_bootbased - Convert the monotonic time to boot based.
@@ -843,6 +855,7 @@ void monotonic_to_bootbased(struct timespec *ts)
 {
 	*ts = timespec_add_safe(*ts, total_sleep_time);
 }
+EXPORT_SYMBOL_GPL(monotonic_to_bootbased);
 
 unsigned long get_seconds(void)
 {

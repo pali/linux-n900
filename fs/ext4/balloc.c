@@ -189,9 +189,6 @@ unsigned ext4_init_block_bitmap(struct super_block *sb, struct buffer_head *bh,
  * when a file system is mounted (see ext4_fill_super).
  */
 
-
-#define in_range(b, first, len)	((b) >= (first) && (b) <= (first) + (len) - 1)
-
 /**
  * ext4_get_group_desc() -- load group descriptor from disk
  * @sb:			super block
@@ -761,7 +758,13 @@ static unsigned long ext4_bg_num_gdb_meta(struct super_block *sb,
 static unsigned long ext4_bg_num_gdb_nometa(struct super_block *sb,
 					ext4_group_t group)
 {
-	return ext4_bg_has_super(sb, group) ? EXT4_SB(sb)->s_gdb_count : 0;
+	if (!ext4_bg_has_super(sb, group))
+		return 0;
+
+	if (EXT4_HAS_INCOMPAT_FEATURE(sb,EXT4_FEATURE_INCOMPAT_META_BG))
+		return le32_to_cpu(EXT4_SB(sb)->s_es->s_first_meta_bg);
+	else
+		return EXT4_SB(sb)->s_gdb_count;
 }
 
 /**

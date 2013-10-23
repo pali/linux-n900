@@ -136,6 +136,11 @@ LIST_HEAD(amd_iommu_list);		/* list of all AMD IOMMUs in the
 					   system */
 
 /*
+ * Set to true if ACPI table parsing and hardware intialization went properly
+ */
+static bool amd_iommu_initialized;
+
+/*
  * Pointer to the device table which is shared by all AMD IOMMUs
  * it is indexed by the PCI device id or the HT unit id and contains
  * information about the domain the device belongs to as well as the
@@ -617,6 +622,13 @@ static void __init init_iommu_from_pci(struct amd_iommu *iommu)
 	iommu->last_device = calc_devid(MMIO_GET_BUS(range),
 					MMIO_GET_LD(range));
 	iommu->evt_msi_num = MMIO_MSI_NUM(misc);
+
+	if (is_rd890_iommu(iommu->dev)) {
+		pci_read_config_dword(iommu->dev, 0xf0, &iommu->cache_cfg[0]);
+		pci_read_config_dword(iommu->dev, 0xf4, &iommu->cache_cfg[1]);
+		pci_read_config_dword(iommu->dev, 0xf8, &iommu->cache_cfg[2]);
+		pci_read_config_dword(iommu->dev, 0xfc, &iommu->cache_cfg[3]);
+	}
 }
 
 /*
@@ -634,29 +646,9 @@ static void __init init_iommu_from_acpi(struct amd_iommu *iommu,
 	struct ivhd_entry *e;
 
 	/*
-	 * First set the recommended feature enable bits from ACPI
-	 * into the IOMMU control registers
+	 * First save the recommended feature enable bits from ACPI
 	 */
-	h->flags & IVHD_FLAG_HT_TUN_EN_MASK ?
-		iommu_feature_enable(iommu, CONTROL_HT_TUN_EN) :
-		iommu_feature_disable(iommu, CONTROL_HT_TUN_EN);
-
-	h->flags & IVHD_FLAG_PASSPW_EN_MASK ?
-		iommu_feature_enable(iommu, CONTROL_PASSPW_EN) :
-		iommu_feature_disable(iommu, CONTROL_PASSPW_EN);
-
-	h->flags & IVHD_FLAG_RESPASSPW_EN_MASK ?
-		iommu_feature_enable(iommu, CONTROL_RESPASSPW_EN) :
-		iommu_feature_disable(iommu, CONTROL_RESPASSPW_EN);
-
-	h->flags & IVHD_FLAG_ISOC_EN_MASK ?
-		iommu_feature_enable(iommu, CONTROL_ISOC_EN) :
-		iommu_feature_disable(iommu, CONTROL_ISOC_EN);
-
-	/*
-	 * make IOMMU memory accesses cache coherent
-	 */
-	iommu_feature_enable(iommu, CONTROL_COHERENT_EN);
+	iommu->acpi_flags = h->flags;
 
 	/*
 	 * Done. Now parse the device entries
@@ -913,6 +905,8 @@ static int __init init_iommu_all(struct acpi_table_header *table)
 	}
 	WARN_ON(p != end);
 
+	amd_iommu_initialized = true;
+
 	return 0;
 }
 
@@ -925,7 +919,7 @@ static int __init init_iommu_all(struct acpi_table_header *table)
  *
  ****************************************************************************/
 
-static int __init iommu_setup_msi(struct amd_iommu *iommu)
+static int iommu_setup_msi(struct amd_iommu *iommu)
 {
 	int r;
 
@@ -1082,6 +1076,40 @@ static void init_device_table(void)
 	}
 }
 
+static void iommu_init_flags(struct amd_iommu *iommu)
+{
+	iommu->acpi_flags & IVHD_FLAG_HT_TUN_EN_MASK ?
+		iommu_feature_enable(iommu, CONTROL_HT_TUN_EN) :
+		iommu_feature_disable(iommu, CONTROL_HT_TUN_EN);
+
+	iommu->acpi_flags & IVHD_FLAG_PASSPW_EN_MASK ?
+		iommu_feature_enable(iommu, CONTROL_PASSPW_EN) :
+		iommu_feature_disable(iommu, CONTROL_PASSPW_EN);
+
+	iommu->acpi_flags & IVHD_FLAG_RESPASSPW_EN_MASK ?
+		iommu_feature_enable(iommu, CONTROL_RESPASSPW_EN) :
+		iommu_feature_disable(iommu, CONTROL_RESPASSPW_EN);
+
+	iommu->acpi_flags & IVHD_FLAG_ISOC_EN_MASK ?
+		iommu_feature_enable(iommu, CONTROL_ISOC_EN) :
+		iommu_feature_disable(iommu, CONTROL_ISOC_EN);
+
+	/*
+	 * make IOMMU memory accesses cache coherent
+	 */
+	iommu_feature_enable(iommu, CONTROL_COHERENT_EN);
+}
+
+static void iommu_apply_quirks(struct amd_iommu *iommu)
+{
+	if (is_rd890_iommu(iommu->dev)) {
+		pci_write_config_dword(iommu->dev, 0xf0, iommu->cache_cfg[0]);
+		pci_write_config_dword(iommu->dev, 0xf4, iommu->cache_cfg[1]);
+		pci_write_config_dword(iommu->dev, 0xf8, iommu->cache_cfg[2]);
+		pci_write_config_dword(iommu->dev, 0xfc, iommu->cache_cfg[3]);
+	}
+}
+
 /*
  * This function finally enables all IOMMUs found in the system after
  * they have been initialized
@@ -1092,6 +1120,8 @@ static void enable_iommus(void)
 
 	for_each_iommu(iommu) {
 		iommu_disable(iommu);
+		iommu_apply_quirks(iommu);
+		iommu_init_flags(iommu);
 		iommu_set_device_table(iommu);
 		iommu_enable_command_buffer(iommu);
 		iommu_enable_event_buffer(iommu);
@@ -1263,6 +1293,9 @@ int __init amd_iommu_init(void)
 	if (acpi_table_parse("IVRS", init_iommu_all) != 0)
 		goto free;
 
+	if (!amd_iommu_initialized)
+		goto free;
+
 	if (acpi_table_parse("IVRS", init_memory_definitions) != 0)
 		goto free;
 
@@ -1274,14 +1307,17 @@ int __init amd_iommu_init(void)
 	if (ret)
 		goto free;
 
+	enable_iommus();
+
 	if (iommu_pass_through)
 		ret = amd_iommu_init_passthrough();
 	else
 		ret = amd_iommu_init_dma_ops();
+
 	if (ret)
 		goto free;
 
-	enable_iommus();
+	amd_iommu_init_api();
 
 	if (iommu_pass_through)
 		goto out;
@@ -1301,6 +1337,8 @@ out:
 	return ret;
 
 free:
+	disable_iommus();
+
 	free_pages((unsigned long)amd_iommu_pd_alloc_bitmap,
 		   get_order(MAX_DOMAIN_ID/8));
 

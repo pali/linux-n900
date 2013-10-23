@@ -2545,11 +2545,9 @@ int iwl3945_hw_set_hw_params(struct iwl_priv *priv)
 	memset((void *)&priv->hw_params, 0,
 	       sizeof(struct iwl_hw_params));
 
-	priv->shared_virt =
-	    pci_alloc_consistent(priv->pci_dev,
-				 sizeof(struct iwl3945_shared),
-				 &priv->shared_phys);
-
+	priv->shared_virt = dma_alloc_coherent(&priv->pci_dev->dev,
+					       sizeof(struct iwl3945_shared),
+					       &priv->shared_phys, GFP_KERNEL);
 	if (!priv->shared_virt) {
 		IWL_ERR(priv, "failed to allocate pci memory\n");
 		mutex_unlock(&priv->mutex);
@@ -2895,6 +2893,7 @@ static struct iwl_cfg iwl3945_bg_cfg = {
 	.mod_params = &iwl3945_mod_params,
 	.use_isr_legacy = true,
 	.ht_greenfield_support = false,
+	.broken_powersave = true,
 };
 
 static struct iwl_cfg iwl3945_abg_cfg = {
@@ -2909,6 +2908,7 @@ static struct iwl_cfg iwl3945_abg_cfg = {
 	.mod_params = &iwl3945_mod_params,
 	.use_isr_legacy = true,
 	.ht_greenfield_support = false,
+	.broken_powersave = true,
 };
 
 struct pci_device_id iwl3945_hw_card_ids[] = {

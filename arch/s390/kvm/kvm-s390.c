@@ -116,10 +116,16 @@ long kvm_arch_dev_ioctl(struct file *filp,
 
 int kvm_dev_ioctl_check_extension(long ext)
 {
+	int r;
+
 	switch (ext) {
+	case KVM_CAP_S390_PSW:
+		r = 1;
+		break;
 	default:
-		return 0;
+		r = 0;
 	}
+	return r;
 }
 
 /* Section: vm related */
@@ -332,11 +338,13 @@ struct kvm_vcpu *kvm_arch_vcpu_create(struct kvm *kvm,
 
 	rc = kvm_vcpu_init(vcpu, kvm, id);
 	if (rc)
-		goto out_free_cpu;
+		goto out_free_sie_block;
 	VM_EVENT(kvm, 3, "create cpu %d at %p, sie block at %p", id, vcpu,
 		 vcpu->arch.sie_block);
 
 	return vcpu;
+out_free_sie_block:
+	free_page((unsigned long)(vcpu->arch.sie_block));
 out_free_cpu:
 	kfree(vcpu);
 out_nomem:
@@ -419,8 +427,10 @@ static int kvm_arch_vcpu_ioctl_set_initial_psw(struct kvm_vcpu *vcpu, psw_t psw)
 	vcpu_load(vcpu);
 	if (atomic_read(&vcpu->arch.sie_block->cpuflags) & CPUSTAT_RUNNING)
 		rc = -EBUSY;
-	else
-		vcpu->arch.sie_block->gpsw = psw;
+	else {
+		vcpu->run->psw_mask = psw.mask;
+		vcpu->run->psw_addr = psw.addr;
+	}
 	vcpu_put(vcpu);
 	return rc;
 }
@@ -508,9 +518,6 @@ rerun_vcpu:
 
 	switch (kvm_run->exit_reason) {
 	case KVM_EXIT_S390_SIEIC:
-		vcpu->arch.sie_block->gpsw.mask = kvm_run->s390_sieic.mask;
-		vcpu->arch.sie_block->gpsw.addr = kvm_run->s390_sieic.addr;
-		break;
 	case KVM_EXIT_UNKNOWN:
 	case KVM_EXIT_INTR:
 	case KVM_EXIT_S390_RESET:
@@ -518,6 +525,9 @@ rerun_vcpu:
 	default:
 		BUG();
 	}
+
+	vcpu->arch.sie_block->gpsw.mask = kvm_run->psw_mask;
+	vcpu->arch.sie_block->gpsw.addr = kvm_run->psw_addr;
 
 	might_fault();
 
@@ -538,8 +548,6 @@ rerun_vcpu:
 		/* intercept cannot be handled in-kernel, prepare kvm-run */
 		kvm_run->exit_reason         = KVM_EXIT_S390_SIEIC;
 		kvm_run->s390_sieic.icptcode = vcpu->arch.sie_block->icptcode;
-		kvm_run->s390_sieic.mask     = vcpu->arch.sie_block->gpsw.mask;
-		kvm_run->s390_sieic.addr     = vcpu->arch.sie_block->gpsw.addr;
 		kvm_run->s390_sieic.ipa      = vcpu->arch.sie_block->ipa;
 		kvm_run->s390_sieic.ipb      = vcpu->arch.sie_block->ipb;
 		rc = 0;
@@ -550,6 +558,9 @@ rerun_vcpu:
 		 * kvm_run has been prepared by the handler */
 		rc = 0;
 	}
+
+	kvm_run->psw_mask     = vcpu->arch.sie_block->gpsw.mask;
+	kvm_run->psw_addr     = vcpu->arch.sie_block->gpsw.addr;
 
 	if (vcpu->sigset_active)
 		sigprocmask(SIG_SETMASK, &sigsaved, NULL);

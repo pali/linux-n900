@@ -1505,8 +1505,7 @@ static int b44_magic_pattern(u8 *macaddr, u8 *ppattern, u8 *pmask, int offset)
 		for (k = 0; k< ethaddr_bytes; k++) {
 			ppattern[offset + magicsync +
 				(j * ETH_ALEN) + k] = macaddr[k];
-			len++;
-			set_bit(len, (unsigned long *) pmask);
+			set_bit(len++, (unsigned long *) pmask);
 		}
 	}
 	return len - 1;
@@ -2176,8 +2175,6 @@ static int __devinit b44_init_one(struct ssb_device *sdev,
 	dev->irq = sdev->irq;
 	SET_ETHTOOL_OPS(dev, &b44_ethtool_ops);
 
-	netif_carrier_off(dev);
-
 	err = ssb_bus_powerup(sdev->bus, 0);
 	if (err) {
 		dev_err(sdev->dev,
@@ -2216,6 +2213,8 @@ static int __devinit b44_init_one(struct ssb_device *sdev,
 		dev_err(sdev->dev, "Cannot register net device, aborting.\n");
 		goto err_out_powerdown;
 	}
+
+	netif_carrier_off(dev);
 
 	ssb_set_drvdata(sdev, dev);
 

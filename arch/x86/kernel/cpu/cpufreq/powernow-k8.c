@@ -929,7 +929,8 @@ static int fill_powernow_table_pstate(struct powernow_k8_data *data,
 		powernow_table[i].index = index;
 
 		/* Frequency may be rounded for these */
-		if (boot_cpu_data.x86 == 0x10 || boot_cpu_data.x86 == 0x11) {
+		if ((boot_cpu_data.x86 == 0x10 && boot_cpu_data.x86_model < 10)
+				 || boot_cpu_data.x86 == 0x11) {
 			powernow_table[i].frequency =
 				freq_from_fid_did(lo & 0x3f, (lo >> 6) & 7);
 		} else
@@ -1351,6 +1352,7 @@ static int __devexit powernowk8_cpu_exit(struct cpufreq_policy *pol)
 
 	kfree(data->powernow_table);
 	kfree(data);
+	per_cpu(powernow_data, pol->cpu) = NULL;
 
 	return 0;
 }
@@ -1370,7 +1372,7 @@ static unsigned int powernowk8_get(unsigned int cpu)
 	int err;
 
 	if (!data)
-		return -EINVAL;
+		return 0;
 
 	smp_call_function_single(cpu, query_values_on_cpu, &err, true);
 	if (err)

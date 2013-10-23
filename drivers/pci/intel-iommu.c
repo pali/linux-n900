@@ -71,6 +71,49 @@
 #define DMA_32BIT_PFN		IOVA_PFN(DMA_BIT_MASK(32))
 #define DMA_64BIT_PFN		IOVA_PFN(DMA_BIT_MASK(64))
 
+/* page table handling */
+#define LEVEL_STRIDE		(9)
+#define LEVEL_MASK		(((u64)1 << LEVEL_STRIDE) - 1)
+
+static inline int agaw_to_level(int agaw)
+{
+	return agaw + 2;
+}
+
+static inline int agaw_to_width(int agaw)
+{
+	return 30 + agaw * LEVEL_STRIDE;
+}
+
+static inline int width_to_agaw(int width)
+{
+	return (width - 30) / LEVEL_STRIDE;
+}
+
+static inline unsigned int level_to_offset_bits(int level)
+{
+	return (level - 1) * LEVEL_STRIDE;
+}
+
+static inline int pfn_level_offset(unsigned long pfn, int level)
+{
+	return (pfn >> level_to_offset_bits(level)) & LEVEL_MASK;
+}
+
+static inline unsigned long level_mask(int level)
+{
+	return -1UL << level_to_offset_bits(level);
+}
+
+static inline unsigned long level_size(int level)
+{
+	return 1UL << level_to_offset_bits(level);
+}
+
+static inline unsigned long align_to_level(unsigned long pfn, int level)
+{
+	return (pfn + level_size(level) - 1) & level_mask(level);
+}
 
 /* VT-d pages must always be _smaller_ than MM pages. Otherwise things
    are never going to work. */
@@ -449,8 +492,6 @@ void free_iova_mem(struct iova *iova)
 }
 
 
-static inline int width_to_agaw(int width);
-
 static int __iommu_calculate_agaw(struct intel_iommu *iommu, int max_gaw)
 {
 	unsigned long sagaw;
@@ -662,51 +703,6 @@ static void free_context_table(struct intel_iommu *iommu)
 	iommu->root_entry = NULL;
 out:
 	spin_unlock_irqrestore(&iommu->lock, flags);
-}
-
-/* page table handling */
-#define LEVEL_STRIDE		(9)
-#define LEVEL_MASK		(((u64)1 << LEVEL_STRIDE) - 1)
-
-static inline int agaw_to_level(int agaw)
-{
-	return agaw + 2;
-}
-
-static inline int agaw_to_width(int agaw)
-{
-	return 30 + agaw * LEVEL_STRIDE;
-
-}
-
-static inline int width_to_agaw(int width)
-{
-	return (width - 30) / LEVEL_STRIDE;
-}
-
-static inline unsigned int level_to_offset_bits(int level)
-{
-	return (level - 1) * LEVEL_STRIDE;
-}
-
-static inline int pfn_level_offset(unsigned long pfn, int level)
-{
-	return (pfn >> level_to_offset_bits(level)) & LEVEL_MASK;
-}
-
-static inline unsigned long level_mask(int level)
-{
-	return -1UL << level_to_offset_bits(level);
-}
-
-static inline unsigned long level_size(int level)
-{
-	return 1UL << level_to_offset_bits(level);
-}
-
-static inline unsigned long align_to_level(unsigned long pfn, int level)
-{
-	return (pfn + level_size(level) - 1) & level_mask(level);
 }
 
 static struct dma_pte *pfn_to_dma_pte(struct dmar_domain *domain,
@@ -1523,12 +1519,15 @@ static int domain_context_mapping_one(struct dmar_domain *domain, int segment,
 
 		/* Skip top levels of page tables for
 		 * iommu which has less agaw than default.
+		 * Unnecessary for PT mode.
 		 */
-		for (agaw = domain->agaw; agaw != iommu->agaw; agaw--) {
-			pgd = phys_to_virt(dma_pte_addr(pgd));
-			if (!dma_pte_present(pgd)) {
-				spin_unlock_irqrestore(&iommu->lock, flags);
-				return -ENOMEM;
+		if (translation != CONTEXT_TT_PASS_THROUGH) {
+			for (agaw = domain->agaw; agaw != iommu->agaw; agaw--) {
+				pgd = phys_to_virt(dma_pte_addr(pgd));
+				if (!dma_pte_present(pgd)) {
+					spin_unlock_irqrestore(&iommu->lock, flags);
+					return -ENOMEM;
+				}
 			}
 		}
 	}
@@ -1991,6 +1990,16 @@ static int iommu_prepare_identity_map(struct pci_dev *pdev,
 	       "IOMMU: Setting identity map for device %s [0x%Lx - 0x%Lx]\n",
 	       pci_name(pdev), start, end);
 	
+	if (end < start) {
+		WARN(1, "Your BIOS is broken; RMRR ends before it starts!\n"
+			"BIOS vendor: %s; Ver: %s; Product Version: %s\n",
+			dmi_get_system_info(DMI_BIOS_VENDOR),
+			dmi_get_system_info(DMI_BIOS_VERSION),
+		     dmi_get_system_info(DMI_PRODUCT_VERSION));
+		ret = -EIO;
+		goto error;
+	}
+
 	if (end >> agaw_to_width(domain->agaw)) {
 		WARN(1, "Your BIOS is broken; RMRR exceeds permitted address width (%d bits)\n"
 		     "BIOS vendor: %s; Ver: %s; Product Version: %s\n",
@@ -3227,6 +3236,9 @@ static int device_notifier(struct notifier_block *nb,
 	struct device *dev = data;
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct dmar_domain *domain;
+
+	if (iommu_no_mapping(dev))
+		return 0;
 
 	domain = find_domain(pdev);
 	if (!domain)

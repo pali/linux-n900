@@ -628,7 +628,7 @@ static void ar_context_tasklet(unsigned long data)
 	d = &ab->descriptor;
 
 	if (d->res_count == 0) {
-		size_t size, rest, offset;
+		size_t size, size2, rest, pktsize, size3, offset;
 		dma_addr_t start_bus;
 		void *start;
 
@@ -639,25 +639,61 @@ static void ar_context_tasklet(unsigned long data)
 		 */
 
 		offset = offsetof(struct ar_buffer, data);
-		start = buffer = ab;
+		start = ab;
 		start_bus = le32_to_cpu(ab->descriptor.data_address) - offset;
+		buffer = ab->data;
 
 		ab = ab->next;
 		d = &ab->descriptor;
-		size = buffer + PAGE_SIZE - ctx->pointer;
+		size = start + PAGE_SIZE - ctx->pointer;
+		/* valid buffer data in the next page */
 		rest = le16_to_cpu(d->req_count) - le16_to_cpu(d->res_count);
+		/* what actually fits in this page */
+		size2 = min(rest, (size_t)PAGE_SIZE - offset - size);
 		memmove(buffer, ctx->pointer, size);
-		memcpy(buffer + size, ab->data, rest);
-		ctx->current_buffer = ab;
-		ctx->pointer = (void *) ab->data + rest;
-		end = buffer + size + rest;
+		memcpy(buffer + size, ab->data, size2);
 
-		while (buffer < end)
-			buffer = handle_ar_packet(ctx, buffer);
+		while (size > 0) {
+			void *next = handle_ar_packet(ctx, buffer);
+			pktsize = next - buffer;
+			if (pktsize >= size) {
+				/*
+				 * We have handled all the data that was
+				 * originally in this page, so we can now
+				 * continue in the next page.
+				 */
+				buffer = next;
+				break;
+			}
+			/* move the next packet to the start of the buffer */
+			memmove(buffer, next, size + size2 - pktsize);
+			size -= pktsize;
+			/* fill up this page again */
+			size3 = min(rest - size2,
+				    (size_t)PAGE_SIZE - offset - size - size2);
+			memcpy(buffer + size + size2,
+			       (void *) ab->data + size2, size3);
+			size2 += size3;
+		}
 
-		dma_free_coherent(ohci->card.device, PAGE_SIZE,
-				  start, start_bus);
-		ar_context_add_page(ctx);
+		if (rest > 0) {
+			/* handle the packets that are fully in the next page */
+			buffer = (void *) ab->data +
+					(buffer - (start + offset + size));
+			end = (void *) ab->data + rest;
+
+			while (buffer < end)
+				buffer = handle_ar_packet(ctx, buffer);
+
+			ctx->current_buffer = ab;
+			ctx->pointer = end;
+
+			dma_free_coherent(ohci->card.device, PAGE_SIZE,
+					  start, start_bus);
+			ar_context_add_page(ctx);
+		} else {
+			ctx->pointer = start + PAGE_SIZE;
+		}
 	} else {
 		buffer = ctx->pointer;
 		ctx->pointer = end =
@@ -2209,6 +2245,13 @@ static int ohci_queue_iso_receive_dualbuffer(struct fw_iso_context *base,
 	page     = payload >> PAGE_SHIFT;
 	offset   = payload & ~PAGE_MASK;
 	rest     = p->payload_length;
+	/*
+	 * The controllers I've tested have not worked correctly when
+	 * second_req_count is zero.  Rather than do something we know won't
+	 * work, return an error
+	 */
+	if (rest == 0)
+		return -EINVAL;
 
 	/* FIXME: make packet-per-buffer/dual-buffer a context option */
 	while (rest > 0) {
@@ -2262,7 +2305,7 @@ static int ohci_queue_iso_receive_packet_per_buffer(struct fw_iso_context *base,
 					unsigned long payload)
 {
 	struct iso_context *ctx = container_of(base, struct iso_context, base);
-	struct descriptor *d = NULL, *pd = NULL;
+	struct descriptor *d, *pd;
 	struct fw_iso_packet *p = packet;
 	dma_addr_t d_bus, page_bus;
 	u32 z, header_z, rest;
@@ -2300,8 +2343,9 @@ static int ohci_queue_iso_receive_packet_per_buffer(struct fw_iso_context *base,
 		d->data_address = cpu_to_le32(d_bus + (z * sizeof(*d)));
 
 		rest = payload_per_buffer;
+		pd = d;
 		for (j = 1; j < z; j++) {
-			pd = d + j;
+			pd++;
 			pd->control = cpu_to_le16(DESCRIPTOR_STATUS |
 						  DESCRIPTOR_INPUT_MORE);
 
@@ -2404,6 +2448,7 @@ static void ohci_pmac_off(struct pci_dev *dev)
 
 #define PCI_VENDOR_ID_AGERE		PCI_VENDOR_ID_ATT
 #define PCI_DEVICE_ID_AGERE_FW643	0x5901
+#define PCI_DEVICE_ID_TI_TSB43AB23	0x8024
 
 static int __devinit pci_probe(struct pci_dev *dev,
 			       const struct pci_device_id *ent)
@@ -2469,7 +2514,8 @@ static int __devinit pci_probe(struct pci_dev *dev,
 #if !defined(CONFIG_X86_32)
 	/* dual-buffer mode is broken with descriptor addresses above 2G */
 	if (dev->vendor == PCI_VENDOR_ID_TI &&
-	    dev->device == PCI_DEVICE_ID_TI_TSB43AB22)
+	    (dev->device == PCI_DEVICE_ID_TI_TSB43AB22 ||
+	     dev->device == PCI_DEVICE_ID_TI_TSB43AB23))
 		ohci->use_dualbuffer = false;
 #endif
 

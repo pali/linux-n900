@@ -264,6 +264,7 @@ enum ieee80211_sta_flags {
 	IEEE80211_STA_DISABLE_11N	= BIT(4),
 	IEEE80211_STA_CSA_RECEIVED	= BIT(5),
 	IEEE80211_STA_MFP_ENABLED	= BIT(6),
+	IEEE80211_STA_NULLFUNC_ACKED	= BIT(7),
 };
 
 /* flags for MLME request */
@@ -808,6 +809,7 @@ struct ieee80211_local {
 	unsigned int wmm_acm; /* bit field of ACM bits (BIT(802.1D tag)) */
 
 	bool pspolling;
+	bool scan_ps_enabled;
 	/*
 	 * PS can only be enabled when we have exactly one managed
 	 * interface (and monitors) in PS, this then points there.

@@ -371,6 +371,9 @@ struct bio *bio_kmalloc(gfp_t gfp_mask, int nr_iovecs)
 {
 	struct bio *bio;
 
+	if (nr_iovecs > UIO_MAXIOV)
+		return NULL;
+
 	bio = kmalloc(sizeof(struct bio) + nr_iovecs * sizeof(struct bio_vec),
 		      gfp_mask);
 	if (unlikely(!bio))
@@ -542,13 +545,18 @@ static int __bio_add_page(struct request_queue *q, struct bio *bio, struct page
 
 		if (page == prev->bv_page &&
 		    offset == prev->bv_offset + prev->bv_len) {
+			unsigned int prev_bv_len = prev->bv_len;
 			prev->bv_len += len;
 
 			if (q->merge_bvec_fn) {
 				struct bvec_merge_data bvm = {
+					/* prev_bvec is already charged in
+					   bi_size, discharge it in order to
+					   simulate merging updated prev_bvec
+					   as new bvec. */
 					.bi_bdev = bio->bi_bdev,
 					.bi_sector = bio->bi_sector,
-					.bi_size = bio->bi_size,
+					.bi_size = bio->bi_size - prev_bv_len,
 					.bi_rw = bio->bi_rw,
 				};
 
@@ -696,8 +704,12 @@ static void bio_free_map_data(struct bio_map_data *bmd)
 static struct bio_map_data *bio_alloc_map_data(int nr_segs, int iov_count,
 					       gfp_t gfp_mask)
 {
-	struct bio_map_data *bmd = kmalloc(sizeof(*bmd), gfp_mask);
+	struct bio_map_data *bmd;
 
+	if (iov_count > UIO_MAXIOV)
+		return NULL;
+
+	bmd = kmalloc(sizeof(*bmd), gfp_mask);
 	if (!bmd)
 		return NULL;
 
@@ -826,6 +838,12 @@ struct bio *bio_copy_user_iov(struct request_queue *q,
 		end = (uaddr + iov[i].iov_len + PAGE_SIZE - 1) >> PAGE_SHIFT;
 		start = uaddr >> PAGE_SHIFT;
 
+		/*
+		 * Overflow, abort
+		 */
+		if (end < start)
+			return ERR_PTR(-EINVAL);
+
 		nr_pages += end - start;
 		len += iov[i].iov_len;
 	}
@@ -953,6 +971,12 @@ static struct bio *__bio_map_user_iov(struct request_queue *q,
 		unsigned long end = (uaddr + len + PAGE_SIZE - 1) >> PAGE_SHIFT;
 		unsigned long start = uaddr >> PAGE_SHIFT;
 
+		/*
+		 * Overflow, abort
+		 */
+		if (end < start)
+			return ERR_PTR(-EINVAL);
+
 		nr_pages += end - start;
 		/*
 		 * buffer must be aligned to at least hardsector size for now
@@ -980,7 +1004,7 @@ static struct bio *__bio_map_user_iov(struct request_queue *q,
 		unsigned long start = uaddr >> PAGE_SHIFT;
 		const int local_nr_pages = end - start;
 		const int page_limit = cur_page + local_nr_pages;
-		
+
 		ret = get_user_pages_fast(uaddr, local_nr_pages,
 				write_to_vm, &pages[cur_page]);
 		if (ret < local_nr_pages) {

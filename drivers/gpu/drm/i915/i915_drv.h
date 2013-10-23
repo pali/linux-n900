@@ -258,7 +258,7 @@ typedef struct drm_i915_private {
 
 	struct notifier_block lid_notifier;
 
-	int crt_ddc_bus; /* -1 = unknown, else GPIO to use for CRT DDC */
+	int crt_ddc_bus; /* 0 = unknown, else GPIO to use for CRT DDC */
 	struct drm_i915_fence_reg fence_regs[16]; /* assume 965 */
 	int fence_reg_start; /* 4 if userland hasn't ioctl'd us yet */
 	int num_fence_regs; /* 8 on pre-965, 16 otherwise */
@@ -467,6 +467,15 @@ typedef struct drm_i915_private {
 		struct list_head flushing_list;
 
 		/**
+		 * List of objects currently pending a GPU write flush.
+		 *
+		 * All elements on this list will belong to either the
+		 * active_list or flushing_list, last_rendering_seqno can
+		 * be used to differentiate between the two elements.
+		 */
+		struct list_head gpu_write_list;
+
+		/**
 		 * LRU list of objects which are not in the ringbuffer and
 		 * are ready to unbind, but are still in the GTT.
 		 *
@@ -546,6 +555,9 @@ typedef struct drm_i915_private {
 	struct timer_list idle_timer;
 	bool busy;
 	u16 orig_clock;
+	int child_dev_num;
+	struct child_device_config *child_dev;
+	struct drm_connector *int_lvds_connector;
 } drm_i915_private_t;
 
 /** driver private structure attached to each drm_gem_object */
@@ -557,6 +569,8 @@ struct drm_i915_gem_object {
 
 	/** This object's place on the active/flushing/inactive lists */
 	struct list_head list;
+	/** This object's place on GPU write list */
+	struct list_head gpu_write_list;
 
 	/** This object's place on the fenced object LRU */
 	struct list_head fence_list;
@@ -813,15 +827,17 @@ void i915_gem_cleanup_ringbuffer(struct drm_device *dev);
 int i915_gem_do_init(struct drm_device *dev, unsigned long start,
 		     unsigned long end);
 int i915_gem_idle(struct drm_device *dev);
+int i915_lp_ring_sync(struct drm_device *dev);
 int i915_gem_fault(struct vm_area_struct *vma, struct vm_fault *vmf);
 int i915_gem_object_set_to_gtt_domain(struct drm_gem_object *obj,
 				      int write);
+int i915_gem_object_set_to_display_plane(struct drm_gem_object *obj);
 int i915_gem_attach_phys_object(struct drm_device *dev,
 				struct drm_gem_object *obj, int id);
 void i915_gem_detach_phys_object(struct drm_device *dev,
 				 struct drm_gem_object *obj);
 void i915_gem_free_all_phys_object(struct drm_device *dev);
-int i915_gem_object_get_pages(struct drm_gem_object *obj);
+int i915_gem_object_get_pages(struct drm_gem_object *obj, gfp_t gfpmask);
 void i915_gem_object_put_pages(struct drm_gem_object *obj);
 void i915_gem_release(struct drm_device * dev, struct drm_file *file_priv);
 
@@ -957,6 +973,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define IS_I85X(dev) ((dev)->pci_device == 0x3582)
 #define IS_I855(dev) ((dev)->pci_device == 0x3582)
 #define IS_I865G(dev) ((dev)->pci_device == 0x2572)
+#define IS_I8XX(dev) (IS_I830(dev) || IS_845G(dev) || IS_I85X(dev) || IS_I865G(dev))
 
 #define IS_I915G(dev) ((dev)->pci_device == 0x2582 || (dev)->pci_device == 0x258a)
 #define IS_I915GM(dev) ((dev)->pci_device == 0x2592)
@@ -1018,9 +1035,12 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
  */
 #define HAS_128_BYTE_Y_TILING(dev) (IS_I9XX(dev) && !(IS_I915G(dev) || \
 						      IS_I915GM(dev)))
+#define SUPPORTS_DIGITAL_OUTPUTS(dev)	(IS_I9XX(dev) && !IS_IGD(dev))
 #define SUPPORTS_INTEGRATED_HDMI(dev)	(IS_G4X(dev) || IS_IGDNG(dev))
 #define SUPPORTS_INTEGRATED_DP(dev)	(IS_G4X(dev) || IS_IGDNG(dev))
 #define SUPPORTS_EDP(dev)		(IS_IGDNG_M(dev))
+#define SUPPORTS_TV(dev)		(IS_I9XX(dev) && IS_MOBILE(dev) && \
+					!IS_IGDNG(dev) && !IS_IGD(dev))
 #define I915_HAS_HOTPLUG(dev) (IS_I945G(dev) || IS_I945GM(dev) || IS_G33(dev) || IS_I965G(dev))
 /* dsparb controlled by hw only */
 #define DSPARB_HWCONTROL(dev) (IS_G4X(dev) || IS_IGDNG(dev))

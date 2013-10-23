@@ -3032,7 +3032,7 @@ megasas_mgmt_fw_ioctl(struct megasas_instance *instance,
 	int error = 0, i;
 	void *sense = NULL;
 	dma_addr_t sense_handle;
-	u32 *sense_ptr;
+	unsigned long *sense_ptr;
 
 	memset(kbuff_arr, 0, sizeof(kbuff_arr));
 
@@ -3109,7 +3109,7 @@ megasas_mgmt_fw_ioctl(struct megasas_instance *instance,
 		}
 
 		sense_ptr =
-		    (u32 *) ((unsigned long)cmd->frame + ioc->sense_off);
+		(unsigned long *) ((unsigned long)cmd->frame + ioc->sense_off);
 		*sense_ptr = sense_handle;
 	}
 
@@ -3140,8 +3140,8 @@ megasas_mgmt_fw_ioctl(struct megasas_instance *instance,
 		 * sense_ptr points to the location that has the user
 		 * sense buffer address
 		 */
-		sense_ptr = (u32 *) ((unsigned long)ioc->frame.raw +
-				     ioc->sense_off);
+		sense_ptr = (unsigned long *) ((unsigned long)ioc->frame.raw +
+				ioc->sense_off);
 
 		if (copy_to_user((void __user *)((unsigned long)(*sense_ptr)),
 				 sense, ioc->sense_len)) {
@@ -3282,6 +3282,7 @@ static int megasas_mgmt_compat_ioctl_fw(struct file *file, unsigned long arg)
 	    compat_alloc_user_space(sizeof(struct megasas_iocpacket));
 	int i;
 	int error = 0;
+	compat_uptr_t ptr;
 
 	if (clear_user(ioc, sizeof(*ioc)))
 		return -EFAULT;
@@ -3294,9 +3295,22 @@ static int megasas_mgmt_compat_ioctl_fw(struct file *file, unsigned long arg)
 	    copy_in_user(&ioc->sge_count, &cioc->sge_count, sizeof(u32)))
 		return -EFAULT;
 
-	for (i = 0; i < MAX_IOCTL_SGE; i++) {
-		compat_uptr_t ptr;
+	/*
+	 * The sense_ptr is used in megasas_mgmt_fw_ioctl only when
+	 * sense_len is not null, so prepare the 64bit value under
+	 * the same condition.
+	 */
+	if (ioc->sense_len) {
+		void __user **sense_ioc_ptr =
+			(void __user **)(ioc->frame.raw + ioc->sense_off);
+		compat_uptr_t *sense_cioc_ptr =
+			(compat_uptr_t *)(cioc->frame.raw + cioc->sense_off);
+		if (get_user(ptr, sense_cioc_ptr) ||
+		    put_user(compat_ptr(ptr), sense_ioc_ptr))
+			return -EFAULT;
+	}
 
+	for (i = 0; i < MAX_IOCTL_SGE; i++) {
 		if (get_user(ptr, &cioc->sgl[i].iov_base) ||
 		    put_user(compat_ptr(ptr), &ioc->sgl[i].iov_base) ||
 		    copy_in_user(&ioc->sgl[i].iov_len,
@@ -3451,7 +3465,7 @@ out:
 	return retval;
 }
 
-static DRIVER_ATTR(poll_mode_io, S_IRUGO|S_IWUGO,
+static DRIVER_ATTR(poll_mode_io, S_IRUGO|S_IWUSR,
 		megasas_sysfs_show_poll_mode_io,
 		megasas_sysfs_set_poll_mode_io);
 

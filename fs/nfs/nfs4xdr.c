@@ -840,8 +840,8 @@ static void encode_attrs(struct xdr_stream *xdr, const struct iattr *iap, const 
 		bmval1 |= FATTR4_WORD1_TIME_ACCESS_SET;
 		*p++ = cpu_to_be32(NFS4_SET_TO_CLIENT_TIME);
 		*p++ = cpu_to_be32(0);
-		*p++ = cpu_to_be32(iap->ia_mtime.tv_sec);
-		*p++ = cpu_to_be32(iap->ia_mtime.tv_nsec);
+		*p++ = cpu_to_be32(iap->ia_atime.tv_sec);
+		*p++ = cpu_to_be32(iap->ia_atime.tv_nsec);
 	}
 	else if (iap->ia_valid & ATTR_ATIME) {
 		bmval1 |= FATTR4_WORD1_TIME_ACCESS_SET;
@@ -2096,7 +2096,7 @@ nfs4_xdr_enc_getacl(struct rpc_rqst *req, __be32 *p,
 	encode_compound_hdr(&xdr, req, &hdr);
 	encode_sequence(&xdr, &args->seq_args, &hdr);
 	encode_putfh(&xdr, args->fh, &hdr);
-	replen = hdr.replen + nfs4_fattr_bitmap_maxsz + 1;
+	replen = hdr.replen + op_decode_hdr_maxsz + nfs4_fattr_bitmap_maxsz + 1;
 	encode_getattr_two(&xdr, FATTR4_WORD0_ACL, 0, &hdr);
 
 	xdr_inline_pages(&req->rq_rcv_buf, replen << 2,
@@ -4554,7 +4554,7 @@ static int decode_sequence(struct xdr_stream *xdr,
 	 * If the server returns different values for sessionID, slotID or
 	 * sequence number, the server is looney tunes.
 	 */
-	status = -ESERVERFAULT;
+	status = -EREMOTEIO;
 
 	if (memcmp(id.data, res->sr_session->sess_id.data,
 		   NFS4_MAX_SESSIONID_LEN)) {
@@ -5678,7 +5678,7 @@ static struct {
 	{ NFS4ERR_BAD_COOKIE,	-EBADCOOKIE	},
 	{ NFS4ERR_NOTSUPP,	-ENOTSUPP	},
 	{ NFS4ERR_TOOSMALL,	-ETOOSMALL	},
-	{ NFS4ERR_SERVERFAULT,	-ESERVERFAULT	},
+	{ NFS4ERR_SERVERFAULT,	-EREMOTEIO	},
 	{ NFS4ERR_BADTYPE,	-EBADTYPE	},
 	{ NFS4ERR_LOCKED,	-EAGAIN		},
 	{ NFS4ERR_SYMLINK,	-ELOOP		},
@@ -5705,7 +5705,7 @@ nfs4_stat_to_errno(int stat)
 	}
 	if (stat <= 10000 || stat > 10100) {
 		/* The server is looney tunes. */
-		return -ESERVERFAULT;
+		return -EREMOTEIO;
 	}
 	/* If we cannot translate the error, the recovery routines should
 	 * handle it.

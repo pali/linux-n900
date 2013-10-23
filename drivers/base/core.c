@@ -56,7 +56,14 @@ static inline int device_is_not_partition(struct device *dev)
  */
 const char *dev_driver_string(const struct device *dev)
 {
-	return dev->driver ? dev->driver->name :
+	struct device_driver *drv;
+
+	/* dev->driver can change to NULL underneath us because of unbinding,
+	 * so be careful about accessing it.  dev->bus and dev->class should
+	 * never change once they are set, so they don't need special care.
+	 */
+	drv = ACCESS_ONCE(dev->driver);
+	return drv ? drv->name :
 			(dev->bus ? dev->bus->name :
 			(dev->class ? dev->class->name : ""));
 }
@@ -596,6 +603,7 @@ static struct kobject *get_device_parent(struct device *dev,
 	int retval;
 
 	if (dev->class) {
+		static DEFINE_MUTEX(gdp_mutex);
 		struct kobject *kobj = NULL;
 		struct kobject *parent_kobj;
 		struct kobject *k;
@@ -612,6 +620,8 @@ static struct kobject *get_device_parent(struct device *dev,
 		else
 			parent_kobj = &parent->kobj;
 
+		mutex_lock(&gdp_mutex);
+
 		/* find our class-directory at the parent and reference it */
 		spin_lock(&dev->class->p->class_dirs.list_lock);
 		list_for_each_entry(k, &dev->class->p->class_dirs.list, entry)
@@ -620,20 +630,26 @@ static struct kobject *get_device_parent(struct device *dev,
 				break;
 			}
 		spin_unlock(&dev->class->p->class_dirs.list_lock);
-		if (kobj)
+		if (kobj) {
+			mutex_unlock(&gdp_mutex);
 			return kobj;
+		}
 
 		/* or create a new class-directory at the parent device */
 		k = kobject_create();
-		if (!k)
+		if (!k) {
+			mutex_unlock(&gdp_mutex);
 			return NULL;
+		}
 		k->kset = &dev->class->p->class_dirs;
 		retval = kobject_add(k, parent_kobj, "%s", dev->class->name);
 		if (retval < 0) {
+			mutex_unlock(&gdp_mutex);
 			kobject_put(k);
 			return NULL;
 		}
 		/* do not emit an uevent for this simple "glue" directory */
+		mutex_unlock(&gdp_mutex);
 		return k;
 	}
 

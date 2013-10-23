@@ -62,7 +62,7 @@ ieee80211_bss_info_update(struct ieee80211_local *local,
 			  bool beacon)
 {
 	struct ieee80211_bss *bss;
-	int clen;
+	int clen, srlen;
 	s32 signal = 0;
 
 	if (local->hw.flags & IEEE80211_HW_SIGNAL_DBM)
@@ -94,23 +94,24 @@ ieee80211_bss_info_update(struct ieee80211_local *local,
 	if (bss->dtim_period == 0)
 		bss->dtim_period = 1;
 
-	bss->supp_rates_len = 0;
+	/* replace old supported rates if we get new values */
+	srlen = 0;
 	if (elems->supp_rates) {
-		clen = IEEE80211_MAX_SUPP_RATES - bss->supp_rates_len;
+		clen = IEEE80211_MAX_SUPP_RATES;
 		if (clen > elems->supp_rates_len)
 			clen = elems->supp_rates_len;
-		memcpy(&bss->supp_rates[bss->supp_rates_len], elems->supp_rates,
-		       clen);
-		bss->supp_rates_len += clen;
+		memcpy(bss->supp_rates, elems->supp_rates, clen);
+		srlen += clen;
 	}
 	if (elems->ext_supp_rates) {
-		clen = IEEE80211_MAX_SUPP_RATES - bss->supp_rates_len;
+		clen = IEEE80211_MAX_SUPP_RATES - srlen;
 		if (clen > elems->ext_supp_rates_len)
 			clen = elems->ext_supp_rates_len;
-		memcpy(&bss->supp_rates[bss->supp_rates_len],
-		       elems->ext_supp_rates, clen);
-		bss->supp_rates_len += clen;
+		memcpy(bss->supp_rates + srlen, elems->ext_supp_rates, clen);
+		srlen += clen;
 	}
+	if (srlen)
+		bss->supp_rates_len = srlen;
 
 	bss->wmm_used = elems->wmm_param || elems->wmm_info;
 
@@ -196,7 +197,8 @@ ieee80211_scan_rx(struct ieee80211_sub_if_data *sdata, struct sk_buff *skb)
 static void ieee80211_scan_ps_enable(struct ieee80211_sub_if_data *sdata)
 {
 	struct ieee80211_local *local = sdata->local;
-	bool ps = false;
+
+	local->scan_ps_enabled = false;
 
 	/* FIXME: what to do when local->pspolling is true? */
 
@@ -204,12 +206,13 @@ static void ieee80211_scan_ps_enable(struct ieee80211_sub_if_data *sdata)
 	cancel_work_sync(&local->dynamic_ps_enable_work);
 
 	if (local->hw.conf.flags & IEEE80211_CONF_PS) {
-		ps = true;
+		local->scan_ps_enabled = true;
 		local->hw.conf.flags &= ~IEEE80211_CONF_PS;
 		ieee80211_hw_config(local, IEEE80211_CONF_CHANGE_PS);
 	}
 
-	if (!ps || !(local->hw.flags & IEEE80211_HW_PS_NULLFUNC_STACK))
+	if (!(local->scan_ps_enabled) ||
+	    !(local->hw.flags & IEEE80211_HW_PS_NULLFUNC_STACK))
 		/*
 		 * If power save was enabled, no need to send a nullfunc
 		 * frame because AP knows that we are sleeping. But if the
@@ -230,7 +233,7 @@ static void ieee80211_scan_ps_disable(struct ieee80211_sub_if_data *sdata)
 
 	if (!local->ps_sdata)
 		ieee80211_send_nullfunc(local, sdata, 0);
-	else {
+	else if (local->scan_ps_enabled) {
 		/*
 		 * In !IEEE80211_HW_PS_NULLFUNC_STACK case the hardware
 		 * will send a nullfunc frame with the powersave bit set
@@ -246,6 +249,16 @@ static void ieee80211_scan_ps_disable(struct ieee80211_sub_if_data *sdata)
 		 */
 		local->hw.conf.flags |= IEEE80211_CONF_PS;
 		ieee80211_hw_config(local, IEEE80211_CONF_CHANGE_PS);
+	} else if (local->hw.conf.dynamic_ps_timeout > 0) {
+		/*
+		 * If IEEE80211_CONF_PS was not set and the dynamic_ps_timer
+		 * had been running before leaving the operating channel,
+		 * restart the timer now and send a nullfunc frame to inform
+		 * the AP that we are awake.
+		 */
+		ieee80211_send_nullfunc(local, sdata, 0);
+		mod_timer(&local->dynamic_ps_timer, jiffies +
+			  msecs_to_jiffies(local->hw.conf.dynamic_ps_timeout));
 	}
 }
 
@@ -264,10 +277,14 @@ void ieee80211_scan_completed(struct ieee80211_hw *hw, bool aborted)
 
 	mutex_lock(&local->scan_mtx);
 
-	if (WARN_ON(!local->scanning)) {
-		mutex_unlock(&local->scan_mtx);
-		return;
-	}
+	/*
+	 * It's ok to abort a not-yet-running scan (that
+	 * we have one at all will be verified by checking
+	 * local->scan_req next), but not to complete it
+	 * successfully.
+	 */
+	if (WARN_ON(!local->scanning && !aborted))
+		aborted = true;
 
 	if (WARN_ON(!local->scan_req)) {
 		mutex_unlock(&local->scan_mtx);
@@ -392,6 +409,16 @@ static int __ieee80211_start_scan(struct ieee80211_sub_if_data *sdata,
 	if (local->scan_req)
 		return -EBUSY;
 
+	if (req != local->int_scan_req &&
+	    sdata->vif.type == NL80211_IFTYPE_STATION &&
+	    !list_empty(&ifmgd->work_list)) {
+		/* actually wait for the work it's doing to finish/time out */
+		set_bit(IEEE80211_STA_REQ_SCAN, &ifmgd->request);
+		local->scan_req = req;
+		local->scan_sdata = sdata;
+		return 0;
+	}
+
 	if (local->ops->hw_scan) {
 		u8 *ies;
 		int ielen;
@@ -411,14 +438,6 @@ static int __ieee80211_start_scan(struct ieee80211_sub_if_data *sdata,
 
 	local->scan_req = req;
 	local->scan_sdata = sdata;
-
-	if (req != local->int_scan_req &&
-	    sdata->vif.type == NL80211_IFTYPE_STATION &&
-	    !list_empty(&ifmgd->work_list)) {
-		/* actually wait for the work it's doing to finish/time out */
-		set_bit(IEEE80211_STA_REQ_SCAN, &ifmgd->request);
-		return 0;
-	}
 
 	if (local->ops->hw_scan)
 		__set_bit(SCAN_HW_SCANNING, &local->scanning);

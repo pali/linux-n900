@@ -36,6 +36,7 @@
 #include <linux/platform_device.h>
 #include <linux/mod_devicetable.h>
 #include <linux/log2.h>
+#include <linux/pm.h>
 
 /* this is for "generic access to PC-style RTC" using CMOS_READ/CMOS_WRITE */
 #include <asm-generic/rtc.h>
@@ -723,6 +724,9 @@ cmos_do_probe(struct device *dev, struct resource *ports, int rtc_irq)
 		}
 	}
 
+	cmos_rtc.dev = dev;
+	dev_set_drvdata(dev, &cmos_rtc);
+
 	cmos_rtc.rtc = rtc_device_register(driver_name, dev,
 				&cmos_rtc_ops, THIS_MODULE);
 	if (IS_ERR(cmos_rtc.rtc)) {
@@ -730,8 +734,6 @@ cmos_do_probe(struct device *dev, struct resource *ports, int rtc_irq)
 		goto cleanup0;
 	}
 
-	cmos_rtc.dev = dev;
-	dev_set_drvdata(dev, &cmos_rtc);
 	rename_region(ports, dev_name(&cmos_rtc.rtc->dev));
 
 	spin_lock_irq(&rtc_lock);
@@ -854,7 +856,7 @@ static void __exit cmos_do_remove(struct device *dev)
 
 #ifdef	CONFIG_PM
 
-static int cmos_suspend(struct device *dev, pm_message_t mesg)
+static int cmos_suspend(struct device *dev)
 {
 	struct cmos_rtc	*cmos = dev_get_drvdata(dev);
 	unsigned char	tmp;
@@ -901,7 +903,7 @@ static int cmos_suspend(struct device *dev, pm_message_t mesg)
  */
 static inline int cmos_poweroff(struct device *dev)
 {
-	return cmos_suspend(dev, PMSG_HIBERNATE);
+	return cmos_suspend(dev);
 }
 
 static int cmos_resume(struct device *dev)
@@ -948,9 +950,9 @@ static int cmos_resume(struct device *dev)
 	return 0;
 }
 
+static SIMPLE_DEV_PM_OPS(cmos_pm_ops, cmos_suspend, cmos_resume);
+
 #else
-#define	cmos_suspend	NULL
-#define	cmos_resume	NULL
 
 static inline int cmos_poweroff(struct device *dev)
 {
@@ -1086,7 +1088,7 @@ static void __exit cmos_pnp_remove(struct pnp_dev *pnp)
 
 static int cmos_pnp_suspend(struct pnp_dev *pnp, pm_message_t mesg)
 {
-	return cmos_suspend(&pnp->dev, mesg);
+	return cmos_suspend(&pnp->dev);
 }
 
 static int cmos_pnp_resume(struct pnp_dev *pnp)
@@ -1099,9 +1101,9 @@ static int cmos_pnp_resume(struct pnp_dev *pnp)
 #define	cmos_pnp_resume		NULL
 #endif
 
-static void cmos_pnp_shutdown(struct device *pdev)
+static void cmos_pnp_shutdown(struct pnp_dev *pnp)
 {
-	if (system_state == SYSTEM_POWER_OFF && !cmos_poweroff(pdev))
+	if (system_state == SYSTEM_POWER_OFF && !cmos_poweroff(&pnp->dev))
 		return;
 
 	cmos_do_shutdown();
@@ -1120,15 +1122,12 @@ static struct pnp_driver cmos_pnp_driver = {
 	.id_table	= rtc_ids,
 	.probe		= cmos_pnp_probe,
 	.remove		= __exit_p(cmos_pnp_remove),
+	.shutdown	= cmos_pnp_shutdown,
 
 	/* flag ensures resume() gets called, and stops syslog spam */
 	.flags		= PNP_DRIVER_RES_DO_NOT_CHANGE,
 	.suspend	= cmos_pnp_suspend,
 	.resume		= cmos_pnp_resume,
-	.driver		= {
-		.name	  = (char *)driver_name,
-		.shutdown = cmos_pnp_shutdown,
-	}
 };
 
 #endif	/* CONFIG_PNP */
@@ -1169,8 +1168,9 @@ static struct platform_driver cmos_platform_driver = {
 	.shutdown	= cmos_platform_shutdown,
 	.driver = {
 		.name		= (char *) driver_name,
-		.suspend	= cmos_suspend,
-		.resume		= cmos_resume,
+#ifdef CONFIG_PM
+		.pm		= &cmos_pm_ops,
+#endif
 	}
 };
 

@@ -18,6 +18,7 @@
 #include <linux/hrtimer.h>
 #include <linux/tick.h>
 #include <linux/sched.h>
+#include <linux/math64.h>
 
 #define BUCKETS 12
 #define RESOLUTION 1024
@@ -100,7 +101,6 @@ struct menu_device {
 
 	unsigned int	expected_us;
 	u64		predicted_us;
-	unsigned int	measured_us;
 	unsigned int	exit_us;
 	unsigned int	bucket;
 	u64		correction_factor[BUCKETS];
@@ -169,6 +169,12 @@ static DEFINE_PER_CPU(struct menu_device, menu_devices);
 
 static void menu_update(struct cpuidle_device *dev);
 
+/* This implements DIV_ROUND_CLOSEST but avoids 64 bit division */
+static u64 div_round64(u64 dividend, u32 divisor)
+{
+	return div_u64(dividend + (divisor / 2), divisor);
+}
+
 /**
  * menu_select - selects the next idle state to enter
  * @dev: the CPU
@@ -180,13 +186,13 @@ static int menu_select(struct cpuidle_device *dev)
 	int i;
 	int multiplier;
 
-	data->last_state_idx = 0;
-	data->exit_us = 0;
-
 	if (data->needs_update) {
 		menu_update(dev);
 		data->needs_update = 0;
 	}
+
+	data->last_state_idx = 0;
+	data->exit_us = 0;
 
 	/* Special case when user has set very strict latency requirement */
 	if (unlikely(latency_req == 0))
@@ -209,9 +215,8 @@ static int menu_select(struct cpuidle_device *dev)
 		data->correction_factor[data->bucket] = RESOLUTION * DECAY;
 
 	/* Make sure to round up for half microseconds */
-	data->predicted_us = DIV_ROUND_CLOSEST(
-		data->expected_us * data->correction_factor[data->bucket],
-		RESOLUTION * DECAY);
+	data->predicted_us = div_round64(data->expected_us * data->correction_factor[data->bucket],
+					 RESOLUTION * DECAY);
 
 	/*
 	 * We want to default to C1 (hlt), not to busy polling
@@ -288,7 +293,7 @@ static void menu_update(struct cpuidle_device *dev)
 	new_factor = data->correction_factor[data->bucket]
 			* (DECAY - 1) / DECAY;
 
-	if (data->expected_us > 0 && data->measured_us < MAX_INTERESTING)
+	if (data->expected_us > 0 && measured_us < MAX_INTERESTING)
 		new_factor += RESOLUTION * measured_us / data->expected_us;
 	else
 		/*

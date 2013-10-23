@@ -59,6 +59,12 @@ static struct usb_device_id btusb_table[] = {
 	/* Generic Bluetooth USB device */
 	{ USB_DEVICE_INFO(0xe0, 0x01, 0x01) },
 
+	/* Apple iMac11,1 */
+	{ USB_DEVICE(0x05ac, 0x8215) },
+
+	/* Apple MacBookPro8,2 */
+	{ USB_DEVICE(0x05ac, 0x821a) },
+
 	/* AVM BlueFRITZ! USB v2.0 */
 	{ USB_DEVICE(0x057c, 0x3800) },
 
@@ -307,6 +313,7 @@ static void btusb_bulk_complete(struct urb *urb)
 		return;
 
 	usb_anchor_urb(urb, &data->bulk_anchor);
+	usb_mark_last_busy(data->udev);
 
 	err = usb_submit_urb(urb, GFP_ATOMIC);
 	if (err < 0) {

@@ -2287,12 +2287,12 @@ int
 cifs_mount(struct super_block *sb, struct cifs_sb_info *cifs_sb,
 		char *mount_data_global, const char *devname)
 {
-	int rc = 0;
+	int rc;
 	int xid;
 	struct smb_vol *volume_info;
-	struct cifsSesInfo *pSesInfo = NULL;
-	struct cifsTconInfo *tcon = NULL;
-	struct TCP_Server_Info *srvTcp = NULL;
+	struct cifsSesInfo *pSesInfo;
+	struct cifsTconInfo *tcon;
+	struct TCP_Server_Info *srvTcp;
 	char   *full_path;
 	char *mount_data = mount_data_global;
 #ifdef CONFIG_CIFS_DFS_UPCALL
@@ -2301,6 +2301,10 @@ cifs_mount(struct super_block *sb, struct cifs_sb_info *cifs_sb,
 	int referral_walks_count = 0;
 try_mount_again:
 #endif
+	rc = 0;
+	tcon = NULL;
+	pSesInfo = NULL;
+	srvTcp = NULL;
 	full_path = NULL;
 
 	xid = GetXid();
@@ -2528,7 +2532,7 @@ try_mount_again:
 
 remote_path_check:
 	/* check if a whole path (including prepath) is not remote */
-	if (!rc && cifs_sb->prepathlen && tcon) {
+	if (!rc && tcon) {
 		/* build_path_to_root works only when we have a valid tcon */
 		full_path = cifs_build_path_to_root(cifs_sb);
 		if (full_path == NULL) {
@@ -2597,6 +2601,7 @@ remote_path_check:
 
 			cleanup_volume_info(&volume_info);
 			referral_walks_count++;
+			FreeXid(xid);
 			goto try_mount_again;
 		}
 #else /* No DFS support, return error on mount */

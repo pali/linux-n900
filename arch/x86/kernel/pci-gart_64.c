@@ -553,6 +553,9 @@ static void enable_gart_translations(void)
 
 		enable_gart_translation(dev, __pa(agp_gatt_table));
 	}
+
+	/* Flush the GART-TLB to remove stale entries */
+	k8_flush_garts();
 }
 
 /*
@@ -717,7 +720,7 @@ void __init gart_iommu_init(void)
 	unsigned long scratch;
 	long i;
 
-	if (cache_k8_northbridges() < 0 || num_k8_northbridges == 0)
+	if (num_k8_northbridges == 0)
 		return;
 
 #ifndef CONFIG_AGP_AMD64
@@ -856,7 +859,7 @@ void __init gart_parse_options(char *p)
 #endif
 	if (isdigit(*p) && get_option(&p, &arg))
 		iommu_size = arg;
-	if (!strncmp(p, "fullflush", 8))
+	if (!strncmp(p, "fullflush", 9))
 		iommu_fullflush = 1;
 	if (!strncmp(p, "nofullflush", 11))
 		iommu_fullflush = 0;

@@ -496,7 +496,8 @@ ieee80211_tx_h_rate_ctrl(struct ieee80211_tx_data *tx)
 	struct ieee80211_hdr *hdr = (void *)tx->skb->data;
 	struct ieee80211_supported_band *sband;
 	struct ieee80211_rate *rate;
-	int i, len;
+	int i;
+	u32 len;
 	bool inval = false, rts = false, short_preamble = false;
 	struct ieee80211_tx_rate_control txrc;
 	u32 sta_flags;
@@ -505,7 +506,7 @@ ieee80211_tx_h_rate_ctrl(struct ieee80211_tx_data *tx)
 
 	sband = tx->local->hw.wiphy->bands[tx->channel->band];
 
-	len = min_t(int, tx->skb->len + FCS_LEN,
+	len = min_t(u32, tx->skb->len + FCS_LEN,
 			 tx->local->hw.wiphy->frag_threshold);
 
 	/* set up the tx rate control struct we give the RC algo */
@@ -1401,6 +1402,7 @@ static void ieee80211_xmit(struct ieee80211_sub_if_data *sdata,
 
 	if ((local->hw.flags & IEEE80211_HW_PS_NULLFUNC_STACK) &&
 	    local->hw.conf.dynamic_ps_timeout > 0 &&
+	    !local->quiescing &&
 	    !(local->scanning) && local->ps_sdata) {
 		if (local->hw.conf.flags & IEEE80211_CONF_PS) {
 			ieee80211_stop_queues_by_reason(&local->hw,
@@ -1481,7 +1483,7 @@ static void ieee80211_xmit(struct ieee80211_sub_if_data *sdata,
 				return;
 			}
 
-	ieee80211_select_queue(local, skb);
+	ieee80211_set_qos_hdr(local, skb);
 	ieee80211_tx(sdata, skb, false);
 	dev_put(sdata->dev);
 }
@@ -1880,6 +1882,7 @@ static bool ieee80211_tx_pending_skb(struct ieee80211_local *local,
 void ieee80211_tx_pending(unsigned long data)
 {
 	struct ieee80211_local *local = (struct ieee80211_local *)data;
+	struct ieee80211_sub_if_data *sdata;
 	unsigned long flags;
 	int i;
 	bool txok;
@@ -1920,6 +1923,11 @@ void ieee80211_tx_pending(unsigned long data)
 			if (!txok)
 				break;
 		}
+
+		if (skb_queue_empty(&local->pending[i]))
+			list_for_each_entry_rcu(sdata, &local->interfaces, list)
+				netif_tx_wake_queue(
+					netdev_get_tx_queue(sdata->dev, i));
 	}
 	spin_unlock_irqrestore(&local->queue_stop_reason_lock, flags);
 
@@ -2224,6 +2232,9 @@ void ieee80211_tx_skb(struct ieee80211_sub_if_data *sdata, struct sk_buff *skb,
 
 	if (!encrypt)
 		info->flags |= IEEE80211_TX_INTFL_DONT_ENCRYPT;
+
+	/* send all internal mgmt frames on VO */
+	skb_set_queue_mapping(skb, 0);
 
 	/*
 	 * The other path calling ieee80211_xmit is from the tasklet,

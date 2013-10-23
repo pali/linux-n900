@@ -214,7 +214,7 @@
 #define   I830_FENCE_SIZE_BITS(size)	((ffs((size) >> 19) - 1) << 8)
 #define   I830_FENCE_PITCH_SHIFT	4
 #define   I830_FENCE_REG_VALID		(1<<0)
-#define   I915_FENCE_MAX_PITCH_VAL	0x10
+#define   I915_FENCE_MAX_PITCH_VAL	4
 #define   I830_FENCE_MAX_PITCH_VAL	6
 #define   I830_FENCE_MAX_SIZE_VAL	(1<<8)
 
@@ -307,6 +307,70 @@
 #define LM_BURST_LENGTH     0x00000700
 #define LM_FIFO_WATERMARK   0x0000001F
 #define MI_ARB_STATE	0x020e4 /* 915+ only */
+#define   MI_ARB_MASK_SHIFT	  16	/* shift for enable bits */
+
+/* Make render/texture TLB fetches lower priorty than associated data
+ *   fetches. This is not turned on by default
+ */
+#define   MI_ARB_RENDER_TLB_LOW_PRIORITY	(1 << 15)
+
+/* Isoch request wait on GTT enable (Display A/B/C streams).
+ * Make isoch requests stall on the TLB update. May cause
+ * display underruns (test mode only)
+ */
+#define   MI_ARB_ISOCH_WAIT_GTT			(1 << 14)
+
+/* Block grant count for isoch requests when block count is
+ * set to a finite value.
+ */
+#define   MI_ARB_BLOCK_GRANT_MASK		(3 << 12)
+#define   MI_ARB_BLOCK_GRANT_8			(0 << 12)	/* for 3 display planes */
+#define   MI_ARB_BLOCK_GRANT_4			(1 << 12)	/* for 2 display planes */
+#define   MI_ARB_BLOCK_GRANT_2			(2 << 12)	/* for 1 display plane */
+#define   MI_ARB_BLOCK_GRANT_0			(3 << 12)	/* don't use */
+
+/* Enable render writes to complete in C2/C3/C4 power states.
+ * If this isn't enabled, render writes are prevented in low
+ * power states. That seems bad to me.
+ */
+#define   MI_ARB_C3_LP_WRITE_ENABLE		(1 << 11)
+
+/* This acknowledges an async flip immediately instead
+ * of waiting for 2TLB fetches.
+ */
+#define   MI_ARB_ASYNC_FLIP_ACK_IMMEDIATE	(1 << 10)
+
+/* Enables non-sequential data reads through arbiter
+ */
+#define   MI_ARB_DUAL_DATA_PHASE_DISABLE       	(1 << 9)
+
+/* Disable FSB snooping of cacheable write cycles from binner/render
+ * command stream
+ */
+#define   MI_ARB_CACHE_SNOOP_DISABLE		(1 << 8)
+
+/* Arbiter time slice for non-isoch streams */
+#define   MI_ARB_TIME_SLICE_MASK		(7 << 5)
+#define   MI_ARB_TIME_SLICE_1			(0 << 5)
+#define   MI_ARB_TIME_SLICE_2			(1 << 5)
+#define   MI_ARB_TIME_SLICE_4			(2 << 5)
+#define   MI_ARB_TIME_SLICE_6			(3 << 5)
+#define   MI_ARB_TIME_SLICE_8			(4 << 5)
+#define   MI_ARB_TIME_SLICE_10			(5 << 5)
+#define   MI_ARB_TIME_SLICE_14			(6 << 5)
+#define   MI_ARB_TIME_SLICE_16			(7 << 5)
+
+/* Low priority grace period page size */
+#define   MI_ARB_LOW_PRIORITY_GRACE_4KB		(0 << 4)	/* default */
+#define   MI_ARB_LOW_PRIORITY_GRACE_8KB		(1 << 4)
+
+/* Disable display A/B trickle feed */
+#define   MI_ARB_DISPLAY_TRICKLE_FEED_DISABLE	(1 << 2)
+
+/* Set display plane priority */
+#define   MI_ARB_DISPLAY_PRIORITY_A_B		(0 << 0)	/* display A > display B */
+#define   MI_ARB_DISPLAY_PRIORITY_B_A		(1 << 0)	/* display B > display A */
+
 #define CACHE_MODE_0	0x02120 /* 915+ only */
 #define   CM0_MASK_SHIFT          16
 #define   CM0_IZ_OPT_DISABLE      (1<<6)
@@ -329,6 +393,7 @@
 #define   FBC_CTL_PERIODIC	(1<<30)
 #define   FBC_CTL_INTERVAL_SHIFT (16)
 #define   FBC_CTL_UNCOMPRESSIBLE (1<<14)
+#define   FBC_C3_IDLE		(1<<13)
 #define   FBC_CTL_STRIDE_SHIFT	(5)
 #define   FBC_CTL_FENCENO	(1<<0)
 #define FBC_COMMAND		0x0320c
@@ -404,6 +469,13 @@
 # define GPIO_DATA_VAL_OUT		(1 << 11)
 # define GPIO_DATA_VAL_IN		(1 << 12)
 # define GPIO_DATA_PULLUP_DISABLE	(1 << 13)
+
+#define GMBUS0			0x5100
+#define GMBUS1			0x5104
+#define GMBUS2			0x5108
+#define GMBUS3			0x510c
+#define GMBUS4			0x5110
+#define GMBUS5			0x5120
 
 /*
  * Clock control & power management
@@ -863,14 +935,6 @@
 #define CRT_HOTPLUG_DETECT_VOLTAGE_475MV	(1 << 2)
 #define CRT_HOTPLUG_MASK			(0x3fc) /* Bits 9-2 */
 #define CRT_FORCE_HOTPLUG_MASK			0xfffffe1f
-#define HOTPLUG_EN_MASK (HDMIB_HOTPLUG_INT_EN | \
-			 HDMIC_HOTPLUG_INT_EN |	  \
-			 HDMID_HOTPLUG_INT_EN |	  \
-			 SDVOB_HOTPLUG_INT_EN |	  \
-			 SDVOC_HOTPLUG_INT_EN |	  \
-			 TV_HOTPLUG_INT_EN |	  \
-			 CRT_HOTPLUG_INT_EN)
-
 
 #define PORT_HOTPLUG_STAT	0x61114
 #define   HDMIB_HOTPLUG_INT_STATUS		(1 << 29)
@@ -968,6 +1032,8 @@
 #define   LVDS_PORT_EN			(1 << 31)
 /* Selects pipe B for LVDS data.  Must be set on pre-965. */
 #define   LVDS_PIPEB_SELECT		(1 << 30)
+/* LVDS dithering flag on 965/g4x platform */
+#define   LVDS_ENABLE_DITHER		(1 << 25)
 /* Enable border for unscaled (or aspect-scaled) display */
 #define   LVDS_BORDER_ENABLE		(1 << 15)
 /*
@@ -1737,6 +1803,8 @@
 
 /* Display & cursor control */
 
+/* dithering flag on Ironlake */
+#define PIPE_ENABLE_DITHER	(1 << 4)
 /* Pipe A */
 #define PIPEADSL		0x70000
 #define PIPEACONF		0x70008
@@ -2156,6 +2224,13 @@
 #define PCH_GPIOD               0xc501c
 #define PCH_GPIOE               0xc5020
 #define PCH_GPIOF               0xc5024
+
+#define PCH_GMBUS0		0xc5100
+#define PCH_GMBUS1		0xc5104
+#define PCH_GMBUS2		0xc5108
+#define PCH_GMBUS3		0xc510c
+#define PCH_GMBUS4		0xc5110
+#define PCH_GMBUS5		0xc5120
 
 #define PCH_DPLL_A              0xc6014
 #define PCH_DPLL_B              0xc6018

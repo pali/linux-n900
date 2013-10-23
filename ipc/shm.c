@@ -101,6 +101,7 @@ static void do_shm_rmid(struct ipc_namespace *ns, struct kern_ipc_perm *ipcp)
 void shm_exit_ns(struct ipc_namespace *ns)
 {
 	free_ipcs(ns, &shm_ids(ns), do_shm_rmid);
+	idr_destroy(&ns->ids[IPC_SHM_IDS].ipcs_idr);
 }
 #endif
 
@@ -290,27 +291,27 @@ static unsigned long shm_get_unmapped_area(struct file *file,
 	unsigned long flags)
 {
 	struct shm_file_data *sfd = shm_file_data(file);
-	return get_unmapped_area(sfd->file, addr, len, pgoff, flags);
-}
-
-int is_file_shm_hugepages(struct file *file)
-{
-	int ret = 0;
-
-	if (file->f_op == &shm_file_operations) {
-		struct shm_file_data *sfd;
-		sfd = shm_file_data(file);
-		ret = is_file_hugepages(sfd->file);
-	}
-	return ret;
+	return sfd->file->f_op->get_unmapped_area(sfd->file, addr, len,
+						pgoff, flags);
 }
 
 static const struct file_operations shm_file_operations = {
 	.mmap		= shm_mmap,
 	.fsync		= shm_fsync,
 	.release	= shm_release,
+};
+
+static const struct file_operations shm_file_operations_huge = {
+	.mmap		= shm_mmap,
+	.fsync		= shm_fsync,
+	.release	= shm_release,
 	.get_unmapped_area	= shm_get_unmapped_area,
 };
+
+int is_file_shm_hugepages(struct file *file)
+{
+	return file->f_op == &shm_file_operations_huge;
+}
 
 static const struct vm_operations_struct shm_vm_ops = {
 	.open	= shm_open,	/* callback for a new vm-area open */
@@ -473,6 +474,7 @@ static inline unsigned long copy_shmid_to_user(void __user *buf, struct shmid64_
 	    {
 		struct shmid_ds out;
 
+		memset(&out, 0, sizeof(out));
 		ipc64_perm_to_ipc_perm(&in->shm_perm, &out.shm_perm);
 		out.shm_segsz	= in->shm_segsz;
 		out.shm_atime	= in->shm_atime;
@@ -889,7 +891,10 @@ long do_shmat(int shmid, char __user *shmaddr, int shmflg, ulong *raddr)
 	if (!sfd)
 		goto out_put_dentry;
 
-	file = alloc_file(path.mnt, path.dentry, f_mode, &shm_file_operations);
+	file = alloc_file(path.mnt, path.dentry, f_mode,
+			is_file_hugepages(shp->shm_file) ?
+				&shm_file_operations_huge :
+				&shm_file_operations);
 	if (!file)
 		goto out_free;
 	ima_counts_get(file);

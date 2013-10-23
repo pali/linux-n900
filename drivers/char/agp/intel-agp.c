@@ -8,6 +8,7 @@
 #include <linux/kernel.h>
 #include <linux/pagemap.h>
 #include <linux/agp_backend.h>
+#include <asm/smp.h>
 #include "agp.h"
 
 /*
@@ -178,6 +179,7 @@ static struct _intel_private {
 	 * popup and for the GTT.
 	 */
 	int gtt_entries;			/* i830+ */
+	int gtt_total_size;
 	union {
 		void __iomem *i9xx_flush_page;
 		void *i8xx_flush_page;
@@ -814,12 +816,6 @@ static void intel_i830_setup_flush(void)
 		intel_i830_fini_flush();
 }
 
-static void
-do_wbinvd(void *null)
-{
-	wbinvd();
-}
-
 /* The chipset_flush interface needs to get data that has already been
  * flushed out of the CPU all the way out to main memory, because the GPU
  * doesn't snoop those buffers.
@@ -836,12 +832,10 @@ static void intel_i830_chipset_flush(struct agp_bridge_data *bridge)
 
 	memset(pg, 0, 1024);
 
-	if (cpu_has_clflush) {
+	if (cpu_has_clflush)
 		clflush_cache_range(pg, 1024);
-	} else {
-		if (on_each_cpu(do_wbinvd, NULL, 1) != 0)
-			printk(KERN_ERR "Timed out waiting for cache flush.\n");
-	}
+	else if (wbinvd_on_all_cpus() != 0)
+		printk(KERN_ERR "Timed out waiting for cache flush.\n");
 }
 
 /* The intel i830 automatically initializes the agp aperture during POST.
@@ -1153,7 +1147,7 @@ static int intel_i915_configure(void)
 	readl(intel_private.registers+I810_PGETBL_CTL);	/* PCI Posting. */
 
 	if (agp_bridge->driver->needs_scratch_page) {
-		for (i = intel_private.gtt_entries; i < current_size->num_entries; i++) {
+		for (i = intel_private.gtt_entries; i < intel_private.gtt_total_size; i++) {
 			writel(agp_bridge->scratch_page, intel_private.gtt+i);
 		}
 		readl(intel_private.gtt+i-1);	/* PCI Posting. */
@@ -1308,6 +1302,8 @@ static int intel_i915_create_gatt_table(struct agp_bridge_data *bridge)
 	if (!intel_private.gtt)
 		return -ENOMEM;
 
+	intel_private.gtt_total_size = gtt_map_size / 4;
+
 	temp &= 0xfff80000;
 
 	intel_private.registers = ioremap(temp, 128 * 4096);
@@ -1394,6 +1390,8 @@ static int intel_i965_create_gatt_table(struct agp_bridge_data *bridge)
 
 	if (!intel_private.gtt)
 		return -ENOMEM;
+
+	intel_private.gtt_total_size = gtt_size / 4;
 
 	intel_private.registers = ioremap(temp, 128 * 4096);
 	if (!intel_private.registers) {
