@@ -1,26 +1,26 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
@@ -36,25 +36,21 @@
 #include "linux/kernel.h"
 #include "linux/pagemap.h"
 
-static PVRSRV_ERROR AllocDeviceMem(IMG_HANDLE hDevCookie,
-				   IMG_HANDLE hDevMemHeap,
-				   IMG_UINT32 ui32Flags,
-				   IMG_UINT32 ui32Size,
-				   IMG_UINT32 ui32Alignment,
-				   PVRSRV_KERNEL_MEM_INFO ** ppsMemInfo);
+static enum PVRSRV_ERROR AllocDeviceMem(void *hDevCookie, void *hDevMemHeap,
+				   u32 ui32Flags, u32 ui32Size,
+				   u32 ui32Alignment,
+				   struct PVRSRV_KERNEL_MEM_INFO **ppsMemInfo);
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVGetDeviceMemHeapsKM(IMG_HANDLE hDevCookie,
-							PVRSRV_HEAP_INFO *
-							psHeapInfo)
+enum PVRSRV_ERROR PVRSRVGetDeviceMemHeapsKM(void *hDevCookie,
+					struct PVRSRV_HEAP_INFO *psHeapInfo)
 {
-	PVRSRV_DEVICE_NODE *psDeviceNode;
-	IMG_UINT32 ui32HeapCount;
-	DEVICE_MEMORY_HEAP_INFO *psDeviceMemoryHeap;
-	IMG_UINT32 i;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode;
+	u32 ui32HeapCount;
+	struct DEVICE_MEMORY_HEAP_INFO *psDeviceMemoryHeap;
+	u32 i;
 
-	psDeviceNode = (PVRSRV_DEVICE_NODE *) hDevCookie;
-	PVR_ASSERT(psDeviceNode != IMG_NULL);
+	psDeviceNode = (struct PVRSRV_DEVICE_NODE *)hDevCookie;
+	PVR_ASSERT(psDeviceNode != NULL);
 
 	ui32HeapCount = psDeviceNode->sDevMemoryInfo.ui32HeapCount;
 	psDeviceMemoryHeap = psDeviceNode->sDevMemoryInfo.psDeviceMemoryHeap;
@@ -74,39 +70,29 @@ IMG_EXPORT
 
 	for (; i < PVRSRV_MAX_CLIENT_HEAPS; i++) {
 		OSMemSet(psHeapInfo + i, 0, sizeof(*psHeapInfo));
-		psHeapInfo[i].ui32HeapID = (IMG_UINT32) SGX_UNDEFINED_HEAP_ID;
+		psHeapInfo[i].ui32HeapID = (u32) SGX_UNDEFINED_HEAP_ID;
 	}
 
 	return PVRSRV_OK;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVCreateDeviceMemContextKM(IMG_HANDLE
-							     hDevCookie,
-							     PVRSRV_PER_PROCESS_DATA
-							     * psPerProc,
-							     IMG_HANDLE *
-							     phDevMemContext,
-							     IMG_UINT32 *
-							     pui32ClientHeapCount,
-							     PVRSRV_HEAP_INFO *
-							     psHeapInfo,
-							     IMG_BOOL *
-							     pbCreated
-							     ,
-							     IMG_BOOL * pbShared
-    )
+enum PVRSRV_ERROR PVRSRVCreateDeviceMemContextKM(void *hDevCookie,
+			     struct PVRSRV_PER_PROCESS_DATA *psPerProc,
+			     void **phDevMemContext,
+			     u32 *pui32ClientHeapCount,
+			     struct PVRSRV_HEAP_INFO *psHeapInfo,
+			     IMG_BOOL *pbCreated, IMG_BOOL *pbShared)
 {
-	PVRSRV_DEVICE_NODE *psDeviceNode;
-	IMG_UINT32 ui32HeapCount, ui32ClientHeapCount = 0;
-	DEVICE_MEMORY_HEAP_INFO *psDeviceMemoryHeap;
-	IMG_HANDLE hDevMemContext;
-	IMG_HANDLE hDevMemHeap;
-	IMG_DEV_PHYADDR sPDDevPAddr;
-	IMG_UINT32 i;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode;
+	u32 ui32HeapCount, ui32ClientHeapCount = 0;
+	struct DEVICE_MEMORY_HEAP_INFO *psDeviceMemoryHeap;
+	void *hDevMemContext;
+	void *hDevMemHeap;
+	struct IMG_DEV_PHYADDR sPDDevPAddr;
+	u32 i;
 
-	psDeviceNode = (PVRSRV_DEVICE_NODE *) hDevCookie;
-	PVR_ASSERT(psDeviceNode != IMG_NULL);
+	psDeviceNode = (struct PVRSRV_DEVICE_NODE *)hDevCookie;
+	PVR_ASSERT(psDeviceNode != NULL);
 
 	ui32HeapCount = psDeviceNode->sDevMemoryInfo.ui32HeapCount;
 	psDeviceMemoryHeap = psDeviceNode->sDevMemoryInfo.psDeviceMemoryHeap;
@@ -115,13 +101,13 @@ IMG_EXPORT
 
 	hDevMemContext = BM_CreateContext(psDeviceNode,
 					  &sPDDevPAddr, psPerProc, pbCreated);
-	if (hDevMemContext == IMG_NULL) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "PVRSRVCreateDeviceMemContextKM: Failed BM_CreateContext"));
+	if (hDevMemContext == NULL) {
+		PVR_DPF(PVR_DBG_ERROR, "PVRSRVCreateDeviceMemContextKM: "
+			  "Failed BM_CreateContext");
 		return PVRSRV_ERROR_OUT_OF_MEMORY;
 	}
 
-	for (i = 0; i < ui32HeapCount; i++) {
+	for (i = 0; i < ui32HeapCount; i++)
 		switch (psDeviceMemoryHeap[i].DevMemHeapType) {
 		case DEVICE_MEMORY_HEAP_SHARED_EXPORTED:
 			{
@@ -164,7 +150,6 @@ IMG_EXPORT
 				break;
 			}
 		}
-	}
 
 	*pui32ClientHeapCount = ui32ClientHeapCount;
 	*phDevMemContext = hDevMemContext;
@@ -172,46 +157,42 @@ IMG_EXPORT
 	return PVRSRV_OK;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVDestroyDeviceMemContextKM(IMG_HANDLE
-							      hDevCookie,
-							      IMG_HANDLE
-							      hDevMemContext,
-							      IMG_BOOL *
-							      pbDestroyed)
+enum PVRSRV_ERROR PVRSRVDestroyDeviceMemContextKM(void *hDevCookie,
+					     void *hDevMemContext,
+					     IMG_BOOL *pbDestroyed)
 {
+	int destroyed;
+
 	PVR_UNREFERENCED_PARAMETER(hDevCookie);
 
-	return BM_DestroyContext(hDevMemContext, pbDestroyed);
+	destroyed = pvr_put_ctx(hDevMemContext);
+	if (pbDestroyed)
+		*pbDestroyed = destroyed ? IMG_TRUE : IMG_FALSE;
+
+	return PVRSRV_OK;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVGetDeviceMemHeapInfoKM(IMG_HANDLE
-							   hDevCookie,
-							   IMG_HANDLE
-							   hDevMemContext,
-							   IMG_UINT32 *
-							   pui32ClientHeapCount,
-							   PVRSRV_HEAP_INFO *
-							   psHeapInfo
-							   , IMG_BOOL * pbShared
-    )
+enum PVRSRV_ERROR PVRSRVGetDeviceMemHeapInfoKM(void *hDevCookie,
+					  void *hDevMemContext,
+					  u32 *pui32ClientHeapCount,
+					  struct PVRSRV_HEAP_INFO *psHeapInfo,
+					  IMG_BOOL *pbShared)
 {
-	PVRSRV_DEVICE_NODE *psDeviceNode;
-	IMG_UINT32 ui32HeapCount, ui32ClientHeapCount = 0;
-	DEVICE_MEMORY_HEAP_INFO *psDeviceMemoryHeap;
-	IMG_HANDLE hDevMemHeap;
-	IMG_UINT32 i;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode;
+	u32 ui32HeapCount, ui32ClientHeapCount = 0;
+	struct DEVICE_MEMORY_HEAP_INFO *psDeviceMemoryHeap;
+	void *hDevMemHeap;
+	u32 i;
 
-	psDeviceNode = (PVRSRV_DEVICE_NODE *) hDevCookie;
-	PVR_ASSERT(psDeviceNode != IMG_NULL);
+	psDeviceNode = (struct PVRSRV_DEVICE_NODE *)hDevCookie;
+	PVR_ASSERT(psDeviceNode != NULL);
 
 	ui32HeapCount = psDeviceNode->sDevMemoryInfo.ui32HeapCount;
 	psDeviceMemoryHeap = psDeviceNode->sDevMemoryInfo.psDeviceMemoryHeap;
 
 	PVR_ASSERT(ui32HeapCount <= PVRSRV_MAX_CLIENT_HEAPS);
 
-	for (i = 0; i < ui32HeapCount; i++) {
+	for (i = 0; i < ui32HeapCount; i++)
 		switch (psDeviceMemoryHeap[i].DevMemHeapType) {
 		case DEVICE_MEMORY_HEAP_SHARED_EXPORTED:
 			{
@@ -254,131 +235,115 @@ IMG_EXPORT
 				break;
 			}
 		}
-	}
 
 	*pui32ClientHeapCount = ui32ClientHeapCount;
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR AllocDeviceMem(IMG_HANDLE hDevCookie,
-				   IMG_HANDLE hDevMemHeap,
-				   IMG_UINT32 ui32Flags,
-				   IMG_UINT32 ui32Size,
-				   IMG_UINT32 ui32Alignment,
-				   PVRSRV_KERNEL_MEM_INFO ** ppsMemInfo)
+static enum PVRSRV_ERROR AllocDeviceMem(void *hDevCookie, void *hDevMemHeap,
+				   u32 ui32Flags, u32 ui32Size,
+				   u32 ui32Alignment,
+				   struct PVRSRV_KERNEL_MEM_INFO **ppsMemInfo)
 {
-	PVRSRV_KERNEL_MEM_INFO *psMemInfo;
-	BM_HANDLE hBuffer;
+	struct PVRSRV_KERNEL_MEM_INFO *psMemInfo;
+	void *hBuffer;
 
-	PVRSRV_MEMBLK *psMemBlock;
+	struct PVRSRV_MEMBLK *psMemBlock;
 	IMG_BOOL bBMError;
 
 	PVR_UNREFERENCED_PARAMETER(hDevCookie);
 
-	*ppsMemInfo = IMG_NULL;
+	*ppsMemInfo = NULL;
 
 	if (OSAllocMem(PVRSRV_OS_PAGEABLE_HEAP,
-		       sizeof(PVRSRV_KERNEL_MEM_INFO),
-		       (IMG_VOID **) & psMemInfo, IMG_NULL) != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "AllocDeviceMem: Failed to alloc memory for block"));
-		return (PVRSRV_ERROR_OUT_OF_MEMORY);
+		       sizeof(struct PVRSRV_KERNEL_MEM_INFO),
+		       (void **) &psMemInfo, NULL) != PVRSRV_OK) {
+		PVR_DPF(PVR_DBG_ERROR,
+			 "AllocDeviceMem: Failed to alloc memory for block");
+		return PVRSRV_ERROR_OUT_OF_MEMORY;
 	}
 
 	psMemBlock = &(psMemInfo->sMemBlk);
 
 	psMemInfo->ui32Flags = ui32Flags | PVRSRV_MEM_RAM_BACKED_ALLOCATION;
 
-	bBMError = BM_Alloc(hDevMemHeap,
-			    IMG_NULL,
-			    ui32Size,
+	bBMError = BM_Alloc(hDevMemHeap, NULL, ui32Size,
 			    &psMemInfo->ui32Flags, ui32Alignment, &hBuffer);
 
 	if (!bBMError) {
-		PVR_DPF((PVR_DBG_ERROR, "AllocDeviceMem: BM_Alloc Failed"));
+		PVR_DPF(PVR_DBG_ERROR, "AllocDeviceMem: BM_Alloc Failed");
 		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,
-			  sizeof(PVRSRV_KERNEL_MEM_INFO), psMemInfo, IMG_NULL);
+			  sizeof(struct PVRSRV_KERNEL_MEM_INFO), psMemInfo,
+			  NULL);
 		return PVRSRV_ERROR_OUT_OF_MEMORY;
 	}
 
 	psMemBlock->sDevVirtAddr = BM_HandleToDevVaddr(hBuffer);
 	psMemBlock->hOSMemHandle = BM_HandleToOSMemHandle(hBuffer);
 
-	psMemBlock->hBuffer = (IMG_HANDLE) hBuffer;
-
+	psMemBlock->hBuffer = (void *) hBuffer;
 	psMemInfo->pvLinAddrKM = BM_HandleToCpuVaddr(hBuffer);
-
 	psMemInfo->sDevVAddr = psMemBlock->sDevVirtAddr;
-
 	psMemInfo->ui32AllocSize = ui32Size;
-
 	*ppsMemInfo = psMemInfo;
 
-	return (PVRSRV_OK);
+	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR FreeDeviceMem(PVRSRV_KERNEL_MEM_INFO * psMemInfo)
+static enum PVRSRV_ERROR FreeDeviceMem(struct PVRSRV_KERNEL_MEM_INFO *psMemInfo)
 {
-	BM_HANDLE hBuffer;
+	void *hBuffer;
 
-	if (!psMemInfo) {
+	if (!psMemInfo)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
 	hBuffer = psMemInfo->sMemBlk.hBuffer;
-
 	BM_Free(hBuffer, psMemInfo->ui32Flags);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,
+		  sizeof(struct PVRSRV_KERNEL_MEM_INFO),
+		  psMemInfo, NULL);
 
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_KERNEL_MEM_INFO),
-		  psMemInfo, IMG_NULL);
-
-	return (PVRSRV_OK);
+	return PVRSRV_OK;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVAllocSyncInfoKM(IMG_HANDLE hDevCookie,
-						    IMG_HANDLE hDevMemContext,
-						    PVRSRV_KERNEL_SYNC_INFO **
-						    ppsKernelSyncInfo)
+enum PVRSRV_ERROR PVRSRVAllocSyncInfoKM(void *hDevCookie, void *hDevMemContext,
+		    struct PVRSRV_KERNEL_SYNC_INFO **ppsKernelSyncInfo)
 {
-	IMG_HANDLE hSyncDevMemHeap;
-	DEVICE_MEMORY_INFO *psDevMemoryInfo;
-	BM_CONTEXT *pBMContext;
-	PVRSRV_ERROR eError;
-	PVRSRV_KERNEL_SYNC_INFO *psKernelSyncInfo;
-	PVRSRV_SYNC_DATA *psSyncData;
+	void *hSyncDevMemHeap;
+	struct DEVICE_MEMORY_INFO *psDevMemoryInfo;
+	struct BM_CONTEXT *pBMContext;
+	enum PVRSRV_ERROR eError;
+	struct PVRSRV_KERNEL_SYNC_INFO *psKernelSyncInfo;
+	struct PVRSRV_SYNC_DATA *psSyncData;
 
 	eError = OSAllocMem(PVRSRV_OS_PAGEABLE_HEAP,
-			    sizeof(PVRSRV_KERNEL_SYNC_INFO),
-			    (IMG_VOID **) & psKernelSyncInfo, IMG_NULL);
+			    sizeof(struct PVRSRV_KERNEL_SYNC_INFO),
+			    (void **) &psKernelSyncInfo, NULL);
 	if (eError != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "PVRSRVAllocSyncInfoKM: Failed to alloc memory"));
+		PVR_DPF(PVR_DBG_ERROR,
+			 "PVRSRVAllocSyncInfoKM: Failed to alloc memory");
 		return PVRSRV_ERROR_OUT_OF_MEMORY;
 	}
 
-	pBMContext = (BM_CONTEXT *) hDevMemContext;
+	pBMContext = (struct BM_CONTEXT *)hDevMemContext;
 	psDevMemoryInfo = &pBMContext->psDeviceNode->sDevMemoryInfo;
 
-	hSyncDevMemHeap =
-	    psDevMemoryInfo->psDeviceMemoryHeap[psDevMemoryInfo->
+	hSyncDevMemHeap = psDevMemoryInfo->psDeviceMemoryHeap[psDevMemoryInfo->
 						ui32SyncHeapID].hDevMemHeap;
 
-	eError = AllocDeviceMem(hDevCookie,
-				hSyncDevMemHeap,
-				0,
-				sizeof(PVRSRV_SYNC_DATA),
-				sizeof(IMG_UINT32),
+	eError = AllocDeviceMem(hDevCookie, hSyncDevMemHeap, 0,
+				sizeof(struct PVRSRV_SYNC_DATA),
+				sizeof(u32),
 				&psKernelSyncInfo->psSyncDataMemInfoKM);
 
 	if (eError != PVRSRV_OK) {
 
-		PVR_DPF((PVR_DBG_ERROR,
-			 "PVRSRVAllocSyncInfoKM: Failed to alloc memory"));
+		PVR_DPF(PVR_DBG_ERROR,
+			 "PVRSRVAllocSyncInfoKM: Failed to alloc memory");
 		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,
-			  sizeof(PVRSRV_KERNEL_SYNC_INFO), psKernelSyncInfo,
-			  IMG_NULL);
+			  sizeof(struct PVRSRV_KERNEL_SYNC_INFO),
+			  psKernelSyncInfo, NULL);
 		return PVRSRV_ERROR_OUT_OF_MEMORY;
 	}
 
@@ -395,131 +360,111 @@ IMG_EXPORT
 
 	psKernelSyncInfo->sWriteOpsCompleteDevVAddr.uiAddr =
 	    psKernelSyncInfo->psSyncDataMemInfoKM->sDevVAddr.uiAddr +
-	    offsetof(PVRSRV_SYNC_DATA, ui32WriteOpsComplete);
+	    offsetof(struct PVRSRV_SYNC_DATA, ui32WriteOpsComplete);
 	psKernelSyncInfo->sReadOpsCompleteDevVAddr.uiAddr =
 	    psKernelSyncInfo->psSyncDataMemInfoKM->sDevVAddr.uiAddr +
-	    offsetof(PVRSRV_SYNC_DATA, ui32ReadOpsComplete);
+	    offsetof(struct PVRSRV_SYNC_DATA, ui32ReadOpsComplete);
 
-	psKernelSyncInfo->psSyncDataMemInfoKM->psKernelSyncInfo = IMG_NULL;
+	psKernelSyncInfo->psSyncDataMemInfoKM->psKernelSyncInfo = NULL;
 
 	*ppsKernelSyncInfo = psKernelSyncInfo;
 
 	return PVRSRV_OK;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVFreeSyncInfoKM(PVRSRV_KERNEL_SYNC_INFO *
-						   psKernelSyncInfo)
+enum PVRSRV_ERROR PVRSRVFreeSyncInfoKM(
+			struct PVRSRV_KERNEL_SYNC_INFO *psKernelSyncInfo)
 {
 	FreeDeviceMem(psKernelSyncInfo->psSyncDataMemInfoKM);
-	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_KERNEL_SYNC_INFO),
-		  psKernelSyncInfo, IMG_NULL);
+	OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,
+		sizeof(struct PVRSRV_KERNEL_SYNC_INFO), psKernelSyncInfo, NULL);
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR FreeDeviceMemCallBack(IMG_PVOID pvParam,
-					  IMG_UINT32 ui32Param)
+static enum PVRSRV_ERROR FreeDeviceMemCallBack(void *pvParam, u32 ui32Param)
 {
-	PVRSRV_ERROR eError = PVRSRV_OK;
-	PVRSRV_KERNEL_MEM_INFO *psMemInfo = pvParam;
+	enum PVRSRV_ERROR eError = PVRSRV_OK;
+	struct PVRSRV_KERNEL_MEM_INFO *psMemInfo = pvParam;
 
 	PVR_UNREFERENCED_PARAMETER(ui32Param);
 
-	if (psMemInfo->psKernelSyncInfo) {
+	if (psMemInfo->psKernelSyncInfo)
 		eError = PVRSRVFreeSyncInfoKM(psMemInfo->psKernelSyncInfo);
-	}
 
-	if (eError == PVRSRV_OK) {
+	if (eError == PVRSRV_OK)
 		eError = FreeDeviceMem(psMemInfo);
-	}
 
 	return eError;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVFreeDeviceMemKM(IMG_HANDLE hDevCookie,
-						    PVRSRV_KERNEL_MEM_INFO *
-						    psMemInfo)
+enum PVRSRV_ERROR PVRSRVFreeDeviceMemKM(void *hDevCookie,
+				   struct PVRSRV_KERNEL_MEM_INFO *psMemInfo)
 {
-	PVRSRV_ERROR eError = PVRSRV_OK;
-
 	PVR_UNREFERENCED_PARAMETER(hDevCookie);
 
-	if (!psMemInfo) {
+	if (!psMemInfo)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	if (psMemInfo->sMemBlk.hResItem != IMG_NULL) {
-		eError = ResManFreeResByPtr(psMemInfo->sMemBlk.hResItem);
-	} else {
-
+	if (psMemInfo->sMemBlk.hResItem != NULL)
+		ResManFreeResByPtr(psMemInfo->sMemBlk.hResItem);
+	else
 		FreeDeviceMemCallBack(psMemInfo, 0);
-	}
 
-	return eError;
+	return PVRSRV_OK;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVAllocDeviceMemKM(IMG_HANDLE hDevCookie,
-						     PVRSRV_PER_PROCESS_DATA *
-						     psPerProc,
-						     IMG_HANDLE hDevMemHeap,
-						     IMG_UINT32 ui32Flags,
-						     IMG_UINT32 ui32Size,
-						     IMG_UINT32 ui32Alignment,
-						     PVRSRV_KERNEL_MEM_INFO **
-						     ppsMemInfo)
+enum PVRSRV_ERROR PVRSRVAllocDeviceMemKM(void *hDevCookie,
+				     struct PVRSRV_PER_PROCESS_DATA *psPerProc,
+				     void *hDevMemHeap, u32 ui32Flags,
+				     u32 ui32Size, u32 ui32Alignment,
+				     struct PVRSRV_KERNEL_MEM_INFO **ppsMemInfo)
 {
-	PVRSRV_KERNEL_MEM_INFO *psMemInfo;
-	PVRSRV_ERROR eError;
-	BM_HEAP *psBMHeap;
-	IMG_HANDLE hDevMemContext;
+	struct PVRSRV_KERNEL_MEM_INFO *psMemInfo;
+	enum PVRSRV_ERROR eError;
+	struct BM_HEAP *psBMHeap;
+	void *hDevMemContext;
 
-	if (!hDevMemHeap || (ui32Size == 0)) {
+	if (!hDevMemHeap || (ui32Size == 0))
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	eError = AllocDeviceMem(hDevCookie,
-				hDevMemHeap,
-				ui32Flags, ui32Size, ui32Alignment, &psMemInfo);
+	eError = AllocDeviceMem(hDevCookie, hDevMemHeap, ui32Flags, ui32Size,
+				ui32Alignment, &psMemInfo);
 
-	if (eError != PVRSRV_OK) {
+	if (eError != PVRSRV_OK)
 		return eError;
-	}
 
 	if (ui32Flags & PVRSRV_MEM_NO_SYNCOBJ) {
-		psMemInfo->psKernelSyncInfo = IMG_NULL;
+		psMemInfo->psKernelSyncInfo = NULL;
 	} else {
 
-		psBMHeap = (BM_HEAP *) hDevMemHeap;
-		hDevMemContext = (IMG_HANDLE) psBMHeap->pBMContext;
+		psBMHeap = (struct BM_HEAP *)hDevMemHeap;
+		hDevMemContext = (void *) psBMHeap->pBMContext;
 		eError = PVRSRVAllocSyncInfoKM(hDevCookie,
 					       hDevMemContext,
 					       &psMemInfo->psKernelSyncInfo);
-		if (eError != PVRSRV_OK) {
+		if (eError != PVRSRV_OK)
 			goto free_mainalloc;
-		}
 	}
 
 	*ppsMemInfo = psMemInfo;
 
 	if (ui32Flags & PVRSRV_MEM_NO_RESMAN) {
-		psMemInfo->sMemBlk.hResItem = IMG_NULL;
+		psMemInfo->sMemBlk.hResItem = NULL;
 	} else {
 
 		psMemInfo->sMemBlk.hResItem =
 		    ResManRegisterRes(psPerProc->hResManContext,
 				      RESMAN_TYPE_DEVICEMEM_ALLOCATION,
 				      psMemInfo, 0, FreeDeviceMemCallBack);
-		if (psMemInfo->sMemBlk.hResItem == IMG_NULL) {
+		if (psMemInfo->sMemBlk.hResItem == NULL) {
 
 			eError = PVRSRV_ERROR_OUT_OF_MEMORY;
 			goto free_mainalloc;
 		}
 	}
 
-	return (PVRSRV_OK);
+	return PVRSRV_OK;
 
 free_mainalloc:
 	FreeDeviceMem(psMemInfo);
@@ -527,19 +472,16 @@ free_mainalloc:
 	return eError;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVDissociateDeviceMemKM(IMG_HANDLE hDevCookie,
-							  PVRSRV_KERNEL_MEM_INFO
-							  * psMemInfo)
+enum PVRSRV_ERROR PVRSRVDissociateDeviceMemKM(void *hDevCookie,
+				  struct PVRSRV_KERNEL_MEM_INFO *psMemInfo)
 {
-	PVRSRV_ERROR eError = PVRSRV_OK;
-	PVRSRV_DEVICE_NODE *psDeviceNode = hDevCookie;
+	enum PVRSRV_ERROR eError = PVRSRV_OK;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode = hDevCookie;
 
 	PVR_UNREFERENCED_PARAMETER(hDevCookie);
 
-	if (!psMemInfo) {
+	if (!psMemInfo)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
 	ResManDissociateRes(psMemInfo->sMemBlk.hResItem,
 			    psDeviceNode->hResManContext);
@@ -547,12 +489,8 @@ IMG_EXPORT
 	return eError;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVGetFreeDeviceMemKM(IMG_UINT32 ui32Flags,
-						       IMG_UINT32 * pui32Total,
-						       IMG_UINT32 * pui32Free,
-						       IMG_UINT32 *
-						       pui32LargestBlock)
+enum PVRSRV_ERROR PVRSRVGetFreeDeviceMemKM(u32 ui32Flags, u32 *pui32Total,
+				      u32 *pui32Free, u32 *pui32LargestBlock)
 {
 
 	PVR_UNREFERENCED_PARAMETER(ui32Flags);
@@ -563,163 +501,75 @@ IMG_EXPORT
 	return PVRSRV_OK;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVUnwrapExtMemoryKM(PVRSRV_KERNEL_MEM_INFO *
-						      psMemInfo)
+enum PVRSRV_ERROR PVRSRVUnwrapExtMemoryKM(
+		struct PVRSRV_KERNEL_MEM_INFO *psMemInfo)
 {
-	if (!psMemInfo) {
+	if (!psMemInfo)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	return ResManFreeResByPtr(psMemInfo->sMemBlk.hResItem);
+	ResManFreeResByPtr(psMemInfo->sMemBlk.hResItem);
+	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR UnwrapExtMemoryCallBack(IMG_PVOID pvParam,
-					    IMG_UINT32 ui32Param)
+static enum PVRSRV_ERROR UnwrapExtMemoryCallBack(void *pvParam, u32 ui32Param)
 {
-	PVRSRV_ERROR eError = PVRSRV_OK;
-	PVRSRV_KERNEL_MEM_INFO *psMemInfo = pvParam;
-	IMG_HANDLE hOSWrapMem = IMG_NULL;
-	BM_BUF *psBMBuf;
+	enum PVRSRV_ERROR eError = PVRSRV_OK;
+	struct PVRSRV_KERNEL_MEM_INFO *psMemInfo = pvParam;
+	void *hOSWrapMem = NULL;
+	struct BM_BUF *psBMBuf;
 
 	PVR_UNREFERENCED_PARAMETER(ui32Param);
 
-	psBMBuf = (BM_BUF *) psMemInfo->sMemBlk.hBuffer;
+	psBMBuf = (struct BM_BUF *)psMemInfo->sMemBlk.hBuffer;
 
 	if ((psBMBuf->ui32RefCount == 1) && (psMemInfo->psKernelSyncInfo)) {
 		eError = PVRSRVFreeSyncInfoKM(psMemInfo->psKernelSyncInfo);
 		hOSWrapMem = psBMBuf->hOSWrapMem;
 	}
 
-	if (eError == PVRSRV_OK) {
+	if (eError == PVRSRV_OK)
 		eError = FreeDeviceMem(psMemInfo);
-	}
 
-	if (hOSWrapMem) {
+	if (hOSWrapMem)
 		OSReleasePhysPageAddr(hOSWrapMem, IMG_TRUE);
-	}
 
 	return eError;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVIsWrappedExtMemoryKM(IMG_HANDLE hDevCookie,
-							   PVRSRV_PER_PROCESS_DATA
-							   *psPerProc,
-							   IMG_UINT32
-							   *pui32ByteSize,
-							   IMG_VOID
-							   **pvLinAddr)
+enum PVRSRV_ERROR PVRSRVWrapExtMemoryKM(void *hDevCookie,
+				   struct PVRSRV_PER_PROCESS_DATA *psPerProc,
+				   u32 ui32ByteSize, u32 ui32PageOffset,
+				   IMG_BOOL bPhysContig,
+				   struct IMG_SYS_PHYADDR *psExtSysPAddr,
+				   void *pvLinAddr,
+				   struct PVRSRV_KERNEL_MEM_INFO **ppsMemInfo)
 {
-	DEVICE_MEMORY_INFO *psDevMemoryInfo;
-	IMG_UINT32 ui32HostPageSize = HOST_PAGESIZE();
-	PVRSRV_DEVICE_NODE *psDeviceNode;
-	PVRSRV_ERROR eError;
-	IMG_SYS_PHYADDR sIntSysPAddr;
-	IMG_HANDLE hOSWrapMem = IMG_NULL;
-	IMG_HANDLE hDevMemHeap;
-	IMG_UINT32 ui32PageOffset = 0;
-
-	IMG_UINT32 ui32ReturnedByteSize = *pui32ByteSize;
-
-	eError = PVRSRV_ERROR_OUT_OF_MEMORY;
-
-	psDeviceNode = (PVRSRV_DEVICE_NODE *)hDevCookie;
-	PVR_ASSERT(psDeviceNode != IMG_NULL);
-	psDevMemoryInfo = &psDeviceNode->sDevMemoryInfo;
-
-	hDevMemHeap = psDevMemoryInfo->psDeviceMemoryHeap[SGX_GENERAL_MAPPING_HEAP_ID].hDevMemHeap;
-
-	if (pvLinAddr) {
-		ui32PageOffset = ((IMG_UINT32)*pvLinAddr) & ~PAGE_MASK;
-		*pvLinAddr = (IMG_VOID *)((IMG_UINT32)*pvLinAddr & PAGE_MASK);
-		ui32ReturnedByteSize += ui32PageOffset;
-
-		/* let's start by getting the address of the first page */
-		eError = OSAcquirePhysPageAddr(*pvLinAddr,
-										ui32HostPageSize,
-										&sIntSysPAddr,
-										&hOSWrapMem,
-										IMG_FALSE);
-		if (eError != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR, "PVRSRVIsWrappedExtMemoryKM: Failed to alloc memory for block"));
-			eError = PVRSRV_ERROR_OUT_OF_MEMORY;
-			goto ErrorExitPhase1;
-		}
-
-		OSReleasePhysPageAddr(hOSWrapMem, IMG_FALSE);
-		hOSWrapMem = IMG_NULL;
-
-		/* now check if this memory address is already wrapped */
-		if (BM_IsWrappedCheckSize(hDevMemHeap,
-							ui32PageOffset,
-							sIntSysPAddr,
-							*pui32ByteSize)) {
-			/* already wrapped */
-			eError = PVRSRV_OK;
-		} else {
-			/* not mapped in this heap */
-			/* try the alternative heap */
-			hDevMemHeap = psDevMemoryInfo->psDeviceMemoryHeap[SGX_ALT_MAPPING_HEAP_ID].hDevMemHeap;
-
-			if (BM_IsWrappedCheckSize(hDevMemHeap,
-								ui32PageOffset,
-								sIntSysPAddr,
-								*pui32ByteSize)) {
-				/* already wrapped */
-				eError = PVRSRV_OK;
-			} else {
-				eError = PVRSRV_ERROR_BAD_MAPPING;
-			}
-		}
-	}
-
-ErrorExitPhase1:
-
-	*pui32ByteSize = ui32ReturnedByteSize;
-
-	return eError;
-}
-
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVWrapExtMemoryKM(IMG_HANDLE hDevCookie,
-						    PVRSRV_PER_PROCESS_DATA *
-						    psPerProc,
-						    IMG_UINT32 ui32ByteSize,
-						    IMG_UINT32 ui32PageOffset,
-						    IMG_BOOL bPhysContig,
-						    IMG_SYS_PHYADDR *
-						    psExtSysPAddr,
-						    IMG_VOID * pvLinAddr,
-						    PVRSRV_KERNEL_MEM_INFO **
-						    ppsMemInfo)
-{
-	PVRSRV_KERNEL_MEM_INFO *psMemInfo = IMG_NULL;
-	DEVICE_MEMORY_INFO *psDevMemoryInfo;
-	IMG_UINT32 ui32HostPageSize = HOST_PAGESIZE();
-	IMG_HANDLE hDevMemHeap, hDevMemContext;
-	PVRSRV_DEVICE_NODE *psDeviceNode;
-	BM_HANDLE hBuffer;
-	PVRSRV_MEMBLK *psMemBlock;
+	struct PVRSRV_KERNEL_MEM_INFO *psMemInfo = NULL;
+	struct DEVICE_MEMORY_INFO *psDevMemoryInfo;
+	u32 ui32HostPageSize = HOST_PAGESIZE();
+	void *hDevMemHeap, *hDevMemContext;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode;
+	void *hBuffer;
+	struct PVRSRV_MEMBLK *psMemBlock;
 	IMG_BOOL bBMError;
-	BM_HEAP *psBMHeap;
-	PVRSRV_ERROR eError;
-	IMG_VOID *pvPageAlignedCPUVAddr;
-	IMG_SYS_PHYADDR *psIntSysPAddr = IMG_NULL;
-	IMG_HANDLE hOSWrapMem = IMG_NULL;
-	BM_BUF *psBMBuf;
-	IMG_SYS_PHYADDR *pPageList = psExtSysPAddr;
-	IMG_UINT32 ui32PageCount;
+	struct BM_HEAP *psBMHeap;
+	enum PVRSRV_ERROR eError;
+	void *pvPageAlignedCPUVAddr;
+	struct IMG_SYS_PHYADDR *psIntSysPAddr = NULL;
+	void *hOSWrapMem = NULL;
+	struct BM_BUF *psBMBuf;
+	struct IMG_SYS_PHYADDR *pPageList = psExtSysPAddr;
+	u32 ui32PageCount;
 
-	IMG_UINT32 ui32CalculatedPageOffset = ((IMG_UINT32)pvLinAddr) & ~PAGE_MASK;
+	u32 ui32CalculatedPageOffset = ((u32)pvLinAddr) & ~PAGE_MASK;
 	if (ui32CalculatedPageOffset != ui32PageOffset)	{
-		PVR_DPF((PVR_DBG_ERROR,
-			"PVRSRVWrapExtMemoryKM: offset from address not match offset param"));
+		PVR_DPF(PVR_DBG_ERROR, "PVRSRVWrapExtMemoryKM: "
+			"offset from address not match offset param");
 		return PVRSRV_ERROR_BAD_MAPPING;
 	}
 
-	psDeviceNode = (PVRSRV_DEVICE_NODE *) hDevCookie;
-	PVR_ASSERT(psDeviceNode != IMG_NULL);
+	psDeviceNode = (struct PVRSRV_DEVICE_NODE *)hDevCookie;
+	PVR_ASSERT(psDeviceNode != NULL);
 	psDevMemoryInfo = &psDeviceNode->sDevMemoryInfo;
 	hDevMemHeap =
 	    psDevMemoryInfo->psDeviceMemoryHeap[psDevMemoryInfo->
@@ -730,35 +580,37 @@ IMG_EXPORT
 
 	if (pvLinAddr) {
 		pvPageAlignedCPUVAddr =
-		    (IMG_VOID *) ((IMG_UINT8 *) pvLinAddr - ui32PageOffset);
+		    (void *) ((u8 *) pvLinAddr - ui32PageOffset);
 
 		if (OSAllocMem(PVRSRV_OS_PAGEABLE_HEAP,
-			       ui32PageCount * sizeof(IMG_SYS_PHYADDR),
-			       (IMG_VOID **) & psIntSysPAddr,
-			       IMG_NULL) != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "PVRSRVWrapExtMemoryKM: Failed to alloc memory for block"));
+			       ui32PageCount * sizeof(struct IMG_SYS_PHYADDR),
+			       (void **) &psIntSysPAddr,
+			       NULL) != PVRSRV_OK) {
+			PVR_DPF(PVR_DBG_ERROR, "PVRSRVWrapExtMemoryKM: "
+					"Failed to alloc memory for block");
 			return PVRSRV_ERROR_OUT_OF_MEMORY;
 		}
 
 		/* let's start by getting the address of the first page */
 		eError = OSAcquirePhysPageAddr(pvPageAlignedCPUVAddr,
 					       ui32HostPageSize,
-					       psIntSysPAddr, &hOSWrapMem, IMG_TRUE);
+					       psIntSysPAddr, &hOSWrapMem,
+					       IMG_TRUE);
 		if (eError != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "PVRSRVWrapExtMemoryKM: Failed to alloc memory for block"));
+			PVR_DPF(PVR_DBG_ERROR, "PVRSRVWrapExtMemoryKM: "
+					"Failed to alloc memory for block");
 			eError = PVRSRV_ERROR_OUT_OF_MEMORY;
 			goto ErrorExitPhase1;
 		}
 		/* now check if this memory address is already wrapped */
-		if (BM_IsWrapped(hDevMemHeap, ui32PageOffset, psIntSysPAddr[0])) {
+		if (BM_IsWrapped(hDevMemHeap, ui32PageOffset,
+				 psIntSysPAddr[0])) {
 			/* already wrapped */
 			OSReleasePhysPageAddr(hOSWrapMem, IMG_TRUE);
-			hOSWrapMem = IMG_NULL;
+			hOSWrapMem = NULL;
 		} else if (ui32PageCount > 1) {
 			OSReleasePhysPageAddr(hOSWrapMem, IMG_TRUE);
-			hOSWrapMem = IMG_NULL;
+			hOSWrapMem = NULL;
 			/* the memory is going to wrapped for the first time,
 			 * so we need full page list */
 			eError = OSAcquirePhysPageAddr(pvPageAlignedCPUVAddr,
@@ -768,8 +620,8 @@ IMG_EXPORT
 						       &hOSWrapMem,
 						       IMG_TRUE);
 			if (eError != PVRSRV_OK) {
-				PVR_DPF((PVR_DBG_ERROR,
-					 "PVRSRVWrapExtMemoryKM: Failed to alloc memory for block"));
+				PVR_DPF(PVR_DBG_ERROR, "PVRSRVWrapExtMemoryKM:"
+					  " Failed to alloc memory for block");
 				eError = PVRSRV_ERROR_OUT_OF_MEMORY;
 				goto ErrorExitPhase1;
 			}
@@ -781,24 +633,19 @@ IMG_EXPORT
 	}
 
 	if (OSAllocMem(PVRSRV_OS_PAGEABLE_HEAP,
-		       sizeof(PVRSRV_KERNEL_MEM_INFO),
-		       (IMG_VOID **) & psMemInfo, IMG_NULL) != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "PVRSRVWrapExtMemoryKM: Failed to alloc memory for block"));
+		       sizeof(struct PVRSRV_KERNEL_MEM_INFO),
+		       (void **) &psMemInfo, NULL) != PVRSRV_OK) {
+		PVR_DPF(PVR_DBG_ERROR, "PVRSRVWrapExtMemoryKM: "
+					"Failed to alloc memory for block");
 		eError = PVRSRV_ERROR_OUT_OF_MEMORY;
 		goto ErrorExitPhase2;
 	}
 
 	OSMemSet(psMemInfo, 0, sizeof(*psMemInfo));
-
 	psMemBlock = &(psMemInfo->sMemBlk);
-
-	bBMError = BM_Wrap(hDevMemHeap,
-			   ui32ByteSize,
-			   ui32PageOffset,
-			   bPhysContig,
-			   psExtSysPAddr,
-			   IMG_TRUE, IMG_NULL, &psMemInfo->ui32Flags, &hBuffer);
+	bBMError = BM_Wrap(hDevMemHeap, ui32ByteSize, ui32PageOffset,
+			   bPhysContig, psExtSysPAddr,
+			   IMG_TRUE, NULL, &psMemInfo->ui32Flags, &hBuffer);
 	if (!bBMError) {
 		/* Alloc failed from current mapping heap, try the other one */
 		psDevMemoryInfo->ui32MappingHeapID =
@@ -807,42 +654,39 @@ IMG_EXPORT
 		    SGX_GENERAL_MAPPING_HEAP_ID;
 		hDevMemHeap =
 		    psDevMemoryInfo->psDeviceMemoryHeap[psDevMemoryInfo->
-							ui32MappingHeapID].
-		    hDevMemHeap;
+						ui32MappingHeapID]. hDevMemHeap;
 		bBMError =
 		    BM_Wrap(hDevMemHeap, ui32ByteSize, ui32PageOffset,
-			    bPhysContig, psExtSysPAddr, IMG_TRUE, IMG_NULL,
+			    bPhysContig, psExtSysPAddr, IMG_TRUE, NULL,
 			    &psMemInfo->ui32Flags, &hBuffer);
 		if (!bBMError) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "PVRSRVWrapExtMemoryKM: BM_Wrap Failed"));
+			PVR_DPF(PVR_DBG_ERROR,
+				 "PVRSRVWrapExtMemoryKM: BM_Wrap Failed");
 			eError = PVRSRV_ERROR_BAD_MAPPING;
 			goto ErrorExitPhase2;
 		}
 	}
 	/* wrap was successful and BM_Wrap has taken ownership of the page list,
 	 * clear psIntSysPAddr here, so we don't double free the memory */
-	psIntSysPAddr = IMG_NULL;
+	psIntSysPAddr = NULL;
 
 	psMemBlock->sDevVirtAddr = BM_HandleToDevVaddr(hBuffer);
 	psMemBlock->hOSMemHandle = BM_HandleToOSMemHandle(hBuffer);
 
-	psMemBlock->hBuffer = (IMG_HANDLE) hBuffer;
+	psMemBlock->hBuffer = (void *) hBuffer;
 
 	psMemInfo->pvLinAddrKM = BM_HandleToCpuVaddr(hBuffer);
 	psMemInfo->sDevVAddr = psMemBlock->sDevVirtAddr;
 	psMemInfo->ui32AllocSize = ui32ByteSize;
 
-	psBMHeap = (BM_HEAP *) hDevMemHeap;
-	hDevMemContext = (IMG_HANDLE) psBMHeap->pBMContext;
-	psBMBuf = (BM_BUF *) hBuffer;
+	psBMHeap = (struct BM_HEAP *)hDevMemHeap;
+	hDevMemContext = (void *) psBMHeap->pBMContext;
+	psBMBuf = (struct BM_BUF *)hBuffer;
 	if (psBMBuf->ui32RefCount == 1) {
-		eError = PVRSRVAllocSyncInfoKM(hDevCookie,
-					       hDevMemContext,
+		eError = PVRSRVAllocSyncInfoKM(hDevCookie, hDevMemContext,
 					       &psMemInfo->psKernelSyncInfo);
-		if (eError != PVRSRV_OK) {
+		if (eError != PVRSRV_OK)
 			goto ErrorExitPhase2;
-		}
 		psBMBuf->pvKernelSyncInfo = psMemInfo->psKernelSyncInfo;
 		psBMBuf->hOSWrapMem = hOSWrapMem;
 	} else {
@@ -855,85 +699,77 @@ IMG_EXPORT
 			      UnwrapExtMemoryCallBack);
 	/* check if we were passed a page list
 	 * but we didn't use use it */
-	if (pPageList && (pPageList != psExtSysPAddr)) {
+	if (pPageList && (pPageList != psExtSysPAddr))
 		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,
-			  ui32PageCount * sizeof(IMG_SYS_PHYADDR),
-			  (IMG_VOID *) pPageList, 0);
-	}
+			  ui32PageCount * sizeof(struct IMG_SYS_PHYADDR),
+			  (void *)pPageList, NULL);
 
 	*ppsMemInfo = psMemInfo;
 
 	return PVRSRV_OK;
 
 ErrorExitPhase2:
-	if (psMemInfo) {
+	if (psMemInfo)
 		FreeDeviceMem(psMemInfo);
-	}
 
 	if (hOSWrapMem)
 		OSReleasePhysPageAddr(hOSWrapMem, IMG_TRUE);
 ErrorExitPhase1:
-	if (psIntSysPAddr) {
+	if (psIntSysPAddr)
 		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,
-			  ui32PageCount * sizeof(IMG_SYS_PHYADDR),
-			  psIntSysPAddr, IMG_NULL);
-	}
+			  ui32PageCount * sizeof(struct IMG_SYS_PHYADDR),
+			  psIntSysPAddr, NULL);
 
 	return eError;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVUnmapDeviceMemoryKM(PVRSRV_KERNEL_MEM_INFO *
-							psMemInfo)
+enum PVRSRV_ERROR PVRSRVUnmapDeviceMemoryKM(
+		struct PVRSRV_KERNEL_MEM_INFO *psMemInfo)
 {
-	if (!psMemInfo) {
+	if (!psMemInfo)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	return ResManFreeResByPtr(psMemInfo->sMemBlk.hResItem);
+	ResManFreeResByPtr(psMemInfo->sMemBlk.hResItem);
+	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR UnmapDeviceMemoryCallBack(IMG_PVOID pvParam,
-					      IMG_UINT32 ui32Param)
+static enum PVRSRV_ERROR UnmapDeviceMemoryCallBack(void *pvParam, u32 ui32Param)
 {
-	PVRSRV_KERNEL_MEM_INFO *psMemInfo = pvParam;
+	struct PVRSRV_KERNEL_MEM_INFO *psMemInfo = pvParam;
 
 	PVR_UNREFERENCED_PARAMETER(ui32Param);
 
 	return FreeDeviceMem(psMemInfo);
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV PVRSRVMapDeviceMemoryKM(PVRSRV_PER_PROCESS_DATA *
-						      psPerProc,
-						      PVRSRV_KERNEL_MEM_INFO *
-						      psSrcMemInfo,
-						      IMG_HANDLE hDstDevMemHeap,
-						      PVRSRV_KERNEL_MEM_INFO **
-						      ppsDstMemInfo)
+enum PVRSRV_ERROR PVRSRVMapDeviceMemoryKM(
+		struct PVRSRV_PER_PROCESS_DATA *psPerProc,
+			      struct PVRSRV_KERNEL_MEM_INFO *psSrcMemInfo,
+			      void *hDstDevMemHeap,
+			      struct PVRSRV_KERNEL_MEM_INFO **ppsDstMemInfo)
 {
-	PVRSRV_ERROR eError;
-	IMG_UINT32 i;
-	IMG_UINT32 ui32PageCount, ui32PageOffset;
-	IMG_UINT32 ui32HostPageSize = HOST_PAGESIZE();
-	IMG_SYS_PHYADDR *psSysPAddr = IMG_NULL;
-	IMG_DEV_PHYADDR sDevPAddr;
-	BM_BUF *psBuf;
-	IMG_DEV_VIRTADDR sDevVAddr;
-	PVRSRV_KERNEL_MEM_INFO *psMemInfo = IMG_NULL;
-	BM_HANDLE hBuffer;
-	PVRSRV_MEMBLK *psMemBlock;
+	enum PVRSRV_ERROR eError;
+	u32 i;
+	u32 ui32PageCount, ui32PageOffset;
+	u32 ui32HostPageSize = HOST_PAGESIZE();
+	struct IMG_SYS_PHYADDR *psSysPAddr = NULL;
+	struct IMG_DEV_PHYADDR sDevPAddr;
+	struct BM_BUF *psBuf;
+	struct IMG_DEV_VIRTADDR sDevVAddr;
+	struct PVRSRV_KERNEL_MEM_INFO *psMemInfo = NULL;
+	void *hBuffer;
+	struct PVRSRV_MEMBLK *psMemBlock;
 	IMG_BOOL bBMError;
-	PVRSRV_DEVICE_NODE *psDeviceNode;
-	IMG_VOID *pvPageAlignedCPUVAddr;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode;
+	void *pvPageAlignedCPUVAddr;
 
 	if (!psSrcMemInfo || !hDstDevMemHeap || !ppsDstMemInfo) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "PVRSRVMapDeviceMemoryKM: invalid parameters"));
+		PVR_DPF(PVR_DBG_ERROR,
+			 "PVRSRVMapDeviceMemoryKM: invalid parameters");
 		return PVRSRV_ERROR_INVALID_PARAMS;
 	}
 
-	*ppsDstMemInfo = IMG_NULL;
+	*ppsDstMemInfo = NULL;
 
 	ui32PageOffset =
 	    psSrcMemInfo->sDevVAddr.uiAddr & (ui32HostPageSize - 1);
@@ -941,14 +777,14 @@ IMG_EXPORT
 	    HOST_PAGEALIGN(psSrcMemInfo->ui32AllocSize +
 			   ui32PageOffset) / ui32HostPageSize;
 	pvPageAlignedCPUVAddr =
-	    (IMG_VOID *) ((IMG_UINT8 *) psSrcMemInfo->pvLinAddrKM -
+	    (void *) ((u8 *) psSrcMemInfo->pvLinAddrKM -
 			  ui32PageOffset);
 
 	if (OSAllocMem(PVRSRV_OS_PAGEABLE_HEAP,
-		       ui32PageCount * sizeof(IMG_SYS_PHYADDR),
-		       (IMG_VOID **) & psSysPAddr, IMG_NULL) != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "PVRSRVMapDeviceMemoryKM: Failed to alloc memory for block"));
+		       ui32PageCount * sizeof(struct IMG_SYS_PHYADDR),
+		       (void **) &psSysPAddr, NULL) != PVRSRV_OK) {
+		PVR_DPF(PVR_DBG_ERROR, "PVRSRVMapDeviceMemoryKM: "
+					"Failed to alloc memory for block");
 		return PVRSRV_ERROR_OUT_OF_MEMORY;
 	}
 
@@ -961,8 +797,8 @@ IMG_EXPORT
 		eError =
 		    BM_GetPhysPageAddr(psSrcMemInfo, sDevVAddr, &sDevPAddr);
 		if (eError != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "PVRSRVMapDeviceMemoryKM: Failed to retrieve page list from device"));
+			PVR_DPF(PVR_DBG_ERROR, "PVRSRVMapDeviceMemoryKM: "
+				"Failed to retrieve page list from device");
 			goto ErrorExit;
 		}
 
@@ -974,10 +810,10 @@ IMG_EXPORT
 	}
 
 	if (OSAllocMem(PVRSRV_OS_PAGEABLE_HEAP,
-		       sizeof(PVRSRV_KERNEL_MEM_INFO),
-		       (IMG_VOID **) & psMemInfo, IMG_NULL) != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "PVRSRVMapDeviceMemoryKM: Failed to alloc memory for block"));
+		       sizeof(struct PVRSRV_KERNEL_MEM_INFO),
+		       (void **) &psMemInfo, NULL) != PVRSRV_OK) {
+		PVR_DPF(PVR_DBG_ERROR, "PVRSRVMapDeviceMemoryKM: "
+					"Failed to alloc memory for block");
 		eError = PVRSRV_ERROR_OUT_OF_MEMORY;
 		goto ErrorExit;
 	}
@@ -988,16 +824,13 @@ IMG_EXPORT
 
 	bBMError = BM_Wrap(psBuf->pMapping->pBMHeap,
 			   psSrcMemInfo->ui32AllocSize,
-			   ui32PageOffset,
-			   IMG_FALSE,
-			   psSysPAddr,
-			   IMG_TRUE,
-			   pvPageAlignedCPUVAddr,
+			   ui32PageOffset, IMG_FALSE, psSysPAddr,
+			   IMG_TRUE, pvPageAlignedCPUVAddr,
 			   &psMemInfo->ui32Flags, &hBuffer);
 
 	if (!bBMError) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "PVRSRVMapDeviceMemoryKM: BM_Wrap Failed"));
+		PVR_DPF(PVR_DBG_ERROR,
+			 "PVRSRVMapDeviceMemoryKM: BM_Wrap Failed");
 		eError = PVRSRV_ERROR_BAD_MAPPING;
 		goto ErrorExit;
 	}
@@ -1005,7 +838,7 @@ IMG_EXPORT
 	psMemBlock->sDevVirtAddr = BM_HandleToDevVaddr(hBuffer);
 	psMemBlock->hOSMemHandle = BM_HandleToOSMemHandle(hBuffer);
 
-	psMemBlock->hBuffer = (IMG_HANDLE) hBuffer;
+	psMemBlock->hBuffer = (void *) hBuffer;
 
 	psMemInfo->pvLinAddrKM = psSrcMemInfo->pvLinAddrKM;
 
@@ -1024,103 +857,99 @@ IMG_EXPORT
 
 ErrorExit:
 
-	if (psSysPAddr) {
+	if (psSysPAddr)
+		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, ui32PageCount *
+			    sizeof(struct IMG_SYS_PHYADDR), psSysPAddr, NULL);
 
+	if (psMemInfo)
 		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,
-			  ui32PageCount * sizeof(IMG_SYS_PHYADDR), psSysPAddr,
-			  IMG_NULL);
-	}
-
-	if (psMemInfo) {
-
-		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,
-			  sizeof(PVRSRV_KERNEL_MEM_INFO), psMemInfo, IMG_NULL);
-	}
+			  sizeof(struct PVRSRV_KERNEL_MEM_INFO), psMemInfo,
+			  NULL);
 
 	return eError;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV
-PVRSRVUnmapDeviceClassMemoryKM(PVRSRV_KERNEL_MEM_INFO * psMemInfo)
+enum PVRSRV_ERROR PVRSRVUnmapDeviceClassMemoryKM(
+				struct PVRSRV_KERNEL_MEM_INFO *psMemInfo)
 {
-	if (!psMemInfo) {
+	if (!psMemInfo)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	return ResManFreeResByPtr(psMemInfo->sMemBlk.hResItem);
+	ResManFreeResByPtr(psMemInfo->sMemBlk.hResItem);
+	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR UnmapDeviceClassMemoryCallBack(IMG_PVOID pvParam,
-						   IMG_UINT32 ui32Param)
+static enum PVRSRV_ERROR UnmapDeviceClassMemoryCallBack(void *pvParam,
+							u32 ui32Param)
 {
-	PVRSRV_KERNEL_MEM_INFO *psMemInfo = pvParam;
+	struct PVRSRV_KERNEL_MEM_INFO *psMemInfo = pvParam;
 
 	PVR_UNREFERENCED_PARAMETER(ui32Param);
 
 	return FreeDeviceMem(psMemInfo);
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR IMG_CALLCONV
-PVRSRVMapDeviceClassMemoryKM(PVRSRV_PER_PROCESS_DATA * psPerProc,
-			     IMG_HANDLE hDeviceClassBuffer,
-			     PVRSRV_KERNEL_MEM_INFO ** ppsMemInfo,
-			     IMG_HANDLE * phOSMapInfo)
+enum PVRSRV_ERROR PVRSRVMapDeviceClassMemoryKM(
+				struct PVRSRV_PER_PROCESS_DATA *psPerProc,
+				void *hDeviceClassBuffer,
+				struct PVRSRV_KERNEL_MEM_INFO **ppsMemInfo,
+				void **phOSMapInfo)
 {
-	PVRSRV_ERROR eError;
-	PVRSRV_KERNEL_MEM_INFO *psMemInfo;
-	PVRSRV_DEVICECLASS_BUFFER *psDeviceClassBuffer;
-	IMG_SYS_PHYADDR *psSysPAddr;
-	IMG_VOID *pvCPUVAddr, *pvPageAlignedCPUVAddr;
+	enum PVRSRV_ERROR eError;
+	struct PVRSRV_KERNEL_MEM_INFO *psMemInfo;
+	struct PVRSRV_DEVICECLASS_BUFFER *psDeviceClassBuffer;
+	struct IMG_SYS_PHYADDR *psSysPAddr;
+	void *pvCPUVAddr, *pvPageAlignedCPUVAddr;
 	IMG_BOOL bPhysContig;
-	BM_CONTEXT *psBMContext;
-	DEVICE_MEMORY_INFO *psDevMemoryInfo;
-	IMG_HANDLE hDevMemHeap;
-	IMG_UINT32 ui32ByteSize;
-	IMG_UINT32 ui32Offset;
-	IMG_UINT32 ui32PageSize = HOST_PAGESIZE();
-	BM_HANDLE hBuffer;
-	PVRSRV_MEMBLK *psMemBlock;
+	struct BM_CONTEXT *psBMContext;
+	struct DEVICE_MEMORY_INFO *psDevMemoryInfo;
+	void *hDevMemHeap;
+	u32 ui32ByteSize;
+	u32 ui32Offset;
+	u32 ui32PageSize = HOST_PAGESIZE();
+	void *hBuffer;
+	struct PVRSRV_MEMBLK *psMemBlock;
 	IMG_BOOL bBMError;
 
 	if (!hDeviceClassBuffer || !ppsMemInfo || !phOSMapInfo) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "PVRSRVMapDeviceClassMemoryKM: invalid parameters"));
+		PVR_DPF(PVR_DBG_ERROR,
+			 "PVRSRVMapDeviceClassMemoryKM: invalid parameters");
 		return PVRSRV_ERROR_INVALID_PARAMS;
 	}
 
-	psDeviceClassBuffer = (PVRSRV_DEVICECLASS_BUFFER *) hDeviceClassBuffer;
+	psDeviceClassBuffer = (struct PVRSRV_DEVICECLASS_BUFFER *)
+							hDeviceClassBuffer;
 
 	eError =
 	    psDeviceClassBuffer->pfnGetBufferAddr(psDeviceClassBuffer->
 						  hExtDevice,
 						  psDeviceClassBuffer->
 						  hExtBuffer, &psSysPAddr,
-						  &ui32ByteSize, &pvCPUVAddr,
+						  &ui32ByteSize,
+						  (void __iomem **)&pvCPUVAddr,
 						  phOSMapInfo, &bPhysContig);
 	if (eError != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "PVRSRVMapDeviceClassMemoryKM: unable to get buffer address"));
+		PVR_DPF(PVR_DBG_ERROR, "PVRSRVMapDeviceClassMemoryKM: "
+				"unable to get buffer address");
 		return PVRSRV_ERROR_GENERIC;
 	}
 
-	psBMContext = (BM_CONTEXT *) psDeviceClassBuffer->hDevMemContext;
+	psBMContext = (struct BM_CONTEXT *)psDeviceClassBuffer->hDevMemContext;
 	psDevMemoryInfo = &psBMContext->psDeviceNode->sDevMemoryInfo;
 	hDevMemHeap =
 	    psDevMemoryInfo->psDeviceMemoryHeap[SGX_FB_MAPPING_HEAP_ID].
 	    hDevMemHeap;
 
-	ui32Offset = ((IMG_UINT32) pvCPUVAddr) & (ui32PageSize - 1);
+	ui32Offset = ((u32) pvCPUVAddr) & (ui32PageSize - 1);
 	pvPageAlignedCPUVAddr =
-	    (IMG_VOID *) ((IMG_UINT8 *) pvCPUVAddr - ui32Offset);
+	    (void *) ((u8 *) pvCPUVAddr - ui32Offset);
 
 	if (OSAllocMem(PVRSRV_OS_PAGEABLE_HEAP,
-		       sizeof(PVRSRV_KERNEL_MEM_INFO),
-		       (IMG_VOID **) & psMemInfo, IMG_NULL) != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "PVRSRVMapDeviceClassMemoryKM: Failed to alloc memory for block"));
-		return (PVRSRV_ERROR_OUT_OF_MEMORY);
+		       sizeof(struct PVRSRV_KERNEL_MEM_INFO),
+		       (void **) &psMemInfo, NULL) != PVRSRV_OK) {
+		PVR_DPF(PVR_DBG_ERROR, "PVRSRVMapDeviceClassMemoryKM: "
+			 "Failed to alloc memory for block");
+		return PVRSRV_ERROR_OUT_OF_MEMORY;
 	}
 
 	OSMemSet(psMemInfo, 0, sizeof(*psMemInfo));
@@ -1137,17 +966,18 @@ PVRSRVMapDeviceClassMemoryKM(PVRSRV_PER_PROCESS_DATA * psPerProc,
 			   &psMemInfo->ui32Flags, &hBuffer);
 
 	if (!bBMError) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "PVRSRVMapDeviceClassMemoryKM: BM_Wrap Failed"));
+		PVR_DPF(PVR_DBG_ERROR,
+			 "PVRSRVMapDeviceClassMemoryKM: BM_Wrap Failed");
 		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,
-			  sizeof(PVRSRV_KERNEL_MEM_INFO), psMemInfo, IMG_NULL);
+			  sizeof(struct PVRSRV_KERNEL_MEM_INFO),
+			  psMemInfo, NULL);
 		return PVRSRV_ERROR_BAD_MAPPING;
 	}
 
 	psMemBlock->sDevVirtAddr = BM_HandleToDevVaddr(hBuffer);
 	psMemBlock->hOSMemHandle = BM_HandleToOSMemHandle(hBuffer);
 
-	psMemBlock->hBuffer = (IMG_HANDLE) hBuffer;
+	psMemBlock->hBuffer = (void *) hBuffer;
 
 	psMemInfo->pvLinAddrKM = BM_HandleToCpuVaddr(hBuffer);
 

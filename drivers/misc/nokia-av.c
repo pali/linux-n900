@@ -273,7 +273,7 @@ static int madc_stable_voltage(int d, int t, int tmax)
 
 #define THRESHOLD_GROUNDED	40
 #define THRESHOLD_VIDEO_HI	150
-#define THRESHOLD_HEADSET_HI	200
+#define THRESHOLD_HEADSET_HI	1000
 #define THRESHOLD_ECI_LO	1950
 #define THRESHOLD_ECI_HI	2200
 

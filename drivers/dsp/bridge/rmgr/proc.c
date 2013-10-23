@@ -1462,9 +1462,13 @@ DSP_STATUS PROC_Map(DSP_HPROCESSOR hProcessor, void *pMpuAddr, u32 ulSize,
 
 #ifndef RES_CLEANUP_DISABLE
 	if (DSP_SUCCEEDED(status)) {
+		spin_lock(&pr_ctxt->dmm_list_lock);
+
 		DRV_InsertDMMResElement(&dmmRes, pr_ctxt);
 		DRV_UpdateDMMResElement(dmmRes, (u32)pMpuAddr, ulSize,
 				(u32)pReqAddr, (u32)*ppMapAddr, hProcessor);
+
+		spin_unlock(&pr_ctxt->dmm_list_lock);
 	}
 #endif
 func_end:
@@ -1827,9 +1831,17 @@ DSP_STATUS PROC_UnMap(DSP_HPROCESSOR hProcessor, void *pMapAddr,
 	if (DSP_FAILED(status))
 		goto func_end;
 
-	if (pr_ctxt && DRV_GetDMMResElement((u32)pMapAddr, &dmmRes, pr_ctxt)
-							!= DSP_ENOTFOUND)
-		DRV_RemoveDMMResElement(dmmRes, pr_ctxt);
+	if (pr_ctxt) {
+		DSP_STATUS rc;
+
+		spin_lock(&pr_ctxt->dmm_list_lock);
+
+		rc = DRV_GetDMMResElement((u32)pMapAddr, &dmmRes, pr_ctxt);
+		if (rc != DSP_ENOTFOUND)
+			DRV_RemoveDMMResElement(dmmRes, pr_ctxt);
+
+		spin_unlock(&pr_ctxt->dmm_list_lock);
+	}
 #endif
 func_end:
 	GT_1trace(PROC_DebugMask, GT_ENTER,

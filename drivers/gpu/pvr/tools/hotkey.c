@@ -1,26 +1,26 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
@@ -31,13 +31,13 @@
 #include "hotkey.h"
 #include "hostfunc.h"
 
-IMG_UINT32 g_ui32HotKeyFrame = 0xFFFFFFFF;
+u32 g_ui32HotKeyFrame = 0xFFFFFFFF;
 IMG_BOOL g_bHotKeyPressed = IMG_FALSE;
 IMG_BOOL g_bHotKeyRegistered = IMG_FALSE;
 
-PRIVATEHOTKEYDATA g_PrivateHotKeyData;
+struct PRIVATEHOTKEYDATA g_PrivateHotKeyData;
 
-IMG_VOID ReadInHotKeys(IMG_VOID)
+void ReadInHotKeys(void)
 {
 	g_PrivateHotKeyData.ui32ScanCode = 0x58;
 	g_PrivateHotKeyData.ui32ShiftState = 0x0;
@@ -48,17 +48,17 @@ IMG_VOID ReadInHotKeys(IMG_VOID)
 					&g_PrivateHotKeyData.ui32ShiftState);
 }
 
-IMG_VOID RegisterKeyPressed(IMG_UINT32 dwui32ScanCode, PHOTKEYINFO pInfo)
+void RegisterKeyPressed(u32 dwui32ScanCode, struct HOTKEYINFO *pInfo)
 {
-	PDBG_STREAM psStream;
+	struct DBG_STREAM *psStream;
 
 	PVR_UNREFERENCED_PARAMETER(pInfo);
 
 	if (dwui32ScanCode == g_PrivateHotKeyData.ui32ScanCode) {
-		PVR_DPF((PVR_DBG_MESSAGE, "PDUMP Hotkey pressed !\n"));
+		PVR_DPF(PVR_DBG_MESSAGE, "PDUMP Hotkey pressed !\n");
 
-		psStream =
-		    (PDBG_STREAM) g_PrivateHotKeyData.sHotKeyInfo.pvStream;
+		psStream = (struct DBG_STREAM *)
+				g_PrivateHotKeyData.sHotKeyInfo.pvStream;
 
 		if (!g_bHotKeyPressed) {
 
@@ -69,15 +69,15 @@ IMG_VOID RegisterKeyPressed(IMG_UINT32 dwui32ScanCode, PHOTKEYINFO pInfo)
 	}
 }
 
-IMG_VOID ActivateHotKeys(PDBG_STREAM psStream)
+void ActivateHotKeys(struct DBG_STREAM *psStream)
 {
 
 	ReadInHotKeys();
 
-	if (!g_PrivateHotKeyData.sHotKeyInfo.hHotKey) {
+	if (!g_PrivateHotKeyData.sHotKeyInfo.hHotKey)
 		if (g_PrivateHotKeyData.ui32ScanCode != 0) {
-			PVR_DPF((PVR_DBG_MESSAGE,
-				 "Activate HotKey for PDUMP.\n"));
+			PVR_DPF(PVR_DBG_MESSAGE,
+				 "Activate HotKey for PDUMP.\n");
 
 			g_PrivateHotKeyData.sHotKeyInfo.pvStream = psStream;
 
@@ -87,13 +87,12 @@ IMG_VOID ActivateHotKeys(PDBG_STREAM psStream)
 		} else {
 			g_PrivateHotKeyData.sHotKeyInfo.hHotKey = 0;
 		}
-	}
 }
 
-IMG_VOID DeactivateHotKeys(IMG_VOID)
+void DeactivateHotKeys(void)
 {
 	if (g_PrivateHotKeyData.sHotKeyInfo.hHotKey != 0) {
-		PVR_DPF((PVR_DBG_MESSAGE, "Deactivate HotKey.\n"));
+		PVR_DPF(PVR_DBG_MESSAGE, "Deactivate HotKey.\n");
 
 		RemoveHotKey(g_PrivateHotKeyData.sHotKeyInfo.hHotKey);
 		g_PrivateHotKeyData.sHotKeyInfo.hHotKey = 0;

@@ -38,6 +38,8 @@
 #include <mach/hardware.h>
 #include <mach/mux.h>
 
+#include <linux/i2c/twl4030.h>
+
 #include "musb_core.h"
 #include "omap2430.h"
 
@@ -155,9 +157,11 @@ void musb_platform_try_idle(struct musb *musb, unsigned long timeout)
 
 void musb_platform_enable(struct musb *musb)
 {
+	twl4030_upd_usb_suspended(0);
 }
 void musb_platform_disable(struct musb *musb)
 {
+	twl4030_upd_usb_suspended(musb->is_suspended);
 }
 static void omap_vbus_power(struct musb *musb, int is_on, int sleeping)
 {

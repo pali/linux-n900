@@ -1,30 +1,30 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
-#if !defined (__SERVICESINT_H__)
+#if !defined(__SERVICESINT_H__)
 #define __SERVICESINT_H__
 
 
@@ -35,164 +35,136 @@
 
 #define DRIVERNAME_MAXLENGTH	(100)
 
-	typedef struct _PVRSRV_KERNEL_MEM_INFO_ {
+struct PVRSRV_KERNEL_MEM_INFO {
 
-		IMG_PVOID pvLinAddrKM;
+	void *pvLinAddrKM;
+	struct IMG_DEV_VIRTADDR sDevVAddr;
+	u32 ui32Flags;
+	u32 ui32AllocSize;
+	struct PVRSRV_MEMBLK sMemBlk;
+	struct PVRSRV_KERNEL_SYNC_INFO *psKernelSyncInfo;
+};
 
-		IMG_DEV_VIRTADDR sDevVAddr;
+struct PVRSRV_KERNEL_SYNC_INFO {
+	struct PVRSRV_SYNC_DATA *psSyncData;
+	struct IMG_DEV_VIRTADDR sWriteOpsCompleteDevVAddr;
+	struct IMG_DEV_VIRTADDR sReadOpsCompleteDevVAddr;
+	struct PVRSRV_KERNEL_MEM_INFO *psSyncDataMemInfoKM;
+};
 
-		IMG_UINT32 ui32Flags;
+struct PVRSRV_DEVICE_SYNC_OBJECT {
+	u32 ui32ReadOpPendingVal;
+	struct IMG_DEV_VIRTADDR sReadOpsCompleteDevVAddr;
+	u32 ui32WriteOpPendingVal;
+	struct IMG_DEV_VIRTADDR sWriteOpsCompleteDevVAddr;
+};
 
-		IMG_UINT32 ui32AllocSize;
+struct PVRSRV_SYNC_OBJECT {
+	struct PVRSRV_KERNEL_SYNC_INFO *psKernelSyncInfoKM;
+	u32 ui32WriteOpsPending;
+	u32 ui32ReadOpsPending;
+};
 
-		PVRSRV_MEMBLK sMemBlk;
+struct PVRSRV_COMMAND {
+	u32 ui32CmdSize;
+	u32 ui32DevIndex;
+	u32 CommandType;
+	u32 ui32DstSyncCount;
+	u32 ui32SrcSyncCount;
+	struct PVRSRV_SYNC_OBJECT *psDstSync;
+	struct PVRSRV_SYNC_OBJECT *psSrcSync;
+	u32 ui32DataSize;
+	u32 ui32ProcessID;
+	void *pvData;
+};
 
-		struct _PVRSRV_KERNEL_SYNC_INFO_ *psKernelSyncInfo;
+struct PVRSRV_QUEUE_INFO {
+	void *pvLinQueueKM;
+	void *pvLinQueueUM;
+	volatile u32 ui32ReadOffset;
+	volatile u32 ui32WriteOffset;
+	u32 *pui32KickerAddrKM;
+	u32 *pui32KickerAddrUM;
+	u32 ui32QueueSize;
 
-	} PVRSRV_KERNEL_MEM_INFO;
+	u32 ui32ProcessID;
 
-	typedef struct _PVRSRV_KERNEL_SYNC_INFO_ {
+	void *hMemBlock[2];
 
-		PVRSRV_SYNC_DATA *psSyncData;
+	struct PVRSRV_QUEUE_INFO *psNextKM;
+};
 
-		IMG_DEV_VIRTADDR sWriteOpsCompleteDevVAddr;
 
-		IMG_DEV_VIRTADDR sReadOpsCompleteDevVAddr;
+struct PVRSRV_DEVICECLASS_BUFFER {
+	enum PVRSRV_ERROR (*pfnGetBufferAddr)(void *, void *,
+				    struct IMG_SYS_PHYADDR **, u32 *,
+				    void __iomem **, void **, IMG_BOOL *);
+	void *hDevMemContext;
+	void *hExtDevice;
+	void *hExtBuffer;
+	struct PVRSRV_KERNEL_SYNC_INFO *psKernelSyncInfo;
+};
 
-		PVRSRV_KERNEL_MEM_INFO *psSyncDataMemInfoKM;
+struct PVRSRV_CLIENT_DEVICECLASS_INFO {
+	void *hDeviceKM;
+	void *hServices;
+};
 
-	} PVRSRV_KERNEL_SYNC_INFO;
+static inline u32 PVRSRVGetWriteOpsPending(
+		struct PVRSRV_KERNEL_SYNC_INFO *psSyncInfo, IMG_BOOL bIsReadOp)
+{
+	u32 ui32WriteOpsPending;
 
-	typedef struct _PVRSRV_DEVICE_SYNC_OBJECT_ {
-		IMG_UINT32 ui32ReadOpPendingVal;
-		IMG_DEV_VIRTADDR sReadOpsCompleteDevVAddr;
-		IMG_UINT32 ui32WriteOpPendingVal;
-		IMG_DEV_VIRTADDR sWriteOpsCompleteDevVAddr;
-	} PVRSRV_DEVICE_SYNC_OBJECT;
+	if (bIsReadOp)
+		ui32WriteOpsPending =
+		    psSyncInfo->psSyncData->ui32WriteOpsPending;
+	else
 
-	typedef struct _PVRSRV_SYNC_OBJECT {
-		PVRSRV_KERNEL_SYNC_INFO *psKernelSyncInfoKM;
-		IMG_UINT32 ui32WriteOpsPending;
-		IMG_UINT32 ui32ReadOpsPending;
+		ui32WriteOpsPending =
+		    psSyncInfo->psSyncData->ui32WriteOpsPending++;
 
-	} PVRSRV_SYNC_OBJECT, *PPVRSRV_SYNC_OBJECT;
+	return ui32WriteOpsPending;
+}
 
-	typedef struct _PVRSRV_COMMAND {
-		IMG_UINT32 ui32CmdSize;
-		IMG_UINT32 ui32DevIndex;
-		IMG_UINT32 CommandType;
-		IMG_UINT32 ui32DstSyncCount;
-		IMG_UINT32 ui32SrcSyncCount;
-		PVRSRV_SYNC_OBJECT *psDstSync;
-		PVRSRV_SYNC_OBJECT *psSrcSync;
-		IMG_UINT32 ui32DataSize;
-		IMG_UINT32 ui32ProcessID;
-		IMG_VOID *pvData;
-	} PVRSRV_COMMAND, *PPVRSRV_COMMAND;
+static inline u32 PVRSRVGetReadOpsPending(
+		struct PVRSRV_KERNEL_SYNC_INFO *psSyncInfo, IMG_BOOL bIsReadOp)
+{
+	u32 ui32ReadOpsPending;
 
-	typedef struct _PVRSRV_QUEUE_INFO_ {
-		IMG_VOID *pvLinQueueKM;
-		IMG_VOID *pvLinQueueUM;
-		volatile IMG_UINT32 ui32ReadOffset;
-		volatile IMG_UINT32 ui32WriteOffset;
-		IMG_UINT32 *pui32KickerAddrKM;
-		IMG_UINT32 *pui32KickerAddrUM;
-		IMG_UINT32 ui32QueueSize;
+	if (bIsReadOp)
+		ui32ReadOpsPending =
+		    psSyncInfo->psSyncData->ui32ReadOpsPending++;
+	else
+		ui32ReadOpsPending =
+		    psSyncInfo->psSyncData->ui32ReadOpsPending;
 
-		IMG_UINT32 ui32ProcessID;
+	return ui32ReadOpsPending;
+}
 
-		IMG_HANDLE hMemBlock[2];
+enum PVRSRV_ERROR PVRSRVQueueCommand(void *hQueueInfo,
+				    struct PVRSRV_COMMAND *psCommand);
 
-		struct _PVRSRV_QUEUE_INFO_ *psNextKM;
-	} PVRSRV_QUEUE_INFO;
+enum PVRSRV_ERROR PVRSRVGetMMUContextPDDevPAddr(
+			const struct PVRSRV_CONNECTION *psConnection,
+			void *hDevMemContext,
+			struct IMG_DEV_PHYADDR *sPDDevPAddr);
 
-	typedef PVRSRV_ERROR(*PFN_INSERT_CMD) (PVRSRV_QUEUE_INFO *,
-					       PVRSRV_COMMAND **,
-					       IMG_UINT32,
-					       IMG_UINT16,
-					       IMG_UINT32,
-					       PVRSRV_KERNEL_SYNC_INFO *[],
-					       IMG_UINT32,
-					       PVRSRV_KERNEL_SYNC_INFO *[],
-					       IMG_UINT32);
-	typedef PVRSRV_ERROR(*PFN_SUBMIT_CMD) (PVRSRV_QUEUE_INFO *,
-					       PVRSRV_COMMAND *, IMG_BOOL);
+enum PVRSRV_ERROR PVRSRVAllocSharedSysMem(
+			const struct PVRSRV_CONNECTION *psConnection,
+			u32 ui32Flags, u32 ui32Size,
+			struct PVRSRV_CLIENT_MEM_INFO **ppsClientMemInfo);
 
-	typedef struct PVRSRV_DEVICECLASS_BUFFER_TAG {
-		PFN_GET_BUFFER_ADDR pfnGetBufferAddr;
-		IMG_HANDLE hDevMemContext;
-		IMG_HANDLE hExtDevice;
-		IMG_HANDLE hExtBuffer;
-		PVRSRV_KERNEL_SYNC_INFO *psKernelSyncInfo;
+enum PVRSRV_ERROR PVRSRVFreeSharedSysMem(
+			const struct PVRSRV_CONNECTION *psConnection,
+			struct PVRSRV_CLIENT_MEM_INFO *psClientMemInfo);
 
-	} PVRSRV_DEVICECLASS_BUFFER;
+enum PVRSRV_ERROR PVRSRVUnrefSharedSysMem(
+			const struct PVRSRV_CONNECTION *psConnection,
+			struct PVRSRV_CLIENT_MEM_INFO *psClientMemInfo);
 
-	typedef struct PVRSRV_CLIENT_DEVICECLASS_INFO_TAG {
-		IMG_HANDLE hDeviceKM;
-		IMG_HANDLE hServices;
-	} PVRSRV_CLIENT_DEVICECLASS_INFO;
-
-	static INLINE
-	    IMG_UINT32 PVRSRVGetWriteOpsPending(PVRSRV_KERNEL_SYNC_INFO *
-						psSyncInfo,
-						IMG_BOOL bIsReadOp) {
-		IMG_UINT32 ui32WriteOpsPending;
-
-		if (bIsReadOp) {
-			ui32WriteOpsPending =
-			    psSyncInfo->psSyncData->ui32WriteOpsPending;
-		} else {
-
-			ui32WriteOpsPending =
-			    psSyncInfo->psSyncData->ui32WriteOpsPending++;
-		}
-
-		return ui32WriteOpsPending;
-	}
-
-	static INLINE
-	    IMG_UINT32 PVRSRVGetReadOpsPending(PVRSRV_KERNEL_SYNC_INFO *
-					       psSyncInfo, IMG_BOOL bIsReadOp) {
-		IMG_UINT32 ui32ReadOpsPending;
-
-		if (bIsReadOp) {
-			ui32ReadOpsPending =
-			    psSyncInfo->psSyncData->ui32ReadOpsPending++;
-		} else {
-			ui32ReadOpsPending =
-			    psSyncInfo->psSyncData->ui32ReadOpsPending;
-		}
-
-		return ui32ReadOpsPending;
-	}
-
-	IMG_IMPORT
-	    PVRSRV_ERROR PVRSRVQueueCommand(IMG_HANDLE hQueueInfo,
-					    PVRSRV_COMMAND * psCommand);
-
-	IMG_IMPORT PVRSRV_ERROR IMG_CALLCONV
-	    PVRSRVGetMMUContextPDDevPAddr(const PVRSRV_CONNECTION *
-					  psConnection,
-					  IMG_HANDLE hDevMemContext,
-					  IMG_DEV_PHYADDR * sPDDevPAddr);
-
-	IMG_IMPORT PVRSRV_ERROR IMG_CALLCONV
-	    PVRSRVAllocSharedSysMem(const PVRSRV_CONNECTION * psConnection,
-				    IMG_UINT32 ui32Flags,
-				    IMG_UINT32 ui32Size,
-				    PVRSRV_CLIENT_MEM_INFO ** ppsClientMemInfo);
-
-	IMG_IMPORT PVRSRV_ERROR IMG_CALLCONV
-	    PVRSRVFreeSharedSysMem(const PVRSRV_CONNECTION * psConnection,
-				   PVRSRV_CLIENT_MEM_INFO * psClientMemInfo);
-
-	IMG_IMPORT PVRSRV_ERROR
-	    PVRSRVUnrefSharedSysMem(const PVRSRV_CONNECTION * psConnection,
-				    PVRSRV_CLIENT_MEM_INFO * psClientMemInfo);
-
-	IMG_IMPORT PVRSRV_ERROR IMG_CALLCONV
-	    PVRSRVMapMemInfoMem(const PVRSRV_CONNECTION * psConnection,
-				IMG_HANDLE hKernelMemInfo,
-				PVRSRV_CLIENT_MEM_INFO ** ppsClientMemInfo);
+enum PVRSRV_ERROR PVRSRVMapMemInfoMem(
+			const struct PVRSRV_CONNECTION *psConnection,
+			void *hKernelMemInfo,
+			struct PVRSRV_CLIENT_MEM_INFO **ppsClientMemInfo);
 
 #endif

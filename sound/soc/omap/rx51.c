@@ -633,6 +633,59 @@ static int rx51_ext_put_volsw(struct snd_kcontrol *kcontrol,
 	return change;
 }
 
+#define SOC_RX51_SINGLE_JACK_BIAS(xname) \
+{ \
+	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, \
+	.name = xname, \
+	.access = SNDRV_CTL_ELEM_ACCESS_READWRITE | \
+		  SNDRV_CTL_ELEM_ACCESS_VOLATILE, \
+	.info = rx51_info_jack_bias, \
+	.get = rx51_get_jack_bias, \
+	.put = rx51_put_jack_bias, \
+}
+
+static int rx51_info_jack_bias(struct snd_kcontrol *kcontrol,
+			       struct snd_ctl_elem_info *uinfo)
+{
+	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
+	uinfo->count = 1;
+	uinfo->value.integer.min = 0;
+	uinfo->value.integer.max = 1;
+
+	return 0;
+}
+
+static int rx51_get_jack_bias(struct snd_kcontrol *kcontrol,
+			      struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = (aic34b_get_mic_bias() != 0);
+
+	return 0;
+}
+
+static int rx51_put_jack_bias(struct snd_kcontrol *kcontrol,
+			      struct snd_ctl_elem_value *ucontrol)
+{
+	int change, new_value;
+
+	new_value = ucontrol->value.integer.value[0];
+	change = (new_value != aic34b_get_mic_bias());
+
+	if (change) {
+		switch (rx51_jack_func) {
+		case RX51_JACK_ECI:
+		case RX51_JACK_HS:
+		case RX51_JACK_MIC:
+			aic34b_set_mic_bias(new_value * 2); /* 2.5 V */
+			break;
+		default:
+			change = 0;
+		}
+	}
+
+	return change;
+}
+
 static const struct snd_soc_dapm_widget aic34_dapm_widgets[] = {
 	SND_SOC_DAPM_POST("Post event", rx51_post_event),
 	SND_SOC_DAPM_SPK("Post spk", rx51_post_spk_event),
@@ -732,6 +785,7 @@ static const struct snd_kcontrol_new aic34_rx51_controls[] = {
 	SOC_RX51_EXT_SINGLE_TLV("Earphone Playback Volume",
 				RX51_EXT_API_AIC34B, 118,
 				aic3x_output_stage_tlv),
+	SOC_RX51_SINGLE_JACK_BIAS("Jack Bias Switch"),
 };
 
 static int rx51_aic34_init(struct snd_soc_codec *codec)

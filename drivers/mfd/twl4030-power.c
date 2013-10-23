@@ -74,6 +74,18 @@ static u8 triton_next_free_address = 0x2b;
 #define R_VIO_OSC		0x52
 #define EXT_FS_CLK_EN		(0x1 << 6)
 
+#define R_WDT_CFG		0x03
+#define WDT_WRK_TIMEOUT		0x03
+
+#define R_UNLOCK_TEST_REG	0x12
+#define TWL_EEPROM_R_UNLOCK	0x49
+
+#define TWL_SIL_TYPE(rev)	((rev) & 0x00FFFFFF)
+#define TWL_SIL_REV(rev)	((rev) >> 24)
+#define TWL_SIL_5030		0x09002F
+#define TWL_REV_1_0		0x00
+#define TWL_REV_1_1		0x10
+
 /* resource configuration registers */
 
 #define DEVGROUP_OFFSET		0
@@ -486,13 +498,24 @@ static void __init twl_workaround(void)
 {
 	u8 val;
 	u8 reg[]={R_VDD1_OSC, R_VDD2_OSC, R_VIO_OSC};
+	u8 wdt_orig = 0;
 	int i;
-	int err = 0;
+	int err;
+	/* Setup the twl wdt to take care of borderline failure case */
+	err = twl4030_i2c_read_u8(TWL4030_MODULE_PM_RECEIVER, &wdt_orig,
+			R_WDT_CFG);
+	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, WDT_WRK_TIMEOUT,
+			R_WDT_CFG);
+
 	for (i = 0; i < sizeof(reg); i++) {
 		err |= twl4030_i2c_read_u8(TWL4030_MODULE_PM_RECEIVER, &val, reg[i]);
 		val |= EXT_FS_CLK_EN;
 		err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, val, reg[i]);
 	}
+
+	/* restore the original value */
+	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, wdt_orig,
+			R_WDT_CFG);
 	if (err)
 		pr_warning("TWL4030: workaround setup failed!\n");
 }
@@ -502,14 +525,41 @@ void __init twl4030_power_init(struct twl4030_power_data *triton2_scripts)
 	int err = 0;
 	int i;
 	struct twl4030_resconfig *resconfig;
+	u32 twl4030_rev = 0;
+	bool apply_workaround = 0;
 
 	err = twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, KEY_1,
 				R_PROTECT_KEY);
 	err |= twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, KEY_2,
 				R_PROTECT_KEY);
 	if (err)
-		printk(KERN_ERR
-			"TWL4030 Unable to unlock registers\n");
+		pr_err("TWL4030 Unable to unlock registers\n");
+
+	err = twl4030_i2c_write_u8(TWL4030_MODULE_INTBR, TWL_EEPROM_R_UNLOCK,
+			R_UNLOCK_TEST_REG);
+	if (err)
+		pr_err("TWL4030 Unable to unlock IDCODE registers\n");
+
+	err = twl4030_i2c_read(TWL4030_MODULE_INTBR, (u8 *)(&twl4030_rev),
+			0x0, 4);
+	if (err)
+		pr_err("TWL4030: unable to read IDCODE-%d\n", err);
+
+	err = twl4030_i2c_write_u8(TWL4030_MODULE_INTBR, 0x0,
+			R_UNLOCK_TEST_REG);
+	if (err)
+		pr_err("TWL4030 Unable to relock IDCODE registers\n");
+
+	/* introduce workaround based on TWL4030 revision */
+	if ((TWL_SIL_TYPE(twl4030_rev) == TWL_SIL_5030) &&
+		(TWL_SIL_REV(twl4030_rev) <= TWL_REV_1_1))
+		apply_workaround = 1;
+
+	if (apply_workaround) {
+		pr_err("TWL5030: Enabling workaround for rev 0x%04X\n",
+				twl4030_rev);
+		twl_workaround();
+	}
 
 	for (i = 0; i < triton2_scripts->scripts_size; i++) {
 		err = load_triton_script(triton2_scripts->scripts[i]);
@@ -532,8 +582,6 @@ void __init twl4030_power_init(struct twl4030_power_data *triton2_scripts)
 		}
 	}
 
-	/* TODO: introduce workaround based on TWL4030 revision */
-	twl_workaround();
 	if (twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, 0, R_PROTECT_KEY))
 		printk(KERN_ERR
 			"TWL4030 Unable to relock registers\n");

@@ -179,6 +179,8 @@ minstrel_tx_status(void *priv, struct ieee80211_supported_band *sband,
 
 	if (!mp->has_mrr || (ar[0].rate_idx < 0)) {
 		ndx = rix_to_ndx(mi, info->tx_rate_idx);
+		if (ndx < 0)
+			return;
 		tries = info->status.retry_count + 1;
 		mi->r[ndx].success += success;
 		mi->r[ndx].attempts += tries;
@@ -190,6 +192,8 @@ minstrel_tx_status(void *priv, struct ieee80211_supported_band *sband,
 			break;
 
 		ndx = rix_to_ndx(mi, ar[i].rate_idx);
+		if (ndx < 0)
+			continue;
 		mi->r[ndx].attempts += ar[i].limit + 1;
 
 		if ((i != 3) && (ar[i + 1].rate_idx < 0))
@@ -224,7 +228,7 @@ minstrel_get_next_sample(struct minstrel_sta_info *mi)
 	unsigned int sample_ndx;
 	sample_ndx = SAMPLE_TBL(mi, mi->sample_idx, mi->sample_column);
 	mi->sample_idx++;
-	if (mi->sample_idx > (mi->n_rates - 2)) {
+	if ((int) mi->sample_idx > (mi->n_rates - 2)) {
 		mi->sample_idx = 0;
 		mi->sample_column++;
 		if (mi->sample_column >= SAMPLE_COLUMNS)

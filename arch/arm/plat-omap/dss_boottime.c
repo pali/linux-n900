@@ -135,12 +135,17 @@ int dss_boottime_enable_clocks(void)
 	BUG_ON(!dss_fclk || !dss_iclk);
 
 	if ((r = clk_enable(dss_iclk)) < 0)
-		return r;
+		goto err1;
 
 	if ((r = clk_enable(dss_fclk)) < 0)
-		return r;
+		goto err2;
 
 	return 0;
+
+err2:
+	clk_disable(dss_iclk);
+err1:
+	return r;
 }
 EXPORT_SYMBOL_GPL(dss_boottime_enable_clocks);
 

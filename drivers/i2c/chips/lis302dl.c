@@ -793,6 +793,11 @@ static int lis302dl_remove(struct i2c_client *client)
 	lis302dl_unregister_sysfs(client);
 	free_irq(gpio_to_irq(chip->irq1), chip);
 	gpio_free(chip->irq1);
+
+	cancel_delayed_work_sync(&chip->poweroff_work);
+	cancel_work_sync(&chip->work1);
+	lis302dl_power(chip, 0);
+
 	kfree(chip);
 
 	return 0;

@@ -30,6 +30,7 @@
 #include "wl1251_spi.h"
 #include "wl1251_tx.h"
 #include "wl1251_ps.h"
+#include "wl12xx_80211.h"
 
 static bool wl1251_tx_double_buffer_busy(struct wl1251 *wl, u32 data_out_count)
 {
@@ -167,8 +168,7 @@ static int wl1251_tx_fill_hdr(struct wl1251 *wl, struct sk_buff *skb,
 	tx_hdr->expiry_time = cpu_to_le32(1 << 16);
 	tx_hdr->id = id;
 
-	/* FIXME: how to get the correct queue id? */
-	tx_hdr->xmit_queue = 0;
+	tx_hdr->xmit_queue = wl1251_tx_get_queue(skb_get_queue_mapping(skb));
 
 	wl1251_tx_control(tx_hdr, control, fc);
 	wl1251_tx_frag_block_num(tx_hdr);
@@ -220,6 +220,7 @@ static int wl1251_tx_send_packet(struct wl1251 *wl, struct sk_buff *skb,
 			/* align the buffer on a 4-byte boundary */
 			skb_reserve(skb, offset);
 			memmove(skb->data, src, skb->len);
+			tx_hdr = (struct tx_double_buffer_desc *) skb->data;
 		} else {
 			wl1251_info("No handler, fixme!");
 			return -EINVAL;
@@ -237,8 +238,9 @@ static int wl1251_tx_send_packet(struct wl1251 *wl, struct sk_buff *skb,
 
 	wl1251_spi_mem_write(wl, addr, skb->data, len);
 
-	wl1251_debug(DEBUG_TX, "tx id %u skb 0x%p payload %u rate 0x%x",
-		     tx_hdr->id, skb, tx_hdr->length, tx_hdr->rate);
+	wl1251_debug(DEBUG_TX, "tx id %u skb 0x%p payload %u rate 0x%x "
+		     "queue %d", tx_hdr->id, skb, tx_hdr->length,
+		     tx_hdr->rate, tx_hdr->xmit_queue);
 
 	return 0;
 }
@@ -297,6 +299,54 @@ static int wl1251_tx_frame(struct wl1251 *wl, struct sk_buff *skb)
 	return ret;
 }
 
+static int wl1251_tx_pspoll(struct wl1251 *wl)
+{
+	struct wl12xx_ps_poll_template *pspoll;
+	struct ieee80211_tx_info *info;
+	struct sk_buff *skb;
+	int ret;
+	u16 fc;
+
+	skb = dev_alloc_skb(wl->hw->extra_tx_headroom + sizeof(*pspoll));
+	if (!skb) {
+		wl1251_warning("failed to allocate buffer for pspoll frame");
+		return -ENOMEM;
+	}
+	skb_reserve(skb, wl->hw->extra_tx_headroom);
+
+	pspoll = (struct wl12xx_ps_poll_template *) skb_put(skb,
+							    sizeof(*pspoll));
+	memset(pspoll, 0, sizeof(*pspoll));
+	fc = IEEE80211_FTYPE_CTL | IEEE80211_STYPE_PSPOLL | IEEE80211_FCTL_PM;
+	pspoll->fc = cpu_to_le16(fc);
+	pspoll->aid = cpu_to_le16(wl->aid);
+
+	/* aid in PS-Poll has its two MSBs each set to 1 */
+	pspoll->aid |= cpu_to_le16(1 << 15 | 1 << 14);
+
+	memcpy(pspoll->bssid, wl->bssid, ETH_ALEN);
+	memcpy(pspoll->ta, wl->mac_addr, ETH_ALEN);
+
+	/* hack to inform that skb is not from mac80211 */
+	info = IEEE80211_SKB_CB(skb);
+	info->driver_data[0] = (void *) 1;
+
+	ret = wl1251_tx_frame(wl, skb);
+
+	if (ret == -EBUSY) {
+		/* firmware buffer is full, stop queues */
+		wl1251_debug(DEBUG_TX, "tx_pspoll: fw buffer full, "
+			     "stop queues");
+		ieee80211_stop_queues(wl->hw);
+		wl->tx_queue_stopped = true;
+	}
+
+	if (ret < 0)
+		dev_kfree_skb(skb);
+
+	return ret;
+}
+
 void wl1251_tx_work(struct work_struct *work)
 {
 	struct wl1251 *wl = container_of(work, struct wl1251, tx_work);
@@ -315,6 +365,16 @@ void wl1251_tx_work(struct work_struct *work)
 			if (ret < 0)
 				goto out;
 			woken_up = true;
+		}
+
+		if (wl->psm) {
+			ret = wl1251_tx_pspoll(wl);
+
+			if (ret < 0) {
+				/* ps poll failed, put skb back to queue */
+				skb_queue_head(&wl->tx_queue, skb);
+				goto out;
+			}
 		}
 
 		ret = wl1251_tx_frame(wl, skb);
@@ -372,7 +432,7 @@ static void wl1251_tx_packet_cb(struct wl1251 *wl,
 {
 	struct ieee80211_tx_info *info;
 	struct sk_buff *skb;
-	int hdrlen, ret;
+	int hdrlen, queue_len;
 	u8 *frame;
 
 	skb = wl->tx_frames[result->id];
@@ -381,7 +441,18 @@ static void wl1251_tx_packet_cb(struct wl1251 *wl,
 		return;
 	}
 
+	wl1251_debug(DEBUG_TX, "tx status id %u skb 0x%p failures %u rate 0x%x"
+		     " status 0x%x (%s)",
+		     result->id, skb, result->ack_failures, result->rate,
+		     result->status, wl1251_tx_parse_status(result->status));
+
 	info = IEEE80211_SKB_CB(skb);
+
+	/* hack: check if skb is not from mac80211 */
+	if ((unsigned long) info->driver_data[0] == 1) {
+		dev_kfree_skb(skb);
+		goto out;
+	}
 
 	if (!(info->flags & IEEE80211_TX_CTL_NO_ACK)) {
 		if (result->status == TX_SUCCESS)
@@ -407,43 +478,21 @@ static void wl1251_tx_packet_cb(struct wl1251 *wl,
 		skb_pull(skb, WL1251_TKIP_IV_SPACE);
 	}
 
-	wl1251_debug(DEBUG_TX, "tx status id %u skb 0x%p failures %u rate 0x%x"
-		     " status 0x%x (%s)",
-		     result->id, skb, result->ack_failures, result->rate,
-		     result->status, wl1251_tx_parse_status(result->status));
-
-
 	ieee80211_tx_status(wl->hw, skb);
 
+out:
 	wl->tx_frames[result->id] = NULL;
 
-	if (wl->tx_queue_stopped) {
-		wl1251_debug(DEBUG_TX, "cb: queue was stopped");
+	queue_len = skb_queue_len(&wl->tx_queue);
 
-		skb = skb_dequeue(&wl->tx_queue);
-
-		/* The skb can be NULL because tx_work might have been
-		   scheduled before the queue was stopped making the
-		   queue empty */
-
-		if (skb) {
-			ret = wl1251_tx_frame(wl, skb);
-			if (ret == -EBUSY) {
-				/* firmware buffer is still full */
-				wl1251_debug(DEBUG_TX, "cb: fw buffer "
-					     "still full");
-				skb_queue_head(&wl->tx_queue, skb);
-				return;
-			} else if (ret < 0) {
-				dev_kfree_skb(skb);
-				return;
-			}
-		}
-
+	if (wl->tx_queue_stopped && queue_len < WL1251_TX_QUEUE_MAX_LENGTH) {
 		wl1251_debug(DEBUG_TX, "cb: waking queues");
 		ieee80211_wake_queues(wl->hw);
 		wl->tx_queue_stopped = false;
 	}
+
+	if (queue_len > 0)
+		queue_work(wl->hw->workqueue, &wl->tx_work);
 }
 
 /* Called upon reception of a TX complete interrupt */

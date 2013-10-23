@@ -5,13 +5,13 @@
 #define SGX_CORE_REV			121
 
 #ifdef CONFIG_PVR_DEBUG
-# define PVR_BUILD_TYPE		"debug"
-# define DEBUG			1
+# define PVR_BUILD_TYPE			"debug"
+# define DEBUG				1
 #elif defined(CONFIG_PVR_TIMING)
-# define PVR_BUILD_TYPE		"timing"
-# define TIMING			1
+# define PVR_BUILD_TYPE			"timing"
+# define TIMING				1
 #elif defined(CONFIG_PVR_RELEASE)
-# define PVR_BUILD_TYPE		"release"
+# define PVR_BUILD_TYPE			"release"
 #endif
 
 #ifdef DEBUG

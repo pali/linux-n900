@@ -307,7 +307,7 @@ static ssize_t reset_store(
 	if (enable != 0 && enable != 1)
 		return -EINVAL;
 
-	dss_schedule_reset();
+	dss_soft_reset();
 
 	return size;
 }
@@ -446,6 +446,59 @@ static int overlay_enabled(struct omap_overlay *ovl)
 	return ovl->info.enabled && ovl->manager && ovl->manager->display;
 }
 
+static void configure_fifomerge(bool enable)
+{
+	int i;
+	struct omap_overlay_manager *mgr;
+	struct omap_display *ch_display = NULL;
+	enum omap_channel ch = dispc_get_enabled_channel();
+
+	/* Make sure all pending updates have been finished. */
+	list_for_each_entry(mgr, &manager_list, list) {
+		struct omap_display *display;
+
+		if (!(mgr->caps & OMAP_DSS_OVL_MGR_CAP_DISPC))
+			continue;
+
+		display = mgr->display;
+
+		if (!display)
+			continue;
+
+		if (mgr->id == ch)
+			ch_display = display;
+
+		/* We don't need GO with manual update display. LCD iface will
+		 * always be turned off after frame, and new settings will
+		 * be taken in to use at next update */
+		if (display->caps & OMAP_DSS_DISPLAY_CAP_MANUAL_UPDATE)
+			continue;
+
+		dispc_wait_for_go(mgr->id);
+	}
+
+	/* Configure FIFO merge */
+	dispc_enable_fifomerge(enable);
+
+	/* Configure the FIFOs to proper size */
+	for (i = 0; i < omap_dss_get_num_overlays(); ++i) {
+		struct omap_overlay *ovl = omap_dss_get_overlay(i);
+
+		if (!(ovl->caps & OMAP_DSS_OVL_CAP_DISPC))
+			continue;
+
+		ovl->manager->display->configure_overlay(ovl);
+	}
+
+	if (!ch_display || ch_display->caps & OMAP_DSS_DISPLAY_CAP_MANUAL_UPDATE)
+		return;
+
+	/* Issue GO for manager */
+	dispc_go(ch);
+	/* Avoid mixing FIFO merge changes with any later updates. */
+	dispc_wait_for_go(ch);
+}
+
 /* We apply settings to both managers here so that we can use optimizations
  * like fifomerge. Shadow registers can be changed first and the non-shadowed
  * should be changed last, at the same time with GO */
@@ -465,6 +518,29 @@ static int omap_dss_mgr_apply(struct omap_overlay_manager *mgr)
 
 	dss_clk_enable(DSS_CLK_ICK | DSS_CLK_FCK1);
 
+	/* Count enabled overlays */
+	for (i = 0; i < omap_dss_get_num_overlays(); ++i) {
+		ovl = omap_dss_get_overlay(i);
+
+		if (!(ovl->caps & OMAP_DSS_OVL_CAP_DISPC))
+			continue;
+
+		if (!overlay_enabled(ovl))
+			continue;
+
+		display = ovl->manager->display;
+
+		if (dss_check_overlay(ovl, display))
+			continue;
+
+		++num_planes_enabled;
+	}
+
+	/* Disable FIFO merge? */
+	if (num_planes_enabled > 1 && dispc_fifomerge_enabled())
+		configure_fifomerge(false);
+
+	num_planes_enabled = 0;
 	/* Configure normal overlay parameters and disable unused overlays */
 	for (i = 0; i < omap_dss_get_num_overlays(); ++i) {
 		ovl = omap_dss_get_overlay(i);
@@ -541,25 +617,6 @@ static int omap_dss_mgr_apply(struct omap_overlay_manager *mgr)
 
 	dispc_set_overlay_optimization();
 
-	/* Enable fifo merge if possible */
-	dispc_enable_fifomerge(num_planes_enabled == 1);
-
-	/* Go through overlays again. This time we configure fifos.  We have to
-	 * do this after enabling/disabling fifomerge so that we have correct
-	 * knowledge of fifo sizes */
-	for (i = 0; i < omap_dss_get_num_overlays(); ++i) {
-		ovl = omap_dss_get_overlay(i);
-
-		if (!(ovl->caps & OMAP_DSS_OVL_CAP_DISPC))
-			continue;
-
-		if (!overlay_enabled(ovl)) {
-			continue;
-		}
-
-		ovl->manager->display->configure_overlay(ovl);
-	}
-
 	/* Try to prevent FIFO undeflows. */
 	omap_dss_update_min_bus_tput();
 
@@ -581,6 +638,10 @@ static int omap_dss_mgr_apply(struct omap_overlay_manager *mgr)
 
 		dispc_go(mgr->id);
 	}
+
+	/* Enable FIFO merge? */
+	if (num_planes_enabled <= 1 && !dispc_fifomerge_enabled())
+		configure_fifomerge(true);
 
 	dss_clk_disable(DSS_CLK_ICK | DSS_CLK_FCK1);
 

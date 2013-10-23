@@ -26,6 +26,7 @@
 
 extern void aic34b_ear_enable(int enable);
 void aic34b_set_mic_bias(int bias);
+int aic34b_get_mic_bias(void);
 int aic34b_set_volume(u8 volume);
 
 #endif

@@ -52,7 +52,6 @@ void if_ssi_stop(int ch);
 void if_ssi_send_break(int ch);
 void if_ssi_flush_rx(int ch);
 void if_ssi_flush_tx(int ch);
-void if_ssi_bootstrap(int ch);
 void if_ssi_set_wakeline(int ch, unsigned int state);
 void if_ssi_get_wakeline(int ch, unsigned int *state);
 int if_ssi_set_rx(int ch, struct ssi_rx_config *cfg);

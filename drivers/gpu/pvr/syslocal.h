@@ -1,26 +1,26 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
@@ -30,18 +30,17 @@
 #include <linux/version.h>
 #include <linux/clk.h>
 #include <linux/semaphore.h>
-/*#include <asm/arch/resource.h>*/
 
 
-	IMG_CHAR *SysCreateVersionString(IMG_CPU_PHYADDR sRegRegion);
+char *SysCreateVersionString(struct IMG_CPU_PHYADDR sRegRegion);
 
-	PVRSRV_ERROR InitSystemClocks(SYS_DATA * psSysData);
-	IMG_VOID CleanupSystemClocks(SYS_DATA * psSysData);
-	IMG_VOID DisableSystemClocks(SYS_DATA * psSysData);
-	PVRSRV_ERROR EnableSystemClocks(SYS_DATA * psSysData);
+enum PVRSRV_ERROR InitSystemClocks(struct SYS_DATA *psSysData);
+void CleanupSystemClocks(struct SYS_DATA *psSysData);
+void DisableSystemClocks(struct SYS_DATA *psSysData);
+enum PVRSRV_ERROR EnableSystemClocks(struct SYS_DATA *psSysData);
 
-	IMG_VOID DisableSGXClocks(SYS_DATA * psSysData);
-	PVRSRV_ERROR EnableSGXClocks(SYS_DATA * psSysData);
+void DisableSGXClocks(struct SYS_DATA *psSysData);
+enum PVRSRV_ERROR EnableSGXClocks(struct SYS_DATA *psSysData);
 
 #define SYS_SPECIFIC_DATA_ENABLE_SYSCLOCKS	0x00000001
 #define SYS_SPECIFIC_DATA_ENABLE_LISR		0x00000002
@@ -56,29 +55,32 @@
 #define	SYS_SPECIFIC_DATA_PM_UNINSTALL_LISR	0x00000200
 #define	SYS_SPECIFIC_DATA_PM_DISABLE_SYSCLOCKS	0x00000400
 
-#define	SYS_SPECIFIC_DATA_SET(psSysSpecData, flag) ((void)((psSysSpecData)->ui32SysSpecificData |= (flag)))
+#define	SYS_SPECIFIC_DATA_SET(psSysSpecData, flag) \
+		((void)((psSysSpecData)->ui32SysSpecificData |= (flag)))
 
-#define	SYS_SPECIFIC_DATA_CLEAR(psSysSpecData, flag) ((void)((psSysSpecData)->ui32SysSpecificData &= ~(flag)))
+#define	SYS_SPECIFIC_DATA_CLEAR(psSysSpecData, flag) \
+		((void)((psSysSpecData)->ui32SysSpecificData &= ~(flag)))
 
-#define	SYS_SPECIFIC_DATA_TEST(psSysSpecData, flag) (((psSysSpecData)->ui32SysSpecificData & (flag)) != 0)
+#define	SYS_SPECIFIC_DATA_TEST(psSysSpecData, flag) \
+		(((psSysSpecData)->ui32SysSpecificData & (flag)) != 0)
 
-	typedef struct _SYS_SPECIFIC_DATA_TAG_ {
-		IMG_UINT32 ui32SysSpecificData;
-		PVRSRV_DEVICE_NODE *psSGXDevNode;
-		IMG_BOOL bSGXInitComplete;
-		IMG_BOOL bSGXClocksEnabled;
-		struct clk *psCORE_CK;
-		struct clk *psSGX_FCK;
-		struct clk *psSGX_ICK;
-		struct clk *psMPU_CK;
+struct SYS_SPECIFIC_DATA {
+	u32 ui32SysSpecificData;
+	struct PVRSRV_DEVICE_NODE *psSGXDevNode;
+	IMG_BOOL bSGXInitComplete;
+	IMG_BOOL bSGXClocksEnabled;
+	struct clk *psCORE_CK;
+	struct clk *psSGX_FCK;
+	struct clk *psSGX_ICK;
+	struct clk *psMPU_CK;
 #if defined(DEBUG) || defined(TIMING)
-		struct clk *psGPT11_FCK;
-		struct clk *psGPT11_ICK;
-		void __iomem *gpt_base;
+	struct clk *psGPT11_FCK;
+	struct clk *psGPT11_ICK;
+	void __iomem *gpt_base;
 #endif
-		struct constraint_handle *pVdd2Handle;
-	} SYS_SPECIFIC_DATA;
+	struct constraint_handle *pVdd2Handle;
+};
 
-	extern SYS_SPECIFIC_DATA *gpsSysSpecificData;
+extern struct SYS_SPECIFIC_DATA *gpsSysSpecificData;
 
 #endif

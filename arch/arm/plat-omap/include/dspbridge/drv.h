@@ -189,6 +189,7 @@ struct PROCESS_CONTEXT{
 
 	/* DMM resources */
 	struct DMM_RES_OBJECT *pDMMList;
+	spinlock_t dmm_list_lock;
 
 	/* DSP Heap resources */
 	struct DSPHEAP_RES_OBJECT *pDSPHEAPList;

@@ -601,7 +601,17 @@ static void ispccdc_setup_lsc(struct isp_ccdc_device *isp_ccdc,
 
 void ispccdc_lsc_error_handler(struct isp_ccdc_device *isp_ccdc)
 {
+	/*
+	 * From OMAP3 TRM: When this event is pending, the module
+	 * goes into transparent mode (output =input). Normal
+	 * operation can be resumed at the start of the next frame
+	 * after:
+	 *  1) Clearing this event
+	 *  2) Disabling the LSC module
+	 *  3) Enabling it
+	 */
 	ispccdc_enable_lsc(isp_ccdc, 0);
+	ispccdc_enable_lsc(isp_ccdc, 1);
 }
 
 /**

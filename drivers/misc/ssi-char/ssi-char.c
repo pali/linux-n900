@@ -171,10 +171,14 @@ static ssize_t ssi_char_read(struct file *file, char __user *buf,
 	ssize_t ret;
 
 	/* only 32bit data is supported for now */
-	if ((count < 4) || (count & 3))
+	if ((count < 4) || (count & 3) || (count > 0x10000))
 		return -EINVAL;
 
 	data = kmalloc(count, GFP_ATOMIC);
+	if (!data) {
+		pr_err("SSI-CHAR: memory allocation failed.\n");
+		return -ENOMEM;
+	}
 
 	ret = if_ssi_read(ch, data, count);
 	if (ret < 0) {
@@ -212,7 +216,7 @@ static ssize_t ssi_char_read(struct file *file, char __user *buf,
 			ret = -EAGAIN;
 			goto out;
 		} else if (signal_pending(current)) {
-			ret = -EAGAIN;
+			ret = -EINTR;
 			if_ssi_cancel_read(ch);
 			break;
 		}
@@ -247,10 +251,14 @@ static ssize_t ssi_char_write(struct file *file, const char __user *buf,
 	ssize_t ret;
 
 	/* only 32bit data is supported for now */
-	if ((count < 4) || (count & 3))
+	if ((count < 4) || (count & 3) || (count > 0x10000))
 		return -EINVAL;
 
 	data = kmalloc(count, GFP_ATOMIC);
+	if (!data) {
+		pr_err("SSI-CHAR: memory allocation failed.\n");
+		return -ENOMEM;
+	}
 
 	if (copy_from_user(data, (void __user *)buf, count)) {
 		ret = -EFAULT;
@@ -295,8 +303,9 @@ static ssize_t ssi_char_write(struct file *file, const char __user *buf,
 			ret = -EAGAIN;
 			goto out;
 		} else if (signal_pending(current)) {
-			ret = -ERESTARTSYS;
-			goto out;
+			ret = -EINTR;
+			if_ssi_cancel_write(ch);
+			break;
 		}
 
 		schedule();

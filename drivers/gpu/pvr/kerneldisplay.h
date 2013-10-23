@@ -1,144 +1,103 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
-#if !defined (__KERNELDISPLAY_H__)
+#if !defined(__KERNELDISPLAY_H__)
 #define __KERNELDISPLAY_H__
 
-typedef PVRSRV_ERROR(*PFN_OPEN_DC_DEVICE) (IMG_UINT32, IMG_HANDLE *,
-					   PVRSRV_SYNC_DATA *);
-typedef PVRSRV_ERROR(*PFN_CLOSE_DC_DEVICE) (IMG_HANDLE);
-typedef PVRSRV_ERROR(*PFN_ENUM_DC_FORMATS) (IMG_HANDLE, IMG_UINT32 *,
-					    DISPLAY_FORMAT *);
-typedef PVRSRV_ERROR(*PFN_ENUM_DC_DIMS) (IMG_HANDLE, DISPLAY_FORMAT *,
-					 IMG_UINT32 *, DISPLAY_DIMS *);
-typedef PVRSRV_ERROR(*PFN_GET_DC_SYSTEMBUFFER) (IMG_HANDLE, IMG_HANDLE *);
-typedef PVRSRV_ERROR(*PFN_GET_DC_INFO) (IMG_HANDLE, DISPLAY_INFO *);
-typedef PVRSRV_ERROR(*PFN_CREATE_DC_SWAPCHAIN) (IMG_HANDLE,
-						IMG_UINT32,
-						DISPLAY_SURF_ATTRIBUTES *,
-						DISPLAY_SURF_ATTRIBUTES *,
-						IMG_UINT32,
-						PVRSRV_SYNC_DATA **,
-						IMG_UINT32,
-						IMG_HANDLE *, IMG_UINT32 *);
-typedef PVRSRV_ERROR(*PFN_DESTROY_DC_SWAPCHAIN) (IMG_HANDLE, IMG_HANDLE);
-typedef PVRSRV_ERROR(*PFN_SET_DC_DSTRECT) (IMG_HANDLE, IMG_HANDLE, IMG_RECT *);
-typedef PVRSRV_ERROR(*PFN_SET_DC_SRCRECT) (IMG_HANDLE, IMG_HANDLE, IMG_RECT *);
-typedef PVRSRV_ERROR(*PFN_SET_DC_DSTCK) (IMG_HANDLE, IMG_HANDLE, IMG_UINT32);
-typedef PVRSRV_ERROR(*PFN_SET_DC_SRCCK) (IMG_HANDLE, IMG_HANDLE, IMG_UINT32);
-typedef PVRSRV_ERROR(*PFN_GET_DC_BUFFERS) (IMG_HANDLE,
-					   IMG_HANDLE,
-					   IMG_UINT32 *, IMG_HANDLE *);
-typedef PVRSRV_ERROR(*PFN_SWAP_TO_DC_BUFFER) (IMG_HANDLE,
-					      IMG_HANDLE,
-					      IMG_UINT32,
-					      IMG_HANDLE,
-					      IMG_UINT32, IMG_RECT *);
-typedef PVRSRV_ERROR(*PFN_SWAP_TO_DC_SYSTEM) (IMG_HANDLE, IMG_HANDLE);
-typedef IMG_VOID(*PFN_SET_DC_STATE) (IMG_HANDLE, IMG_UINT32);
 
-typedef struct PVRSRV_DC_SRV2DISP_KMJTABLE_TAG {
-	IMG_UINT32 ui32TableSize;
-	PFN_OPEN_DC_DEVICE pfnOpenDCDevice;
-	PFN_CLOSE_DC_DEVICE pfnCloseDCDevice;
-	PFN_ENUM_DC_FORMATS pfnEnumDCFormats;
-	PFN_ENUM_DC_DIMS pfnEnumDCDims;
-	PFN_GET_DC_SYSTEMBUFFER pfnGetDCSystemBuffer;
-	PFN_GET_DC_INFO pfnGetDCInfo;
-	PFN_GET_BUFFER_ADDR pfnGetBufferAddr;
-	PFN_CREATE_DC_SWAPCHAIN pfnCreateDCSwapChain;
-	PFN_DESTROY_DC_SWAPCHAIN pfnDestroyDCSwapChain;
-	PFN_SET_DC_DSTRECT pfnSetDCDstRect;
-	PFN_SET_DC_SRCRECT pfnSetDCSrcRect;
-	PFN_SET_DC_DSTCK pfnSetDCDstColourKey;
-	PFN_SET_DC_SRCCK pfnSetDCSrcColourKey;
-	PFN_GET_DC_BUFFERS pfnGetDCBuffers;
-	PFN_SWAP_TO_DC_BUFFER pfnSwapToDCBuffer;
-	PFN_SWAP_TO_DC_SYSTEM pfnSwapToDCSystem;
-	PFN_SET_DC_STATE pfnSetDCState;
+struct PVRSRV_DC_SRV2DISP_KMJTABLE {
+	u32 ui32TableSize;
+	enum PVRSRV_ERROR (*pfnOpenDCDevice)(u32, void **,
+					struct PVRSRV_SYNC_DATA *);
+	enum PVRSRV_ERROR (*pfnCloseDCDevice)(void *);
+	enum PVRSRV_ERROR (*pfnEnumDCFormats)(void *, u32 *,
+					 struct DISPLAY_FORMAT *);
+	enum PVRSRV_ERROR (*pfnEnumDCDims)(void *, struct DISPLAY_FORMAT *,
+				      u32 *, struct DISPLAY_DIMS *);
+	enum PVRSRV_ERROR (*pfnGetDCSystemBuffer)(void *, void **);
+	enum PVRSRV_ERROR (*pfnGetDCInfo)(void *, struct DISPLAY_INFO *);
+	enum PVRSRV_ERROR (*pfnGetBufferAddr)(void *, void *,
+					 struct IMG_SYS_PHYADDR **, u32 *,
+					 void __iomem **, void **, IMG_BOOL *);
+	enum PVRSRV_ERROR (*pfnCreateDCSwapChain)(void *, u32,
+					     struct DISPLAY_SURF_ATTRIBUTES *,
+					     struct DISPLAY_SURF_ATTRIBUTES *,
+					     u32, struct PVRSRV_SYNC_DATA **,
+					     u32, void **, u32 *);
+	enum PVRSRV_ERROR (*pfnDestroyDCSwapChain)(void *, void *);
+	enum PVRSRV_ERROR (*pfnSetDCDstRect)(void *, void *, struct IMG_RECT *);
+	enum PVRSRV_ERROR (*pfnSetDCSrcRect)(void *, void *, struct IMG_RECT *);
+	enum PVRSRV_ERROR (*pfnSetDCDstColourKey)(void *, void *, u32);
+	enum PVRSRV_ERROR (*pfnSetDCSrcColourKey)(void *, void *, u32);
+	enum PVRSRV_ERROR (*pfnGetDCBuffers)(void *, void *, u32 *, void **);
+	enum PVRSRV_ERROR (*pfnSwapToDCBuffer)(void *, void *, u32, void *, u32,
+					  struct IMG_RECT *);
+	enum PVRSRV_ERROR (*pfnSwapToDCSystem)(void *, void *);
+	void (*pfnSetDCState)(void *, u32);
+};
 
-} PVRSRV_DC_SRV2DISP_KMJTABLE;
+struct PVRSRV_DC_DISP2SRV_KMJTABLE {
+	u32 ui32TableSize;
+	enum PVRSRV_ERROR (*pfnPVRSRVRegisterDCDevice)(
+				struct PVRSRV_DC_SRV2DISP_KMJTABLE*, u32 *);
+	enum PVRSRV_ERROR (*pfnPVRSRVRemoveDCDevice)(u32);
+	enum PVRSRV_ERROR (*pfnPVRSRVOEMFunction)(u32, void *, u32, void *,
+				u32);
+	enum PVRSRV_ERROR (*pfnPVRSRVRegisterCmdProcList)(u32,
+				IMG_BOOL (**)(void *, u32, void *), u32[][2],
+				u32);
+	enum PVRSRV_ERROR (*pfnPVRSRVRemoveCmdProcList)(u32, u32);
+	void (*pfnPVRSRVCmdComplete)(void *, IMG_BOOL);
+	enum PVRSRV_ERROR (*pfnPVRSRVRegisterSystemISRHandler)(
+				IMG_BOOL (*)(void *), void *, u32, u32);
+	enum PVRSRV_ERROR (*pfnPVRSRVRegisterPowerDevice)(u32,
+			enum PVRSRV_ERROR (*)(void *, enum PVR_POWER_STATE,
+					 enum PVR_POWER_STATE),
+			enum PVRSRV_ERROR (*)(void *, enum PVR_POWER_STATE,
+					 enum PVR_POWER_STATE),
+			enum PVRSRV_ERROR (*)(void *, IMG_BOOL,
+					 enum PVR_POWER_STATE),
+			enum PVRSRV_ERROR (*)(void *, IMG_BOOL,
+					 enum PVR_POWER_STATE),
+			void *, enum PVR_POWER_STATE, enum PVR_POWER_STATE);
+};
 
-typedef IMG_BOOL(*PFN_ISR_HANDLER) (IMG_VOID *);
+struct DISPLAYCLASS_FLIP_COMMAND {
+	void *hExtDevice;
+	void *hExtSwapChain;
+	void *hExtBuffer;
+	void *hPrivateTag;
+	u32 ui32ClipRectCount;
+	struct IMG_RECT *psClipRect;
+	u32 ui32SwapInterval;
+};
 
-typedef PVRSRV_ERROR(*PFN_DC_REGISTER_DISPLAY_DEV) (PVRSRV_DC_SRV2DISP_KMJTABLE
-						    *, IMG_UINT32 *);
-typedef PVRSRV_ERROR(*PFN_DC_REMOVE_DISPLAY_DEV) (IMG_UINT32);
-typedef PVRSRV_ERROR(*PFN_DC_OEM_FUNCTION) (IMG_UINT32, IMG_VOID *, IMG_UINT32,
-					    IMG_VOID *, IMG_UINT32);
-typedef PVRSRV_ERROR(*PFN_DC_REGISTER_COMMANDPROCLIST) (IMG_UINT32,
-							PPFN_CMD_PROC,
-							IMG_UINT32[][2],
-							IMG_UINT32);
-typedef PVRSRV_ERROR(*PFN_DC_REMOVE_COMMANDPROCLIST) (IMG_UINT32, IMG_UINT32);
-typedef IMG_VOID(*PFN_DC_CMD_COMPLETE) (IMG_HANDLE, IMG_BOOL);
-typedef PVRSRV_ERROR(*PFN_DC_REGISTER_SYS_ISR) (PFN_ISR_HANDLER, IMG_VOID *,
-						IMG_UINT32, IMG_UINT32);
-typedef PVRSRV_ERROR(*PFN_DC_REGISTER_POWER) (IMG_UINT32, PFN_PRE_POWER,
-					      PFN_POST_POWER,
-					      PFN_PRE_CLOCKSPEED_CHANGE,
-					      PFN_POST_CLOCKSPEED_CHANGE,
-					      IMG_HANDLE, PVR_POWER_STATE,
-					      PVR_POWER_STATE);
-
-typedef struct PVRSRV_DC_DISP2SRV_KMJTABLE_TAG {
-	IMG_UINT32 ui32TableSize;
-	PFN_DC_REGISTER_DISPLAY_DEV pfnPVRSRVRegisterDCDevice;
-	PFN_DC_REMOVE_DISPLAY_DEV pfnPVRSRVRemoveDCDevice;
-	PFN_DC_OEM_FUNCTION pfnPVRSRVOEMFunction;
-	PFN_DC_REGISTER_COMMANDPROCLIST pfnPVRSRVRegisterCmdProcList;
-	PFN_DC_REMOVE_COMMANDPROCLIST pfnPVRSRVRemoveCmdProcList;
-	PFN_DC_CMD_COMPLETE pfnPVRSRVCmdComplete;
-	PFN_DC_REGISTER_SYS_ISR pfnPVRSRVRegisterSystemISRHandler;
-	PFN_DC_REGISTER_POWER pfnPVRSRVRegisterPowerDevice;
-} PVRSRV_DC_DISP2SRV_KMJTABLE, *PPVRSRV_DC_DISP2SRV_KMJTABLE;
-
-typedef struct DISPLAYCLASS_FLIP_COMMAND_TAG {
-
-	IMG_HANDLE hExtDevice;
-
-	IMG_HANDLE hExtSwapChain;
-
-	IMG_HANDLE hExtBuffer;
-
-	IMG_HANDLE hPrivateTag;
-
-	IMG_UINT32 ui32ClipRectCount;
-
-	IMG_RECT *psClipRect;
-
-	IMG_UINT32 ui32SwapInterval;
-
-} DISPLAYCLASS_FLIP_COMMAND;
-
-#define DC_FLIP_COMMAND		0
+#define DC_FLIP_COMMAND				0
 
 #define DC_STATE_NO_FLUSH_COMMANDS		0
 #define DC_STATE_FLUSH_COMMANDS			1
-
-typedef IMG_BOOL(*PFN_DC_GET_PVRJTABLE) (PPVRSRV_DC_DISP2SRV_KMJTABLE);
 
 #endif

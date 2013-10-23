@@ -53,10 +53,6 @@ static struct {
 	struct delayed_work bus_tput_work;
 	unsigned int bus_tput;
 
-	bool reset_pending;
-	spinlock_t reset_lock;
-	struct work_struct reset_work;
-
 	struct mutex dss_lock;
 } core;
 
@@ -460,34 +456,9 @@ EXPORT_SYMBOL(omap_dss_unlock);
 
 /* RESET */
 
-void dss_schedule_reset(void)
-{
-	unsigned long flags;
-
-	DSSDBG("schduling a soft reset\n");
-
-	spin_lock_irqsave(&core.reset_lock, flags);
-	if (core.reset_pending) {
-		spin_unlock_irqrestore(&core.reset_lock, flags);
-		return;
-	}
-
-	core.reset_pending = true;
-	schedule_work(&core.reset_work);
-
-	spin_unlock_irqrestore(&core.reset_lock, flags);
-}
-
-static void reset_work_func(struct work_struct *work)
+void dss_soft_reset(void)
 {
 	DSSDBG("performing soft reset\n");
-
-	spin_lock_irq(&core.reset_lock);
-	if (!core.reset_pending) {
-		spin_unlock_irq(&core.reset_lock);
-		return;
-	}
-	spin_unlock_irq(&core.reset_lock);
 
 	omap_dss_lock();
 	dss_clk_enable_all();
@@ -501,11 +472,7 @@ static void reset_work_func(struct work_struct *work)
 	dss_clk_disable_all();
 	omap_dss_unlock();
 
-	spin_lock_irq(&core.reset_lock);
-	core.reset_pending = false;
-	spin_unlock_irq(&core.reset_lock);
-
-	DSSDBG("done with soft reset\n");
+	DSSERR("done with soft reset\n");
 }
 
 /* DVFS */
@@ -694,10 +661,6 @@ static int omap_dss_probe(struct platform_device *pdev)
 
 	INIT_DELAYED_WORK(&core.bus_tput_work, bus_tput_work_func);
 
-	core.reset_pending = false;
-	spin_lock_init(&core.reset_lock);
-	INIT_WORK(&core.reset_work, reset_work_func);
-
 	mutex_init(&core.dss_lock);
 
 	return 0;
@@ -711,9 +674,6 @@ static int omap_dss_remove(struct platform_device *pdev)
 {
 	struct omap_dss_board_info *pdata = pdev->dev.platform_data;
 	int c;
-
-	cancel_work_sync(&core.reset_work);
-	core.reset_pending = false;
 
 	cancel_delayed_work_sync(&core.bus_tput_work);
 	if (pdata->set_min_bus_tput)

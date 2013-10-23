@@ -47,6 +47,9 @@ int ssi_set_rx(struct ssi_port *sport, struct ssr_ctx *cfg)
 			(cfg->channels != NOT_SET)))
 		return -EINVAL;
 
+	if ((cfg->channels & (-cfg->channels)) ^ cfg->channels)
+		return -EINVAL;
+
 	if ((cfg->timeout > SSI_MAX_RX_TIMEOUT) && (cfg->timeout != NOT_SET))
 		return -EINVAL;
 
@@ -57,11 +60,7 @@ int ssi_set_rx(struct ssi_port *sport, struct ssr_ctx *cfg)
 		ssi_outl(cfg->frame_size, base, SSI_SSR_FRAMESIZE_REG(port));
 
 	if (cfg->channels != NOT_SET) {
-		if ((cfg->channels & (-cfg->channels)) ^ cfg->channels)
-			return -EINVAL;
-		else
-			ssi_outl(cfg->channels, base,
-					SSI_SSR_CHANNELS_REG(port));
+		ssi_outl(cfg->channels, base, SSI_SSR_CHANNELS_REG(port));
 	}
 
 	if (cfg->timeout != NOT_SET)
@@ -102,6 +101,9 @@ int ssi_set_tx(struct ssi_port *sport, struct sst_ctx *cfg)
 			(cfg->channels != NOT_SET)))
 		return -EINVAL;
 
+	if ((cfg->channels & (-cfg->channels)) ^ cfg->channels)
+		return -EINVAL;
+
 	if ((cfg->divisor > SSI_MAX_TX_DIVISOR) && (cfg->divisor != NOT_SET))
 		return -EINVAL;
 
@@ -111,17 +113,14 @@ int ssi_set_tx(struct ssi_port *sport, struct sst_ctx *cfg)
 		return -EINVAL;
 
 	if (cfg->mode != NOT_SET)
-		ssi_outl(cfg->channels, base, SSI_SST_CHANNELS_REG(port));
+		ssi_outl(cfg->mode, base, SSI_SST_MODE_REG(port));
 
 	if (cfg->frame_size != NOT_SET)
 		ssi_outl(cfg->frame_size, base, SSI_SST_FRAMESIZE_REG(port));
 
-	if (cfg->channels != NOT_SET) {
-		if ((cfg->channels & (-cfg->channels)) ^ cfg->channels)
-			return -EINVAL;
-		else
-			ssi_outl(cfg->mode, base, SSI_SST_MODE_REG(port));
-	}
+	if (cfg->channels != NOT_SET)
+		ssi_outl(cfg->channels, base, SSI_SST_CHANNELS_REG(port));
+
 
 	if (cfg->divisor != NOT_SET)
 		ssi_outl(cfg->divisor, base, SSI_SST_DIVISOR_REG(port));
@@ -485,6 +484,7 @@ int ssi_ioctl(struct ssi_device *dev, unsigned int command, void *arg)
 			goto out;
 		}
 		ssi_get_tx(dev->ch->ssi_port, (struct sst_ctx *)arg);
+		break;
 	case SSI_IOCTL_TX_CH_FULL:
 		if (!arg) {
 			err = -EINVAL;

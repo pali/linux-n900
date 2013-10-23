@@ -1,26 +1,26 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
@@ -43,14 +43,6 @@
 #include "pvrversion.h"
 #include "proc.h"
 
-#ifdef DEBUG
-int PVRDebugProcSetLevel(struct file *file, const char *buffer,
-			 unsigned long count, void *data);
-int PVRDebugProcGetLevel(char *page, char **start, off_t off, int count,
-			 int *eof, void *data);
-
-#endif
-
 static struct proc_dir_entry *dir;
 
 static off_t procDumpSysNodes(char *buf, size_t size, off_t off);
@@ -63,22 +55,19 @@ off_t printAppend(char *buffer, size_t size, off_t off, const char *format, ...)
 	va_list ap;
 
 	va_start(ap, format);
-
 	n = vsnprintf(buffer + off, space, format, ap);
-
 	va_end(ap);
 
-	if (n > space || n < 0) {
+	if (n > space || n < 0)
 		return size;
-	} else {
+	else
 		return off + n;
-	}
 }
 
 static int pvr_read_proc(char *page, char **start, off_t off,
 			 int count, int *eof, void *data)
 {
-	pvr_read_proc_t *pprn = data;
+	off_t (*pprn)(char *, size_t, off_t) = data;
 
 	off_t len = pprn(page, count, off);
 
@@ -101,21 +90,19 @@ int CreateProcEntry(const char *name, read_proc_t rhandler,
 	mode_t mode;
 
 	if (!dir) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "CreateProcEntry: cannot make proc entry /proc/pvr/%s: no parent",
-			 name));
+		PVR_DPF(PVR_DBG_ERROR, "CreateProcEntry: "
+			"cannot make proc entry /proc/pvr/%s: no parent",
+			 name);
 		return -ENOMEM;
 	}
 
 	mode = S_IFREG;
 
-	if (rhandler) {
+	if (rhandler)
 		mode |= S_IRUGO;
-	}
 
-	if (whandler) {
+	if (whandler)
 		mode |= S_IWUSR;
-	}
 
 	file = create_proc_entry(name, mode, dir);
 
@@ -125,26 +112,26 @@ int CreateProcEntry(const char *name, read_proc_t rhandler,
 		file->write_proc = whandler;
 		file->data = data;
 
-		PVR_DPF((PVR_DBG_MESSAGE, "Created /proc/pvr/%s", name));
+		PVR_DPF(PVR_DBG_MESSAGE, "Created /proc/pvr/%s", name);
 
 		return 0;
 	}
 
-	PVR_DPF((PVR_DBG_ERROR,
-		 "CreateProcEntry: cannot make proc entry /proc/pvr/%s: no memory",
-		 name));
+	PVR_DPF(PVR_DBG_ERROR, "CreateProcEntry: "
+		 "cannot make proc entry /proc/pvr/%s: no memory", name);
 
 	return -ENOMEM;
 }
 
-int CreateProcReadEntry(const char *name, pvr_read_proc_t handler)
+int CreateProcReadEntry(const char *name,
+			off_t (handler)(char *, size_t, off_t))
 {
 	struct proc_dir_entry *file;
 
 	if (!dir) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "CreateProcReadEntry: cannot make proc entry /proc/pvr/%s: no parent",
-			 name));
+		PVR_DPF(PVR_DBG_ERROR, "CreateProcReadEntry: "
+			 "cannot make proc entry /proc/pvr/%s: no parent",
+			 name);
 
 		return -ENOMEM;
 	}
@@ -159,9 +146,9 @@ int CreateProcReadEntry(const char *name, pvr_read_proc_t handler)
 		return 0;
 	}
 
-	PVR_DPF((PVR_DBG_ERROR,
-		 "CreateProcReadEntry: cannot make proc entry /proc/pvr/%s: no memory",
-		 name));
+	PVR_DPF(PVR_DBG_ERROR, "CreateProcReadEntry: "
+			"cannot make proc entry /proc/pvr/%s: no memory",
+		 name);
 
 	return -ENOMEM;
 }
@@ -171,8 +158,8 @@ int CreateProcEntries(void)
 	dir = proc_mkdir("pvr", NULL);
 
 	if (!dir) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "CreateProcEntries: cannot make /proc/pvr directory"));
+		PVR_DPF(PVR_DBG_ERROR, "CreateProcEntries: "
+			"cannot make /proc/pvr directory");
 
 		return -ENOMEM;
 	}
@@ -180,16 +167,16 @@ int CreateProcEntries(void)
 	if (CreateProcReadEntry("queue", QueuePrintQueues) ||
 	    CreateProcReadEntry("version", procDumpVersion) ||
 	    CreateProcReadEntry("nodes", procDumpSysNodes)) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "CreateProcEntries: couldn't make /proc/pvr files"));
+		PVR_DPF(PVR_DBG_ERROR,
+			 "CreateProcEntries: couldn't make /proc/pvr files");
 
 		return -ENOMEM;
 	}
 #ifdef DEBUG
 	if (CreateProcEntry
-	    ("debug_level", PVRDebugProcGetLevel, PVRDebugProcSetLevel, 0)) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "CreateProcEntries: couldn't make /proc/pvr/debug_level"));
+	    ("debug_level", PVRDebugProcGetLevel, PVRDebugProcSetLevel, NULL)) {
+		PVR_DPF(PVR_DBG_ERROR, "CreateProcEntries: "
+			"couldn't make /proc/pvr/debug_level");
 
 		return -ENOMEM;
 	}
@@ -200,11 +187,10 @@ int CreateProcEntries(void)
 
 void RemoveProcEntry(const char *name)
 {
-	if (dir) {
+	if (dir)
 		remove_proc_entry(name, dir);
-	}
 
-	PVR_DPF((PVR_DBG_MESSAGE, "Removing /proc/pvr/%s", name));
+	PVR_DPF(PVR_DBG_MESSAGE, "Removing /proc/pvr/%s", name);
 }
 
 void RemoveProcEntries(void)
@@ -217,8 +203,8 @@ void RemoveProcEntries(void)
 	RemoveProcEntry("version");
 
 	while (dir->subdir) {
-		PVR_DPF((PVR_DBG_WARNING, "Belatedly removing /proc/pvr/%s",
-			 dir->subdir->name));
+		PVR_DPF(PVR_DBG_WARNING, "Belatedly removing /proc/pvr/%s",
+			 dir->subdir->name);
 
 		RemoveProcEntry(dir->subdir->name);
 	}
@@ -228,54 +214,45 @@ void RemoveProcEntries(void)
 
 static off_t procDumpVersion(char *buf, size_t size, off_t off)
 {
-	SYS_DATA *psSysData;
+	struct SYS_DATA *psSysData;
 
-	if (off == 0) {
-		return printAppend(buf, size, 0,
-				   "Version %s (%s) %s\n",
-				   PVRVERSION_STRING,
-				   PVR_BUILD_TYPE, PVR_BUILD_DIR);
-	}
+	if (off == 0)
+		return printAppend(buf, size, 0, "Version %s (%s) %s\n",
+				   PVRVERSION_STRING, PVR_BUILD_TYPE,
+				   PVR_BUILD_DIR);
 
-	if (SysAcquireData(&psSysData) != PVRSRV_OK) {
+	if (SysAcquireData(&psSysData) != PVRSRV_OK)
 		return PVRSRV_ERROR_GENERIC;
-	}
 
 	if (off == 1) {
-		IMG_CHAR *pszSystemVersionString = "None";
+		char *pszSystemVersionString = "None";
 
-		if (psSysData->pszVersionString) {
+		if (psSysData->pszVersionString)
 			pszSystemVersionString = psSysData->pszVersionString;
-		}
 
-		if (strlen(pszSystemVersionString)
-		    + strlen("System Version String: \n")
-		    + 1 > size) {
+		if (strlen(pszSystemVersionString) +
+		    strlen("System Version String: \n") + 1 > size)
 			return 0;
-		}
-		return printAppend(buf, size, 0,
-				   "System Version String: %s\n",
+		return printAppend(buf, size, 0, "System Version String: %s\n",
 				   pszSystemVersionString);
 	}
 
 	return END_OF_FILE;
 }
 
-static const char *deviceTypeToString(PVRSRV_DEVICE_TYPE deviceType)
+static const char *deviceTypeToString(enum PVRSRV_DEVICE_TYPE deviceType)
 {
 	switch (deviceType) {
 	default:
 		{
 			static char text[10];
-
 			sprintf(text, "?%x", deviceType);
-
 			return text;
 		}
 	}
 }
 
-static const char *deviceClassToString(PVRSRV_DEVICE_CLASS deviceClass)
+static const char *deviceClassToString(enum PVRSRV_DEVICE_CLASS deviceClass)
 {
 	switch (deviceClass) {
 	case PVRSRV_DEVICE_CLASS_3D:
@@ -303,33 +280,30 @@ static const char *deviceClassToString(PVRSRV_DEVICE_CLASS deviceClass)
 static
 off_t procDumpSysNodes(char *buf, size_t size, off_t off)
 {
-	SYS_DATA *psSysData;
-	PVRSRV_DEVICE_NODE *psDevNode;
+	struct SYS_DATA *psSysData;
+	struct PVRSRV_DEVICE_NODE *psDevNode;
 	off_t len;
 
-	if (size < 80) {
+	if (size < 80)
 		return 0;
-	}
 
-	if (off == 0) {
-		return printAppend(buf, size, 0,
-				   "Registered nodes\n"
-				   "Addr     Type     Class    Index Ref pvDev     Size Res\n");
-	}
+	if (off == 0)
+		return printAppend(buf, size, 0, "Registered nodes\n"
+			"Addr     Type     Class    Index Ref pvDev     "
+			"Size Res\n");
 
-	if (SysAcquireData(&psSysData) != PVRSRV_OK) {
+	if (SysAcquireData(&psSysData) != PVRSRV_OK)
 		return PVRSRV_ERROR_GENERIC;
-	}
 
 	for (psDevNode = psSysData->psDeviceNodeList;
-	     --off && psDevNode; psDevNode = psDevNode->psNext) ;
+	     --off && psDevNode; psDevNode = psDevNode->psNext)
+		;
 
-	if (!psDevNode) {
+	if (!psDevNode)
 		return END_OF_FILE;
-	}
 
 	len = printAppend(buf, size, 0,
-			  "%p %-8s %-8s %4d  %2lu  %p  %3lu  %p\n",
+			  "%p %-8s %-8s %4d  %2u  %p  %3u  %p\n",
 			  psDevNode,
 			  deviceTypeToString(psDevNode->sDevId.eDeviceType),
 			  deviceClassToString(psDevNode->sDevId.eDeviceClass),
@@ -338,5 +312,5 @@ off_t procDumpSysNodes(char *buf, size_t size, off_t off)
 			  psDevNode->pvDevice,
 			  psDevNode->ui32pvDeviceSize,
 			  psDevNode->hResManContext);
-	return (len);
+	return len;
 }

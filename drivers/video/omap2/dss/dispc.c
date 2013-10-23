@@ -329,7 +329,7 @@ void dispc_save_context(void)
 void dispc_restore_context(void)
 {
 	RR(SYSCONFIG);
-	RR(IRQENABLE);
+	/*RR(IRQENABLE);*/
 	/*RR(CONTROL);*/
 	RR(CONFIG);
 	RR(DEFAULT_COLOR0);
@@ -466,6 +466,15 @@ void dispc_restore_context(void)
 
 	/* enable last, because LCD & DIGIT enable are here */
 	RR(CONTROL);
+
+	/* clear spurious SYNC_LOST_DIGIT interrupts */
+	dispc_write_reg(DISPC_IRQSTATUS, DISPC_IRQ_SYNC_LOST_DIGIT);
+
+	/*
+	 * enable last so IRQs won't trigger before
+	 * the context is fully restored
+	 */
+	RR(IRQENABLE);
 }
 
 #undef SR
@@ -512,6 +521,40 @@ void dispc_go(enum omap_channel channel)
 	DSSDBG("GO %s\n", channel == OMAP_DSS_CHANNEL_LCD ? "LCD" : "DIGIT");
 
 	REG_FLD_MOD(DISPC_CONTROL, 1, bit, bit);
+end:
+	enable_clocks(0);
+}
+
+void dispc_wait_for_go(enum omap_channel channel)
+{
+	int bit;
+	unsigned long tmo;
+
+	enable_clocks(1);
+
+	if (channel == OMAP_DSS_CHANNEL_LCD)
+		bit = 0; /* LCDENABLE */
+	else
+		bit = 1; /* DIGITALENABLE */
+
+	/* if the channel is not enabled, we don't need GO */
+	if (REG_GET(DISPC_CONTROL, bit, bit) == 0)
+		goto end;
+
+	if (channel == OMAP_DSS_CHANNEL_LCD)
+		bit = 5; /* GOLCD */
+	else
+		bit = 6; /* GODIGIT */
+
+	tmo = jiffies + msecs_to_jiffies(200);
+	while (REG_GET(DISPC_CONTROL, bit, bit) == 1) {
+		if (time_after(jiffies, tmo)) {
+			DSSERR("timeout waiting GO flag\n");
+			goto end;
+		}
+		cpu_relax();
+	}
+
 end:
 	enable_clocks(0);
 }
@@ -938,6 +981,26 @@ static void _dispc_set_channel_out(enum omap_plane plane,
 	dispc_write_reg(dispc_reg_att[plane], val);
 }
 
+static enum omap_channel _dispc_get_channel_out(enum omap_plane plane)
+{
+	int shift;
+
+	switch (plane) {
+	case OMAP_DSS_GFX:
+		shift = 8;
+		break;
+	case OMAP_DSS_VIDEO1:
+	case OMAP_DSS_VIDEO2:
+		shift = 16;
+		break;
+	default:
+		BUG();
+		return OMAP_DSS_CHANNEL_LCD;
+	}
+
+	return REG_GET(dispc_reg_att[plane], shift, shift);
+}
+
 void dispc_set_burst_size(enum omap_plane plane,
 		enum omap_burst_size burst_size)
 {
@@ -1075,6 +1138,49 @@ void dispc_enable_fifomerge(bool enable)
 	REG_FLD_MOD(DISPC_CONFIG, enable ? 1 : 0, 14, 14);
 
 	enable_clocks(0);
+}
+
+bool dispc_fifomerge_enabled(void)
+{
+	bool enabled;
+
+	enable_clocks(1);
+
+	enabled = REG_GET(DISPC_CONFIG, 14, 14);
+
+	enable_clocks(0);
+
+	return enabled;
+}
+
+static bool _dispc_plane_enabled(enum omap_plane plane)
+{
+	return REG_GET(dispc_reg_att[plane], 0, 0);
+}
+
+enum omap_channel dispc_get_enabled_channel(void)
+{
+	enum omap_channel ch = OMAP_DSS_CHANNEL_LCD;
+
+	enable_clocks(1);
+
+	if (_dispc_plane_enabled(OMAP_DSS_GFX)) {
+		ch = _dispc_get_channel_out(OMAP_DSS_GFX);
+		goto out;
+	}
+	if (_dispc_plane_enabled(OMAP_DSS_VIDEO1)) {
+		ch = _dispc_get_channel_out(OMAP_DSS_VIDEO1);
+		goto out;
+	}
+	if (_dispc_plane_enabled(OMAP_DSS_VIDEO2)) {
+		ch = _dispc_get_channel_out(OMAP_DSS_VIDEO2);
+		goto out;
+	}
+
+ out:
+	enable_clocks(0);
+
+	return ch;
 }
 
 static void _dispc_set_fir(enum omap_plane plane, int hinc, int vinc)
@@ -1360,6 +1466,19 @@ static s32 calc_gfx_window_skip(void)
 
 	x = x1 - x0;
 	y = y1 - y0;
+
+	if (x >= gfxw - 1 && y >= gfxh - 1) {
+		/*
+		 * If the overlay optimization is enabled with this condition
+		 * being true, then disabling the overlay optimization results
+		 * in a short burst of visible corruption.
+		 *
+		 * FIXME Root cause of corruption is unknown,
+		 * only	seems to happen when GFX is using VRFB.
+		 */
+		DSSDBG("gfx_window_skip: Disabling overlay optimization to avoid corruption\n");
+		return 0;
+	}
 
 	DSSDBG("gfx_window_skip: GFX w=%u, VID1 w=%u, "
 	       "x=%u, y=%u, pix_inc=%u, row_inc=%u, ps=%u\n",
@@ -1650,9 +1769,9 @@ static u32 get_pixel_clock(enum omap_channel channel_out)
 
 	mgr->display->get_timings(mgr->display, &t);
 
-	DSSDBG("PCLK = %u\n", t.pixel_clock);
+	DSSDBG("PCLK = %u\n", t.pixel_clock * 1000);
 
-	return t.pixel_clock;
+	return t.pixel_clock * 1000;
 }
 
 static u32 get_display_width(enum omap_channel channel_out)
@@ -1707,6 +1826,56 @@ static int check_hblank_len(u16 width, u16 height,
 	return 0;
 }
 
+static int check_horiz_timing(enum omap_channel channel_out, u16 pos_x,
+		u16 width, u16 height, u16 out_width, u16 out_height,
+		enum omap_color_mode color_mode, bool five_taps)
+{
+	unsigned int nonactive;
+	int lcd, pcd, ds = DIV_ROUND_UP(height, out_height);
+	struct omap_overlay_manager *mgr = manager_for_channel(channel_out);
+	struct omap_video_timings t;
+
+	/* FIXME add checks for 3-tap filter once the limitations are known */
+	if (!five_taps)
+		return 0;
+
+	/* Convert width to 4 byte units */
+	width = DIV_ROUND_UP(width * color_mode_to_bpp(color_mode), 32);
+
+	if (!mgr || !mgr->display || !mgr->display->get_timings)
+		return -ENODEV;
+
+	mgr->display->get_timings(mgr->display, &t);
+
+	nonactive = t.x_res + t.hfp + t.hsw + t.hbp - out_width;
+
+	enable_clocks(1);
+	dispc_get_lcd_divisor(&lcd, &pcd);
+	enable_clocks(0);
+
+	DSSDBG("(nonactive - pos_x) * pcd = %u, max(0, ds - 2) * width = %d\n",
+	       (nonactive - pos_x) * pcd, max(0, ds - 2) * width);
+	DSSDBG("nonactive * pcd = %u, max(0, ds - 1) * width = %d\n",
+	       nonactive * pcd, max(0, ds - 1) * width);
+
+	/*
+	 * At least ds-2 lines must have already been fetched
+	 * before the display active video period starts.
+	 */
+	if ((nonactive - pos_x) * pcd < max(0, ds - 2) * width)
+		return -EINVAL;
+
+	/*
+	 * Only one line can be fetched during the overlay active
+	 * period, the rest have to be fetched during the inactive
+	 * period.
+	 */
+	if (nonactive * pcd < max(0, ds - 1) * width)
+		return -EINVAL;
+
+	return 0;
+}
+
 static unsigned long calc_fclk_five_taps(u16 width, u16 height,
 		u16 out_width, u16 out_height, enum omap_color_mode color_mode,
 		enum omap_channel channel_out)
@@ -1726,7 +1895,10 @@ static unsigned long calc_fclk_five_taps(u16 width, u16 height,
 		do_div(tmp, 2 * out_height * ppl);
 		fclk = tmp;
 
-		if (height > 2 * out_height && ppl != out_width) {
+		if (height > 2 * out_height) {
+			if (ppl == out_width)
+				return 0;
+
 			tmp = pclk * (height - 2 * out_height) * out_width;
 			do_div(tmp, 2 * out_height * (ppl - out_width));
 			fclk = max(fclk, (u32) tmp);
@@ -1895,6 +2067,12 @@ static int _dispc_setup_plane(enum omap_plane plane,
 		if (width > (2048 >> five_taps))
 			return -EINVAL;
 
+		if (check_horiz_timing(channel_out, pos_x, width, height,
+				out_width, out_height, color_mode, five_taps)) {
+			DSSDBG("horizontal timing too tight\n");
+			return -EINVAL;
+		}
+
 		if (five_taps)
 			fclk = calc_fclk_five_taps(width, height,
 					out_width, out_height,
@@ -1903,7 +2081,7 @@ static int _dispc_setup_plane(enum omap_plane plane,
 		DSSDBG("required fclk rate = %lu Hz\n", fclk);
 		DSSDBG("current fclk rate = %lu Hz\n", dispc_fclk_rate());
 
-		if (fclk > dispc_fclk_rate())
+		if (!fclk || fclk > dispc_fclk_rate())
 			return -EINVAL;
 	}
 
@@ -1953,7 +2131,10 @@ static int _dispc_setup_plane(enum omap_plane plane,
 
 	_dispc_set_plane_pos(plane, pos_x, pos_y);
 
-	_dispc_set_pic_size(plane, width, height);
+	if (field_offset && !fieldmode)
+		_dispc_set_pic_size(plane, width, height - field_offset);
+	else
+		_dispc_set_pic_size(plane, width, height);
 
 	if (plane != OMAP_DSS_GFX) {
 		_dispc_set_scaling(plane, width, height,
@@ -3094,12 +3275,12 @@ static void dispc_error_worker(struct work_struct *work)
 
 	if (errors & DISPC_IRQ_SYNC_LOST) {
 		DSSERR("SYNC_LOST, going to perform a soft reset\n");
-		dss_schedule_reset();
+		dss_soft_reset();
 	}
 
 	if (errors & DISPC_IRQ_SYNC_LOST_DIGIT) {
 		DSSERR("SYNC_LOST_DIGIT, going to perform a soft reset\n");
-		dss_schedule_reset();
+		dss_soft_reset();
 	}
 
 	if (errors & DISPC_IRQ_OCP_ERR) {

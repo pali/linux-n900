@@ -83,6 +83,15 @@ int twl4030_i2c_read(u8 mod_no, u8 *value, u8 reg, unsigned num_bytes);
 
 /*----------------------------------------------------------------------*/
 
+/* Update USB suspended state flag for twl4030-poweroff driver */
+#if defined(CONFIG_TWL4030_POWEROFF)
+extern void twl4030_upd_usb_suspended(u8 suspended);
+#else
+#define twl4030_upd_usb_suspended(susp) do { } while (0)
+#endif
+
+/*----------------------------------------------------------------------*/
+
 /*
  * NOTE:  at up to 1024 registers, this is a big chip.
  *

@@ -1,26 +1,26 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
@@ -32,14 +32,14 @@
 #include <linux/module.h>
 
 #include <linux/pci.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/slab.h>
 #include <linux/errno.h>
 #include <linux/interrupt.h>
 
 #include <linux/platform_device.h>
 
-#include <asm/io.h>
+#include <linux/io.h>
 
 /*#include <asm/arch-omap/display.h>*/
 
@@ -53,23 +53,20 @@
 
 MODULE_SUPPORTED_DEVICE(DEVNAME);
 
-extern int omap_dispc_request_irq(unsigned long, void (*)(void *), void *);
-extern void omap_dispc_free_irq(unsigned long, void (*)(void *), void *);
-
 #define unref__ __attribute__ ((unused))
 
-IMG_VOID *OMAPLFBAllocKernelMem(IMG_UINT32 ui32Size)
+void *OMAPLFBAllocKernelMem(u32 ui32Size)
 {
 	return kmalloc(ui32Size, GFP_KERNEL);
 }
 
-IMG_VOID OMAPLFBFreeKernelMem(IMG_VOID * pvMem)
+void OMAPLFBFreeKernelMem(void *pvMem)
 {
 	kfree(pvMem);
 }
 
-PVRSRV_ERROR OMAPLFBGetLibFuncAddr(IMG_CHAR * szFunctionName,
-				   PFN_DC_GET_PVRJTABLE * ppfnFuncTable)
+enum PVRSRV_ERROR OMAPLFBGetLibFuncAddr(char *szFunctionName,
+	       IMG_BOOL (**ppfnFuncTable)(struct PVRSRV_DC_DISP2SRV_KMJTABLE *))
 {
 	if (strcmp("PVRGetDisplayClassJTable", szFunctionName) != 0)
 		return PVRSRV_ERROR_INVALID_PARAMS;
@@ -79,21 +76,21 @@ PVRSRV_ERROR OMAPLFBGetLibFuncAddr(IMG_CHAR * szFunctionName,
 	return PVRSRV_OK;
 }
 
-IMG_VOID OMAPLFBEnableVSyncInterrupt(OMAPLFB_SWAPCHAIN * psSwapChain)
+void OMAPLFBEnableVSyncInterrupt(struct OMAPLFB_SWAPCHAIN *psSwapChain)
 {
 }
 
-IMG_VOID OMAPLFBDisableVSyncInterrupt(OMAPLFB_SWAPCHAIN * psSwapChain)
+void OMAPLFBDisableVSyncInterrupt(struct OMAPLFB_SWAPCHAIN *psSwapChain)
 {
 }
 
 static void OMAPLFBVSyncISR(void *arg, u32 mask)
 {
-	(void)OMAPLFBVSyncIHandler((OMAPLFB_SWAPCHAIN *) arg);
+	(void)OMAPLFBVSyncIHandler((struct OMAPLFB_SWAPCHAIN *)arg);
 }
 
 
-PVRSRV_ERROR OMAPLFBInstallVSyncISR(OMAPLFB_SWAPCHAIN * psSwapChain)
+enum PVRSRV_ERROR OMAPLFBInstallVSyncISR(struct OMAPLFB_SWAPCHAIN *psSwapChain)
 {
 	if (omap_dispc_register_isr
 	    (OMAPLFBVSyncISR, psSwapChain, DISPC_IRQ_VSYNC) != 0)
@@ -102,28 +99,29 @@ PVRSRV_ERROR OMAPLFBInstallVSyncISR(OMAPLFB_SWAPCHAIN * psSwapChain)
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR OMAPLFBUninstallVSyncISR(OMAPLFB_SWAPCHAIN * psSwapChain)
+enum PVRSRV_ERROR OMAPLFBUninstallVSyncISR(
+					struct OMAPLFB_SWAPCHAIN *psSwapChain)
 {
 	omap_dispc_unregister_isr(OMAPLFBVSyncISR, psSwapChain,
 				  DISPC_IRQ_VSYNC);
 	return PVRSRV_OK;
 }
 
-IMG_VOID OMAPLFBEnableDisplayRegisterAccess(IMG_VOID)
+void OMAPLFBEnableDisplayRegisterAccess(void)
 {
 	printk(KERN_WARNING DRIVER_PREFIX
 	       ": Attempting to call OMAPLFBEnableDisplayRegisterAccess\n");
 	/*omap2_disp_get_dss(); */
 }
 
-IMG_VOID OMAPLFBDisableDisplayRegisterAccess(IMG_VOID)
+void OMAPLFBDisableDisplayRegisterAccess(void)
 {
 	printk(KERN_WARNING DRIVER_PREFIX
 	       ": Attempting to call OMAPLFBDisableDisplayRegisterAccess\n");
 	/*omap2_disp_put_dss(); */
 }
 
-IMG_VOID OMAPLFBFlip(OMAPLFB_SWAPCHAIN * psSwapChain, IMG_UINT32 aPhyAddr)
+void OMAPLFBFlip(struct OMAPLFB_SWAPCHAIN *psSwapChain, u32 aPhyAddr)
 {
 	omap_dispc_set_plane_ba0(OMAP_DSS_CHANNEL_LCD, OMAP_DSS_GFX, aPhyAddr);
 }
@@ -133,17 +131,16 @@ static IMG_BOOL bDeviceSuspended;
 
 static void OMAPLFBCommonSuspend(void)
 {
-	if (bDeviceSuspended) {
+	if (bDeviceSuspended)
 		return;
-	}
 
 	OMAPLFBDriverSuspend();
 
 	bDeviceSuspended = IMG_TRUE;
 }
 
-static int OMAPLFBDriverSuspend_Entry(struct platform_device unref__ * pDevice,
-				      pm_message_t unref__ state)
+static int OMAPLFBDriverSuspend_Entry(struct platform_device *unref__ pDevice,
+				      pm_message_t state unref__)
 {
 	DEBUG_PRINTK((KERN_INFO DRIVER_PREFIX
 		      ": OMAPLFBDriverSuspend_Entry\n"));
@@ -153,7 +150,7 @@ static int OMAPLFBDriverSuspend_Entry(struct platform_device unref__ * pDevice,
 	return 0;
 }
 
-static int OMAPLFBDriverResume_Entry(struct platform_device unref__ * pDevice)
+static int OMAPLFBDriverResume_Entry(struct platform_device *unref__ pDevice)
 {
 	DEBUG_PRINTK((KERN_INFO DRIVER_PREFIX ": OMAPLFBDriverResume_Entry\n"));
 
@@ -164,8 +161,7 @@ static int OMAPLFBDriverResume_Entry(struct platform_device unref__ * pDevice)
 	return 0;
 }
 
-static void OMAPLFBDriverShutdown_Entry(struct platform_device unref__ *
-					pDevice)
+static void OMAPLFBDriverShutdown_Entry(struct platform_device *unref__ pDevice)
 {
 	DEBUG_PRINTK((KERN_INFO DRIVER_PREFIX
 		      ": OMAPLFBDriverShutdown_Entry\n"));
@@ -173,7 +169,7 @@ static void OMAPLFBDriverShutdown_Entry(struct platform_device unref__ *
 	OMAPLFBCommonSuspend();
 }
 
-static void OMAPLFBDeviceRelease_Entry(struct device unref__ * pDevice)
+static void OMAPLFBDeviceRelease_Entry(struct device *unref__ pDevice)
 {
 	DEBUG_PRINTK((KERN_INFO DRIVER_PREFIX
 		      ": OMAPLFBDriverRelease_Entry\n"));
@@ -206,17 +202,19 @@ static int __init OMAPLFB_Init(void)
 		       ": OMAPLFB_Init: OMAPLFBInit failed\n");
 		return -ENODEV;
 	}
-	if ((error = platform_driver_register(&omaplfb_driver)) != 0) {
-		printk(KERN_WARNING DRIVER_PREFIX
-		       ": OMAPLFB_Init: Unable to register platform driver (%d)\n",
+	error = platform_driver_register(&omaplfb_driver);
+	if (error != 0) {
+		printk(KERN_WARNING DRIVER_PREFIX ": OMAPLFB_Init: "
+				"Unable to register platform driver (%d)\n",
 		       error);
 
 		goto ExitDeinit;
 	}
 
-	if ((error = platform_device_register(&omaplfb_device)) != 0) {
-		printk(KERN_WARNING DRIVER_PREFIX
-		       ": OMAPLFB_Init:  Unable to register platform device (%d)\n",
+	error = platform_device_register(&omaplfb_device);
+	if (error != 0) {
+		printk(KERN_WARNING DRIVER_PREFIX ": OMAPLFB_Init:  "
+				"Unable to register platform device (%d)\n",
 		       error);
 
 		goto ExitDriverUnregister;
@@ -228,10 +226,9 @@ ExitDriverUnregister:
 	platform_driver_unregister(&omaplfb_driver);
 
 ExitDeinit:
-	if (OMAPLFBDeinit() != PVRSRV_OK) {
+	if (OMAPLFBDeinit() != PVRSRV_OK)
 		printk(KERN_WARNING DRIVER_PREFIX
 		       ": OMAPLFB_Init: OMAPLFBDeinit failed\n");
-	}
 
 	return -ENODEV;
 }
@@ -241,10 +238,9 @@ static void __exit OMAPLFB_Cleanup(void)
 	platform_device_unregister(&omaplfb_device);
 	platform_driver_unregister(&omaplfb_driver);
 
-	if (OMAPLFBDeinit() != PVRSRV_OK) {
+	if (OMAPLFBDeinit() != PVRSRV_OK)
 		printk(KERN_WARNING DRIVER_PREFIX
 		       ": OMAPLFB_Cleanup: OMAPLFBDeinit failed\n");
-	}
 }
 
 module_init(OMAPLFB_Init);

@@ -1,26 +1,26 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
@@ -38,52 +38,50 @@
 #include "kerneldisplay.h"
 #include "omaplfb.h"
 
-static IMG_VOID *gpvAnchor;
+static void *gpvAnchor;
 
-static int fb_idx = 0;
+static int fb_idx;
 
 #define OMAPLFB_COMMAND_COUNT		1
 
-static PFN_DC_GET_PVRJTABLE pfnGetPVRJTable = IMG_NULL;
+static IMG_BOOL (*pfnGetPVRJTable)(struct PVRSRV_DC_DISP2SRV_KMJTABLE *);
 
-static OMAPLFB_DEVINFO *GetAnchorPtr(IMG_VOID)
+static struct OMAPLFB_DEVINFO *GetAnchorPtr(void)
 {
-	return (OMAPLFB_DEVINFO *) gpvAnchor;
+	return (struct OMAPLFB_DEVINFO *)gpvAnchor;
 }
 
-static IMG_VOID SetAnchorPtr(OMAPLFB_DEVINFO * psDevInfo)
+static void SetAnchorPtr(struct OMAPLFB_DEVINFO *psDevInfo)
 {
-	gpvAnchor = (IMG_VOID *) psDevInfo;
+	gpvAnchor = (void *) psDevInfo;
 }
 
-static IMG_VOID FlushInternalVSyncQueue(OMAPLFB_SWAPCHAIN * psSwapChain)
+static void FlushInternalVSyncQueue(struct OMAPLFB_SWAPCHAIN *psSwapChain)
 {
-	OMAPLFB_VSYNC_FLIP_ITEM *psFlipItem;
-	IMG_UINT32 ui32MaxIndex;
-	IMG_UINT32 i;
+	struct OMAPLFB_VSYNC_FLIP_ITEM *psFlipItem;
+	u32 ui32MaxIndex;
+	u32 i;
 
 	psFlipItem = &psSwapChain->psVSyncFlips[psSwapChain->ui32RemoveIndex];
 	ui32MaxIndex = psSwapChain->ui32BufferCount - 1;
 
 	for (i = 0; i < psSwapChain->ui32BufferCount; i++) {
-		if (!psFlipItem->bValid) {
+		if (!psFlipItem->bValid)
 			continue;
-		}
 
 		DEBUG_PRINTK((KERN_INFO DRIVER_PREFIX
-			      ": FlushInternalVSyncQueue: Flushing swap buffer (index %lu)\n",
-			      psSwapChain->ui32RemoveIndex));
+			      ": %s: Flushing swap buffer (index %u)\n",
+			      __func__, psSwapChain->ui32RemoveIndex));
 
-		if (psFlipItem->bFlipped == IMG_FALSE) {
+		if (psFlipItem->bFlipped == IMG_FALSE)
 
 			OMAPLFBFlip(psSwapChain,
-				    (IMG_UINT32) psFlipItem->sSysAddr);
-		}
+				    (u32) psFlipItem->sSysAddr);
 
 		if (psFlipItem->bCmdCompleted == IMG_FALSE) {
 			DEBUG_PRINTK((KERN_INFO DRIVER_PREFIX
-				      ": FlushInternalVSyncQueue: Calling command complete for swap buffer (index %lu)\n",
-				      psSwapChain->ui32RemoveIndex));
+		  ": %s: Calling command complete for swap buffer (index %u)\n",
+			  __func__, psSwapChain->ui32RemoveIndex));
 
 			psSwapChain->psPVRJTable->
 			    pfnPVRSRVCmdComplete(psFlipItem->hCmdComplete,
@@ -92,9 +90,8 @@ static IMG_VOID FlushInternalVSyncQueue(OMAPLFB_SWAPCHAIN * psSwapChain)
 
 		psSwapChain->ui32RemoveIndex++;
 
-		if (psSwapChain->ui32RemoveIndex > ui32MaxIndex) {
+		if (psSwapChain->ui32RemoveIndex > ui32MaxIndex)
 			psSwapChain->ui32RemoveIndex = 0;
-		}
 
 		psFlipItem->bFlipped = IMG_FALSE;
 		psFlipItem->bCmdCompleted = IMG_FALSE;
@@ -108,14 +105,13 @@ static IMG_VOID FlushInternalVSyncQueue(OMAPLFB_SWAPCHAIN * psSwapChain)
 	psSwapChain->ui32RemoveIndex = 0;
 }
 
-static IMG_VOID SetFlushStateInternalNoLock(OMAPLFB_DEVINFO * psDevInfo,
+static void SetFlushStateInternalNoLock(struct OMAPLFB_DEVINFO *psDevInfo,
 					    IMG_BOOL bFlushState)
 {
-	OMAPLFB_SWAPCHAIN *psSwapChain = psDevInfo->psSwapChain;
+	struct OMAPLFB_SWAPCHAIN *psSwapChain = psDevInfo->psSwapChain;
 
-	if (psSwapChain == IMG_NULL) {
+	if (psSwapChain == NULL)
 		return;
-	}
 
 	if (bFlushState) {
 		if (psSwapChain->ui32SetFlushStateRefCount == 0) {
@@ -135,19 +131,17 @@ static IMG_VOID SetFlushStateInternalNoLock(OMAPLFB_DEVINFO * psDevInfo,
 	}
 }
 
-static IMG_VOID SetFlushStateInternal(OMAPLFB_DEVINFO * psDevInfo,
+static void SetFlushStateInternal(struct OMAPLFB_DEVINFO *psDevInfo,
 				      IMG_BOOL bFlushState)
 {
 	unsigned long ulLockFlags;
 
 	spin_lock_irqsave(&psDevInfo->SwapChainLock, ulLockFlags);
-
 	SetFlushStateInternalNoLock(psDevInfo, bFlushState);
-
 	spin_unlock_irqrestore(&psDevInfo->SwapChainLock, ulLockFlags);
 }
 
-static IMG_VOID SetFlushStateExternal(OMAPLFB_DEVINFO * psDevInfo,
+static void SetFlushStateExternal(struct OMAPLFB_DEVINFO *psDevInfo,
 				      IMG_BOOL bFlushState)
 {
 	unsigned long ulLockFlags;
@@ -162,9 +156,9 @@ static IMG_VOID SetFlushStateExternal(OMAPLFB_DEVINFO * psDevInfo,
 	spin_unlock_irqrestore(&psDevInfo->SwapChainLock, ulLockFlags);
 }
 
-static IMG_VOID SetDCState(IMG_HANDLE hDevice, IMG_UINT32 ui32State)
+static void SetDCState(void *hDevice, u32 ui32State)
 {
-	OMAPLFB_DEVINFO *psDevInfo = (OMAPLFB_DEVINFO *) hDevice;
+	struct OMAPLFB_DEVINFO *psDevInfo = (struct OMAPLFB_DEVINFO *)hDevice;
 
 	switch (ui32State) {
 	case DC_STATE_FLUSH_COMMANDS:
@@ -183,14 +177,13 @@ static IMG_VOID SetDCState(IMG_HANDLE hDevice, IMG_UINT32 ui32State)
 static int FrameBufferEvents(struct notifier_block *psNotif,
 			     unsigned long event, void *data)
 {
-	OMAPLFB_DEVINFO *psDevInfo;
-	OMAPLFB_SWAPCHAIN *psSwapChain;
+	struct OMAPLFB_DEVINFO *psDevInfo;
+	struct OMAPLFB_SWAPCHAIN *psSwapChain;
 	struct fb_event *psFBEvent = (struct fb_event *)data;
 	IMG_BOOL bBlanked;;
 
-	if (event != FB_EVENT_BLANK) {
+	if (event != FB_EVENT_BLANK)
 		return 0;
-	}
 
 	psDevInfo = GetAnchorPtr();
 	psSwapChain = psDevInfo->psSwapChain;
@@ -200,19 +193,18 @@ static int FrameBufferEvents(struct notifier_block *psNotif,
 	if (bBlanked != psSwapChain->bBlanked) {
 		psSwapChain->bBlanked = bBlanked;
 
-		if (bBlanked) {
+		if (bBlanked)
 
 			SetFlushStateInternal(psDevInfo, IMG_TRUE);
-		} else {
+		else
 
 			SetFlushStateInternal(psDevInfo, IMG_FALSE);
-		}
 	}
 
 	return 0;
 }
 
-static PVRSRV_ERROR UnblankDisplay(OMAPLFB_DEVINFO * psDevInfo)
+static enum PVRSRV_ERROR UnblankDisplay(struct OMAPLFB_DEVINFO *psDevInfo)
 {
 	int res;
 
@@ -228,11 +220,12 @@ static PVRSRV_ERROR UnblankDisplay(OMAPLFB_DEVINFO * psDevInfo)
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR EnableLFBEventNotification(OMAPLFB_DEVINFO * psDevInfo)
+static enum PVRSRV_ERROR EnableLFBEventNotification(struct OMAPLFB_DEVINFO
+								   *psDevInfo)
 {
 	int res;
-	OMAPLFB_SWAPCHAIN *psSwapChain = psDevInfo->psSwapChain;
-	PVRSRV_ERROR eError;
+	struct OMAPLFB_SWAPCHAIN *psSwapChain = psDevInfo->psSwapChain;
+	enum PVRSRV_ERROR eError;
 
 	memset(&psDevInfo->sLINNotifBlock, 0,
 	       sizeof(psDevInfo->sLINNotifBlock));
@@ -259,7 +252,8 @@ static PVRSRV_ERROR EnableLFBEventNotification(OMAPLFB_DEVINFO * psDevInfo)
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR DisableLFBEventNotification(OMAPLFB_DEVINFO * psDevInfo)
+static enum PVRSRV_ERROR DisableLFBEventNotification(struct OMAPLFB_DEVINFO
+								   *psDevInfo)
 {
 	int res;
 
@@ -273,12 +267,11 @@ static PVRSRV_ERROR DisableLFBEventNotification(OMAPLFB_DEVINFO * psDevInfo)
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR OpenDCDevice(IMG_UINT32 ui32DeviceID,
-				 IMG_HANDLE * phDevice,
-				 PVRSRV_SYNC_DATA * psSystemBufferSyncData)
+static enum PVRSRV_ERROR OpenDCDevice(u32 ui32DeviceID, void **phDevice,
+				struct PVRSRV_SYNC_DATA *psSystemBufferSyncData)
 {
-	OMAPLFB_DEVINFO *psDevInfo;
-	PVRSRV_ERROR eError;
+	struct OMAPLFB_DEVINFO *psDevInfo;
+	enum PVRSRV_ERROR eError;
 
 	PVR_UNREFERENCED_PARAMETER(ui32DeviceID);
 
@@ -293,184 +286,162 @@ static PVRSRV_ERROR OpenDCDevice(IMG_UINT32 ui32DeviceID,
 		return eError;
 	}
 
-	*phDevice = (IMG_HANDLE) psDevInfo;
+	*phDevice = (void *) psDevInfo;
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR CloseDCDevice(IMG_HANDLE hDevice)
+static enum PVRSRV_ERROR CloseDCDevice(void *hDevice)
 {
 	PVR_UNREFERENCED_PARAMETER(hDevice);
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR EnumDCFormats(IMG_HANDLE hDevice,
-				  IMG_UINT32 * pui32NumFormats,
-				  DISPLAY_FORMAT * psFormat)
+static enum PVRSRV_ERROR EnumDCFormats(void *hDevice, u32 *pui32NumFormats,
+				  struct DISPLAY_FORMAT *psFormat)
 {
-	OMAPLFB_DEVINFO *psDevInfo;
+	struct OMAPLFB_DEVINFO *psDevInfo;
 
-	if (!hDevice || !pui32NumFormats) {
+	if (!hDevice || !pui32NumFormats)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	psDevInfo = (OMAPLFB_DEVINFO *) hDevice;
+	psDevInfo = (struct OMAPLFB_DEVINFO *)hDevice;
 
 	*pui32NumFormats = 1;
 
-	if (psFormat) {
+	if (psFormat)
 		psFormat[0] = psDevInfo->sDisplayFormat;
-	}
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR EnumDCDims(IMG_HANDLE hDevice,
-			       DISPLAY_FORMAT * psFormat,
-			       IMG_UINT32 * pui32NumDims, DISPLAY_DIMS * psDim)
+static enum PVRSRV_ERROR EnumDCDims(void *hDevice,
+			       struct DISPLAY_FORMAT *psFormat,
+			       u32 *pui32NumDims, struct DISPLAY_DIMS *psDim)
 {
-	OMAPLFB_DEVINFO *psDevInfo;
+	struct OMAPLFB_DEVINFO *psDevInfo;
 
-	if (!hDevice || !psFormat || !pui32NumDims) {
+	if (!hDevice || !psFormat || !pui32NumDims)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	psDevInfo = (OMAPLFB_DEVINFO *) hDevice;
+	psDevInfo = (struct OMAPLFB_DEVINFO *)hDevice;
 
 	*pui32NumDims = 1;
 
-	if (psDim) {
+	if (psDim)
 		psDim[0] = psDevInfo->sDisplayDim;
-	}
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR GetDCSystemBuffer(IMG_HANDLE hDevice, IMG_HANDLE * phBuffer)
+static enum PVRSRV_ERROR GetDCSystemBuffer(void *hDevice, void **phBuffer)
 {
-	OMAPLFB_DEVINFO *psDevInfo;
+	struct OMAPLFB_DEVINFO *psDevInfo;
 
-	if (!hDevice || !phBuffer) {
+	if (!hDevice || !phBuffer)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	psDevInfo = (OMAPLFB_DEVINFO *) hDevice;
+	psDevInfo = (struct OMAPLFB_DEVINFO *)hDevice;
 
-	*phBuffer = (IMG_HANDLE) & psDevInfo->sSystemBuffer;
+	*phBuffer = (void *) &psDevInfo->sSystemBuffer;
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR GetDCInfo(IMG_HANDLE hDevice, DISPLAY_INFO * psDCInfo)
+static enum PVRSRV_ERROR GetDCInfo(void *hDevice, struct DISPLAY_INFO *psDCInfo)
 {
-	OMAPLFB_DEVINFO *psDevInfo;
+	struct OMAPLFB_DEVINFO *psDevInfo;
 
-	if (!hDevice || !psDCInfo) {
+	if (!hDevice || !psDCInfo)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	psDevInfo = (OMAPLFB_DEVINFO *) hDevice;
+	psDevInfo = (struct OMAPLFB_DEVINFO *)hDevice;
 
 	*psDCInfo = psDevInfo->sDisplayInfo;
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR GetDCBufferAddr(IMG_HANDLE hDevice,
-				    IMG_HANDLE hBuffer,
-				    IMG_SYS_PHYADDR ** ppsSysAddr,
-				    IMG_UINT32 * pui32ByteSize,
-				    IMG_VOID ** ppvCpuVAddr,
-				    IMG_HANDLE * phOSMapInfo,
-				    IMG_BOOL * pbIsContiguous)
+static enum PVRSRV_ERROR GetDCBufferAddr(void *hDevice, void *hBuffer,
+				    struct IMG_SYS_PHYADDR **ppsSysAddr,
+				    u32 *pui32ByteSize,
+				    void __iomem **ppvCpuVAddr,
+				    void **phOSMapInfo,
+				    IMG_BOOL *pbIsContiguous)
 {
-	OMAPLFB_DEVINFO *psDevInfo;
-	OMAPLFB_BUFFER *psSystemBuffer;
+	struct OMAPLFB_DEVINFO *psDevInfo;
+	struct OMAPLFB_BUFFER *psSystemBuffer;
 
-	if (!hDevice) {
+	if (!hDevice)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
-	psDevInfo = (OMAPLFB_DEVINFO *) hDevice;
+	psDevInfo = (struct OMAPLFB_DEVINFO *)hDevice;
 
-	if (!hBuffer) {
+	if (!hBuffer)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
-	psSystemBuffer = (OMAPLFB_BUFFER *) hBuffer;
+	psSystemBuffer = (struct OMAPLFB_BUFFER *)hBuffer;
 
-	if (!ppsSysAddr) {
+	if (!ppsSysAddr)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
 	*ppsSysAddr = &psSystemBuffer->sSysAddr;
 
-	if (!pui32ByteSize) {
+	if (!pui32ByteSize)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
 	*pui32ByteSize = psDevInfo->sFBInfo.ui32BufferSize;
 
-	if (ppvCpuVAddr) {
+	if (ppvCpuVAddr)
 		*ppvCpuVAddr = psSystemBuffer->sCPUVAddr;
-	}
 
-	if (phOSMapInfo) {
-		*phOSMapInfo = (IMG_HANDLE) 0;
-	}
+	if (phOSMapInfo)
+		*phOSMapInfo = (void *) 0;
 
-	if (pbIsContiguous) {
+	if (pbIsContiguous)
 		*pbIsContiguous = IMG_TRUE;
-	}
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR CreateDCSwapChain(IMG_HANDLE hDevice,
-				      IMG_UINT32 ui32Flags,
-				      DISPLAY_SURF_ATTRIBUTES * psDstSurfAttrib,
-				      DISPLAY_SURF_ATTRIBUTES * psSrcSurfAttrib,
-				      IMG_UINT32 ui32BufferCount,
-				      PVRSRV_SYNC_DATA ** ppsSyncData,
-				      IMG_UINT32 ui32OEMFlags,
-				      IMG_HANDLE * phSwapChain,
-				      IMG_UINT32 * pui32SwapChainID)
+static enum PVRSRV_ERROR CreateDCSwapChain(void *hDevice, u32 ui32Flags,
+			      struct DISPLAY_SURF_ATTRIBUTES *psDstSurfAttrib,
+			      struct DISPLAY_SURF_ATTRIBUTES *psSrcSurfAttrib,
+			      u32 ui32BufferCount,
+			      struct PVRSRV_SYNC_DATA **ppsSyncData,
+			      u32 ui32OEMFlags, void **phSwapChain,
+			      u32 *pui32SwapChainID)
 {
-	OMAPLFB_DEVINFO *psDevInfo;
-	OMAPLFB_SWAPCHAIN *psSwapChain;
-	OMAPLFB_BUFFER *psBuffer;
-	OMAPLFB_VSYNC_FLIP_ITEM *psVSyncFlips;
-	IMG_UINT32 i;
-	PVRSRV_ERROR eError = PVRSRV_ERROR_GENERIC;
+	struct OMAPLFB_DEVINFO *psDevInfo;
+	struct OMAPLFB_SWAPCHAIN *psSwapChain;
+	struct OMAPLFB_BUFFER *psBuffer;
+	struct OMAPLFB_VSYNC_FLIP_ITEM *psVSyncFlips;
+	u32 i;
+	enum PVRSRV_ERROR eError = PVRSRV_ERROR_GENERIC;
 	unsigned long ulLockFlags;
-	IMG_UINT32 ui32BuffersToSkip;
+	u32 ui32BuffersToSkip;
 
 	PVR_UNREFERENCED_PARAMETER(ui32OEMFlags);
 	PVR_UNREFERENCED_PARAMETER(pui32SwapChainID);
 
 	if (!hDevice
 	    || !psDstSurfAttrib
-	    || !psSrcSurfAttrib || !ppsSyncData || !phSwapChain) {
+	    || !psSrcSurfAttrib || !ppsSyncData || !phSwapChain)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	psDevInfo = (OMAPLFB_DEVINFO *) hDevice;
+	psDevInfo = (struct OMAPLFB_DEVINFO *)hDevice;
 
-	if (psDevInfo->sDisplayInfo.ui32MaxSwapChains == 0) {
+	if (psDevInfo->sDisplayInfo.ui32MaxSwapChains == 0)
 		return PVRSRV_ERROR_NOT_SUPPORTED;
-	}
 
-	if (psDevInfo->psSwapChain != IMG_NULL) {
+	if (psDevInfo->psSwapChain != NULL)
 		return PVRSRV_ERROR_FLIP_CHAIN_EXISTS;
-	}
 
-	if (ui32BufferCount > psDevInfo->sDisplayInfo.ui32MaxSwapChainBuffers) {
+	if (ui32BufferCount > psDevInfo->sDisplayInfo.ui32MaxSwapChainBuffers)
 		return PVRSRV_ERROR_TOOMANYBUFFERS;
-	}
 
 	if ((psDevInfo->sFBInfo.ui32RoundedBufferSize * ui32BufferCount) >
-	    psDevInfo->sFBInfo.ui32FBSize) {
+	    psDevInfo->sFBInfo.ui32FBSize)
 		return PVRSRV_ERROR_TOOMANYBUFFERS;
-	}
 
 	ui32BuffersToSkip =
 	    psDevInfo->sDisplayInfo.ui32MaxSwapChainBuffers - ui32BufferCount;
@@ -482,10 +453,9 @@ static PVRSRV_ERROR CreateDCSwapChain(IMG_HANDLE hDevice,
 	    || psDstSurfAttrib->sDims.ui32Width !=
 	    psDevInfo->sDisplayDim.ui32Width
 	    || psDstSurfAttrib->sDims.ui32Height !=
-	    psDevInfo->sDisplayDim.ui32Height) {
+	    psDevInfo->sDisplayDim.ui32Height)
 
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
 	if (psDstSurfAttrib->pixelformat != psSrcSurfAttrib->pixelformat
 	    || psDstSurfAttrib->sDims.ui32ByteStride !=
@@ -493,31 +463,27 @@ static PVRSRV_ERROR CreateDCSwapChain(IMG_HANDLE hDevice,
 	    || psDstSurfAttrib->sDims.ui32Width !=
 	    psSrcSurfAttrib->sDims.ui32Width
 	    || psDstSurfAttrib->sDims.ui32Height !=
-	    psSrcSurfAttrib->sDims.ui32Height) {
+	    psSrcSurfAttrib->sDims.ui32Height)
 
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
 	PVR_UNREFERENCED_PARAMETER(ui32Flags);
 
-	psSwapChain =
-	    (OMAPLFB_SWAPCHAIN *)
-	    OMAPLFBAllocKernelMem(sizeof(OMAPLFB_SWAPCHAIN));
-	if (!psSwapChain) {
+	psSwapChain = (struct OMAPLFB_SWAPCHAIN *)
+			OMAPLFBAllocKernelMem(sizeof(struct OMAPLFB_SWAPCHAIN));
+	if (!psSwapChain)
 		return PVRSRV_ERROR_OUT_OF_MEMORY;
-	}
 
-	psBuffer =
-	    (OMAPLFB_BUFFER *) OMAPLFBAllocKernelMem(sizeof(OMAPLFB_BUFFER) *
+	psBuffer = (struct OMAPLFB_BUFFER *)
+	     OMAPLFBAllocKernelMem(sizeof(struct OMAPLFB_BUFFER) *
 						     ui32BufferCount);
 	if (!psBuffer) {
 		eError = PVRSRV_ERROR_OUT_OF_MEMORY;
 		goto ErrorFreeSwapChain;
 	}
 
-	psVSyncFlips =
-	    (OMAPLFB_VSYNC_FLIP_ITEM *)
-	    OMAPLFBAllocKernelMem(sizeof(OMAPLFB_VSYNC_FLIP_ITEM) *
+	psVSyncFlips = (struct OMAPLFB_VSYNC_FLIP_ITEM *)
+		OMAPLFBAllocKernelMem(sizeof(struct OMAPLFB_VSYNC_FLIP_ITEM) *
 				  ui32BufferCount);
 	if (!psVSyncFlips) {
 		eError = PVRSRV_ERROR_OUT_OF_MEMORY;
@@ -532,15 +498,14 @@ static PVRSRV_ERROR CreateDCSwapChain(IMG_HANDLE hDevice,
 	psSwapChain->psPVRJTable = &psDevInfo->sPVRJTable;
 	psSwapChain->psSwapChainLock = &psDevInfo->SwapChainLock;
 
-	for (i = 0; i < ui32BufferCount - 1; i++) {
+	for (i = 0; i < ui32BufferCount - 1; i++)
 		psBuffer[i].psNext = &psBuffer[i + 1];
-	}
 
 	psBuffer[i].psNext = &psBuffer[0];
 
 	for (i = 0; i < ui32BufferCount; i++) {
-		IMG_UINT32 ui32SwapBuffer = i + ui32BuffersToSkip;
-		IMG_UINT32 ui32BufferOffset =
+		u32 ui32SwapBuffer = i + ui32BuffersToSkip;
+		u32 ui32BufferOffset =
 		    ui32SwapBuffer * psDevInfo->sFBInfo.ui32RoundedBufferSize;
 
 		psBuffer[i].psSyncData = ppsSyncData[i];
@@ -562,7 +527,7 @@ static PVRSRV_ERROR CreateDCSwapChain(IMG_HANDLE hDevice,
 	psSwapChain->pvRegs =
 	    ioremap(psDevInfo->psLINFBInfo->fix.mmio_start,
 		    psDevInfo->psLINFBInfo->fix.mmio_len);
-	if (psSwapChain->pvRegs == IMG_NULL) {
+	if (psSwapChain->pvRegs == NULL) {
 		printk(KERN_WARNING DRIVER_PREFIX
 		       ": Couldn't map registers needed for flipping\n");
 		goto ErrorDisableDisplayRegisters;
@@ -596,15 +561,14 @@ static PVRSRV_ERROR CreateDCSwapChain(IMG_HANDLE hDevice,
 		goto ErrorUninstallVSyncInterrupt;
 	}
 
-	*phSwapChain = (IMG_HANDLE) psSwapChain;
+	*phSwapChain = (void *) psSwapChain;
 
 	return PVRSRV_OK;
 
 ErrorUninstallVSyncInterrupt:
-	if (OMAPLFBUninstallVSyncISR(psSwapChain) != PVRSRV_OK) {
+	if (OMAPLFBUninstallVSyncISR(psSwapChain) != PVRSRV_OK)
 		printk(KERN_WARNING DRIVER_PREFIX
 		       ": Couldn't uninstall VSync ISR\n");
-	}
 ErrorUnmapRegisters:
 	iounmap(psSwapChain->pvRegs);
 ErrorDisableDisplayRegisters:
@@ -618,29 +582,25 @@ ErrorFreeSwapChain:
 	return eError;
 }
 
-static PVRSRV_ERROR DestroyDCSwapChain(IMG_HANDLE hDevice,
-				       IMG_HANDLE hSwapChain)
+static enum PVRSRV_ERROR DestroyDCSwapChain(void *hDevice, void *hSwapChain)
 {
-	OMAPLFB_DEVINFO *psDevInfo;
-	OMAPLFB_SWAPCHAIN *psSwapChain;
+	struct OMAPLFB_DEVINFO *psDevInfo;
+	struct OMAPLFB_SWAPCHAIN *psSwapChain;
 	unsigned long ulLockFlags;
-	PVRSRV_ERROR eError;
+	enum PVRSRV_ERROR eError;
 
-	if (!hDevice || !hSwapChain) {
+	if (!hDevice || !hSwapChain)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	psDevInfo = (OMAPLFB_DEVINFO *) hDevice;
-	psSwapChain = (OMAPLFB_SWAPCHAIN *) hSwapChain;
-	if (psSwapChain != psDevInfo->psSwapChain) {
+	psDevInfo = (struct OMAPLFB_DEVINFO *)hDevice;
+	psSwapChain = (struct OMAPLFB_SWAPCHAIN *)hSwapChain;
+	if (psSwapChain != psDevInfo->psSwapChain)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
 	eError = DisableLFBEventNotification(psDevInfo);
-	if (eError != PVRSRV_OK) {
+	if (eError != PVRSRV_OK)
 		printk(KERN_WARNING DRIVER_PREFIX
 		       ": Couldn't disable framebuffer event notification\n");
-	}
 
 	spin_lock_irqsave(&psDevInfo->SwapChainLock, ulLockFlags);
 
@@ -650,7 +610,7 @@ static PVRSRV_ERROR DestroyDCSwapChain(IMG_HANDLE hDevice,
 
 	OMAPLFBFlip(psSwapChain, psDevInfo->sFBInfo.sSysAddr.uiAddr);
 
-	psDevInfo->psSwapChain = IMG_NULL;
+	psDevInfo->psSwapChain = NULL;
 
 	spin_unlock_irqrestore(&psDevInfo->SwapChainLock, ulLockFlags);
 
@@ -671,8 +631,8 @@ static PVRSRV_ERROR DestroyDCSwapChain(IMG_HANDLE hDevice,
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR SetDCDstRect(IMG_HANDLE hDevice,
-				 IMG_HANDLE hSwapChain, IMG_RECT * psRect)
+static enum PVRSRV_ERROR SetDCDstRect(void *hDevice,
+				 void *hSwapChain, struct IMG_RECT *psRect)
 {
 	PVR_UNREFERENCED_PARAMETER(hDevice);
 	PVR_UNREFERENCED_PARAMETER(hSwapChain);
@@ -681,8 +641,8 @@ static PVRSRV_ERROR SetDCDstRect(IMG_HANDLE hDevice,
 	return PVRSRV_ERROR_NOT_SUPPORTED;
 }
 
-static PVRSRV_ERROR SetDCSrcRect(IMG_HANDLE hDevice,
-				 IMG_HANDLE hSwapChain, IMG_RECT * psRect)
+static enum PVRSRV_ERROR SetDCSrcRect(void *hDevice,
+				 void *hSwapChain, struct IMG_RECT *psRect)
 {
 	PVR_UNREFERENCED_PARAMETER(hDevice);
 	PVR_UNREFERENCED_PARAMETER(hSwapChain);
@@ -691,9 +651,8 @@ static PVRSRV_ERROR SetDCSrcRect(IMG_HANDLE hDevice,
 	return PVRSRV_ERROR_NOT_SUPPORTED;
 }
 
-static PVRSRV_ERROR SetDCDstColourKey(IMG_HANDLE hDevice,
-				      IMG_HANDLE hSwapChain,
-				      IMG_UINT32 ui32CKColour)
+static enum PVRSRV_ERROR SetDCDstColourKey(void *hDevice, void *hSwapChain,
+				      u32 ui32CKColour)
 {
 	PVR_UNREFERENCED_PARAMETER(hDevice);
 	PVR_UNREFERENCED_PARAMETER(hSwapChain);
@@ -702,9 +661,8 @@ static PVRSRV_ERROR SetDCDstColourKey(IMG_HANDLE hDevice,
 	return PVRSRV_ERROR_NOT_SUPPORTED;
 }
 
-static PVRSRV_ERROR SetDCSrcColourKey(IMG_HANDLE hDevice,
-				      IMG_HANDLE hSwapChain,
-				      IMG_UINT32 ui32CKColour)
+static enum PVRSRV_ERROR SetDCSrcColourKey(void *hDevice, void *hSwapChain,
+				      u32 ui32CKColour)
 {
 	PVR_UNREFERENCED_PARAMETER(hDevice);
 	PVR_UNREFERENCED_PARAMETER(hSwapChain);
@@ -713,73 +671,63 @@ static PVRSRV_ERROR SetDCSrcColourKey(IMG_HANDLE hDevice,
 	return PVRSRV_ERROR_NOT_SUPPORTED;
 }
 
-static PVRSRV_ERROR GetDCBuffers(IMG_HANDLE hDevice,
-				 IMG_HANDLE hSwapChain,
-				 IMG_UINT32 * pui32BufferCount,
-				 IMG_HANDLE * phBuffer)
+static enum PVRSRV_ERROR GetDCBuffers(void *hDevice, void *hSwapChain,
+				 u32 *pui32BufferCount, void **phBuffer)
 {
-	OMAPLFB_DEVINFO *psDevInfo;
-	OMAPLFB_SWAPCHAIN *psSwapChain;
-	IMG_UINT32 i;
+	struct OMAPLFB_DEVINFO *psDevInfo;
+	struct OMAPLFB_SWAPCHAIN *psSwapChain;
+	u32 i;
 
-	if (!hDevice || !hSwapChain || !pui32BufferCount || !phBuffer) {
+	if (!hDevice || !hSwapChain || !pui32BufferCount || !phBuffer)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	psDevInfo = (OMAPLFB_DEVINFO *) hDevice;
-	psSwapChain = (OMAPLFB_SWAPCHAIN *) hSwapChain;
-	if (psSwapChain != psDevInfo->psSwapChain) {
+	psDevInfo = (struct OMAPLFB_DEVINFO *)hDevice;
+	psSwapChain = (struct OMAPLFB_SWAPCHAIN *)hSwapChain;
+	if (psSwapChain != psDevInfo->psSwapChain)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
 	*pui32BufferCount = psSwapChain->ui32BufferCount;
 
-	for (i = 0; i < psSwapChain->ui32BufferCount; i++) {
-		phBuffer[i] = (IMG_HANDLE) & psSwapChain->psBuffer[i];
-	}
+	for (i = 0; i < psSwapChain->ui32BufferCount; i++)
+		phBuffer[i] = (void *) &psSwapChain->psBuffer[i];
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR SwapToDCBuffer(IMG_HANDLE hDevice,
-				   IMG_HANDLE hBuffer,
-				   IMG_UINT32 ui32SwapInterval,
-				   IMG_HANDLE hPrivateTag,
-				   IMG_UINT32 ui32ClipRectCount,
-				   IMG_RECT * psClipRect)
+static enum PVRSRV_ERROR SwapToDCBuffer(void *hDevice, void *hBuffer,
+				   u32 ui32SwapInterval, void *hPrivateTag,
+				   u32 ui32ClipRectCount,
+				   struct IMG_RECT *psClipRect)
 {
-	OMAPLFB_DEVINFO *psDevInfo;
+	struct OMAPLFB_DEVINFO *psDevInfo;
 
 	PVR_UNREFERENCED_PARAMETER(ui32SwapInterval);
 	PVR_UNREFERENCED_PARAMETER(hPrivateTag);
 	PVR_UNREFERENCED_PARAMETER(psClipRect);
 
-	if (!hDevice || !hBuffer || (ui32ClipRectCount != 0)) {
+	if (!hDevice || !hBuffer || (ui32ClipRectCount != 0))
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	psDevInfo = (OMAPLFB_DEVINFO *) hDevice;
+	psDevInfo = (struct OMAPLFB_DEVINFO *)hDevice;
 
 	PVR_UNREFERENCED_PARAMETER(hBuffer);
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR SwapToDCSystem(IMG_HANDLE hDevice, IMG_HANDLE hSwapChain)
+static enum PVRSRV_ERROR SwapToDCSystem(void *hDevice, void *hSwapChain)
 {
-	OMAPLFB_DEVINFO *psDevInfo;
-	OMAPLFB_SWAPCHAIN *psSwapChain;
+	struct OMAPLFB_DEVINFO *psDevInfo;
+	struct OMAPLFB_SWAPCHAIN *psSwapChain;
 	unsigned long ulLockFlags;
 
-	if (!hDevice || !hSwapChain) {
+	if (!hDevice || !hSwapChain)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	psDevInfo = (OMAPLFB_DEVINFO *) hDevice;
-	psSwapChain = (OMAPLFB_SWAPCHAIN *) hSwapChain;
-	if (psSwapChain != psDevInfo->psSwapChain) {
+	psDevInfo = (struct OMAPLFB_DEVINFO *)hDevice;
+	psSwapChain = (struct OMAPLFB_SWAPCHAIN *)hSwapChain;
+	if (psSwapChain != psDevInfo->psSwapChain)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
 	spin_lock_irqsave(&psDevInfo->SwapChainLock, ulLockFlags);
 
@@ -792,11 +740,11 @@ static PVRSRV_ERROR SwapToDCSystem(IMG_HANDLE hDevice, IMG_HANDLE hSwapChain)
 	return PVRSRV_OK;
 }
 
-IMG_BOOL OMAPLFBVSyncIHandler(OMAPLFB_SWAPCHAIN * psSwapChain)
+IMG_BOOL OMAPLFBVSyncIHandler(struct OMAPLFB_SWAPCHAIN *psSwapChain)
 {
 	IMG_BOOL bStatus = IMG_FALSE;
-	OMAPLFB_VSYNC_FLIP_ITEM *psFlipItem;
-	IMG_UINT32 ui32MaxIndex;
+	struct OMAPLFB_VSYNC_FLIP_ITEM *psFlipItem;
+	u32 ui32MaxIndex;
 	unsigned long ulLockFlags;
 
 	psFlipItem = &psSwapChain->psVSyncFlips[psSwapChain->ui32RemoveIndex];
@@ -804,9 +752,8 @@ IMG_BOOL OMAPLFBVSyncIHandler(OMAPLFB_SWAPCHAIN * psSwapChain)
 
 	spin_lock_irqsave(psSwapChain->psSwapChainLock, ulLockFlags);
 
-	if (psSwapChain->bFlushCommands) {
+	if (psSwapChain->bFlushCommands)
 		goto ExitUnlock;
-	}
 
 	while (psFlipItem->bValid) {
 
@@ -828,9 +775,9 @@ IMG_BOOL OMAPLFBVSyncIHandler(OMAPLFB_SWAPCHAIN * psSwapChain)
 
 				psSwapChain->ui32RemoveIndex++;
 
-				if (psSwapChain->ui32RemoveIndex > ui32MaxIndex) {
+				if (psSwapChain->ui32RemoveIndex >
+								ui32MaxIndex)
 					psSwapChain->ui32RemoveIndex = 0;
-				}
 
 				psFlipItem->bCmdCompleted = IMG_FALSE;
 				psFlipItem->bFlipped = IMG_FALSE;
@@ -843,7 +790,7 @@ IMG_BOOL OMAPLFBVSyncIHandler(OMAPLFB_SWAPCHAIN * psSwapChain)
 		} else {
 
 			OMAPLFBFlip(psSwapChain,
-				    (IMG_UINT32) psFlipItem->sSysAddr);
+				    (u32) psFlipItem->sSysAddr);
 
 			psFlipItem->bFlipped = IMG_TRUE;
 
@@ -860,31 +807,28 @@ ExitUnlock:
 	return bStatus;
 }
 
-static IMG_BOOL ProcessFlip(IMG_HANDLE hCmdCookie,
-			    IMG_UINT32 ui32DataSize, IMG_VOID * pvData)
+static IMG_BOOL ProcessFlip(void *hCmdCookie, u32 ui32DataSize, void *pvData)
 {
-	DISPLAYCLASS_FLIP_COMMAND *psFlipCmd;
-	OMAPLFB_DEVINFO *psDevInfo;
-	OMAPLFB_BUFFER *psBuffer;
-	OMAPLFB_SWAPCHAIN *psSwapChain;
-	OMAPLFB_VSYNC_FLIP_ITEM *psFlipItem;
+	struct DISPLAYCLASS_FLIP_COMMAND *psFlipCmd;
+	struct OMAPLFB_DEVINFO *psDevInfo;
+	struct OMAPLFB_BUFFER *psBuffer;
+	struct OMAPLFB_SWAPCHAIN *psSwapChain;
+	struct OMAPLFB_VSYNC_FLIP_ITEM *psFlipItem;
 	unsigned long ulLockFlags;
 
-	if (!hCmdCookie || !pvData) {
+	if (!hCmdCookie || !pvData)
 		return IMG_FALSE;
-	}
 
-	psFlipCmd = (DISPLAYCLASS_FLIP_COMMAND *) pvData;
+	psFlipCmd = (struct DISPLAYCLASS_FLIP_COMMAND *)pvData;
 
-	if (psFlipCmd == IMG_NULL
-	    || sizeof(DISPLAYCLASS_FLIP_COMMAND) != ui32DataSize) {
+	if (psFlipCmd == NULL
+	    || sizeof(struct DISPLAYCLASS_FLIP_COMMAND) != ui32DataSize)
 		return IMG_FALSE;
-	}
 
-	psDevInfo = (OMAPLFB_DEVINFO *) psFlipCmd->hExtDevice;
+	psDevInfo = (struct OMAPLFB_DEVINFO *)psFlipCmd->hExtDevice;
 
-	psBuffer = (OMAPLFB_BUFFER *) psFlipCmd->hExtBuffer;
-	psSwapChain = (OMAPLFB_SWAPCHAIN *) psFlipCmd->hExtSwapChain;
+	psBuffer = (struct OMAPLFB_BUFFER *)psFlipCmd->hExtBuffer;
+	psSwapChain = (struct OMAPLFB_SWAPCHAIN *)psFlipCmd->hExtSwapChain;
 
 	spin_lock_irqsave(&psDevInfo->SwapChainLock, ulLockFlags);
 
@@ -907,7 +851,7 @@ static IMG_BOOL ProcessFlip(IMG_HANDLE hCmdCookie,
 	psFlipItem = &psSwapChain->psVSyncFlips[psSwapChain->ui32InsertIndex];
 
 	if (!psFlipItem->bValid) {
-		IMG_UINT32 ui32MaxIndex = psSwapChain->ui32BufferCount - 1;
+		u32 ui32MaxIndex = psSwapChain->ui32BufferCount - 1;
 
 		if (psSwapChain->ui32InsertIndex ==
 		    psSwapChain->ui32RemoveIndex) {
@@ -925,9 +869,8 @@ static IMG_BOOL ProcessFlip(IMG_HANDLE hCmdCookie,
 		psFlipItem->bValid = IMG_TRUE;
 
 		psSwapChain->ui32InsertIndex++;
-		if (psSwapChain->ui32InsertIndex > ui32MaxIndex) {
+		if (psSwapChain->ui32InsertIndex > ui32MaxIndex)
 			psSwapChain->ui32InsertIndex = 0;
-		}
 
 		goto ExitTrueUnlock;
 	}
@@ -940,9 +883,9 @@ ExitTrueUnlock:
 	return IMG_TRUE;
 }
 
-static void SetDevinfo(OMAPLFB_DEVINFO * psDevInfo)
+static void SetDevinfo(struct OMAPLFB_DEVINFO *psDevInfo)
 {
-	OMAPLFB_FBINFO *psPVRFBInfo = &psDevInfo->sFBInfo;
+	struct OMAPLFB_FBINFO *psPVRFBInfo = &psDevInfo->sFBInfo;
 	struct fb_info *psLINFBInfo = psDevInfo->psLINFBInfo;
 	unsigned long FBSize;
 
@@ -983,19 +926,19 @@ static void SetDevinfo(OMAPLFB_DEVINFO * psDevInfo)
 	psPVRFBInfo->ui32RoundedBufferSize =
 	    OMAPLFB_PAGE_ROUNDUP(psPVRFBInfo->ui32BufferSize);
 
-	if (psLINFBInfo->var.bits_per_pixel == 16) {
+	if (psLINFBInfo->var.bits_per_pixel == 16)
 		if ((psLINFBInfo->var.red.length == 5) &&
 		    (psLINFBInfo->var.green.length == 6) &&
 		    (psLINFBInfo->var.blue.length == 5) &&
 		    (psLINFBInfo->var.red.offset == 11) &&
 		    (psLINFBInfo->var.green.offset == 5) &&
 		    (psLINFBInfo->var.blue.offset == 0) &&
-		    (psLINFBInfo->var.red.msb_right == 0)) {
+		    (psLINFBInfo->var.red.msb_right == 0))
 			psPVRFBInfo->ePixelFormat = PVRSRV_PIXEL_FORMAT_RGB565;
-		} else {
+		else
 			printk("Unknown FB format\n");
-		}
-	} else if (psLINFBInfo->var.bits_per_pixel == 32) {
+	else
+	if (psLINFBInfo->var.bits_per_pixel == 32)
 		if ((psLINFBInfo->var.red.length == 8) &&
 		    (psLINFBInfo->var.green.length == 8) &&
 		    (psLINFBInfo->var.blue.length == 8) &&
@@ -1006,11 +949,11 @@ static void SetDevinfo(OMAPLFB_DEVINFO * psDevInfo)
 			psPVRFBInfo->ePixelFormat =
 			    PVRSRV_PIXEL_FORMAT_ARGB8888;
 		} else {
-			printk("Unknown FB format\n");
+			printk(KERN_ERR "Unknown FB format\n");
 		}
-	} else {
-		printk("Unknown FB format\n");
-	}
+	else
+		printk(KERN_ERR "Unknown FB format\n");
+
 	psDevInfo->sDisplayFormat.pixelformat = psDevInfo->sFBInfo.ePixelFormat;
 	psDevInfo->sDisplayDim.ui32Width = psDevInfo->sFBInfo.ui32Width;
 	psDevInfo->sDisplayDim.ui32Height = psDevInfo->sFBInfo.ui32Height;
@@ -1024,7 +967,7 @@ static void SetDevinfo(OMAPLFB_DEVINFO * psDevInfo)
 
 static struct FB_EVENTS {
 	struct notifier_block notif;
-	OMAPLFB_DEVINFO *psDevInfo;
+	struct OMAPLFB_DEVINFO *psDevInfo;
 } gFBEventsData;
 
 static int FBEvents(struct notifier_block *psNotif,
@@ -1038,12 +981,12 @@ static int FBEvents(struct notifier_block *psNotif,
 	return 0;
 }
 
-static PVRSRV_ERROR InitDev(OMAPLFB_DEVINFO * psDevInfo)
+static enum PVRSRV_ERROR InitDev(struct OMAPLFB_DEVINFO *psDevInfo)
 {
 	struct fb_info *psLINFBInfo;
 	struct module *psLINFBOwner;
-	OMAPLFB_FBINFO *psPVRFBInfo = &psDevInfo->sFBInfo;
-	PVRSRV_ERROR eError = PVRSRV_ERROR_GENERIC;
+	struct OMAPLFB_FBINFO *psPVRFBInfo = &psDevInfo->sFBInfo;
+	enum PVRSRV_ERROR eError = PVRSRV_ERROR_GENERIC;
 
 	acquire_console_sem();
 
@@ -1095,7 +1038,7 @@ errRelSem:
 	return eError;
 }
 
-static IMG_VOID DeInitDev(OMAPLFB_DEVINFO * psDevInfo)
+static void DeInitDev(struct OMAPLFB_DEVINFO *psDevInfo)
 {
 	struct fb_info *psLINFBInfo = psDevInfo->psLINFBInfo;
 	struct module *psLINFBOwner;
@@ -1104,56 +1047,51 @@ static IMG_VOID DeInitDev(OMAPLFB_DEVINFO * psDevInfo)
 
 	psLINFBOwner = psLINFBInfo->fbops->owner;
 
-	if (psLINFBInfo->fbops->fb_release != NULL) {
+	if (psLINFBInfo->fbops->fb_release != NULL)
 		(void)psLINFBInfo->fbops->fb_release(psLINFBInfo, 0);
-	}
 
 	module_put(psLINFBOwner);
 
 	release_console_sem();
 }
 
-PVRSRV_ERROR OMAPLFBInit(IMG_VOID)
+enum PVRSRV_ERROR OMAPLFBInit(void)
 {
-	OMAPLFB_DEVINFO *psDevInfo;
+	struct OMAPLFB_DEVINFO *psDevInfo;
 
 	psDevInfo = GetAnchorPtr();
 
-	if (psDevInfo == IMG_NULL) {
-		PFN_CMD_PROC pfnCmdProcList[OMAPLFB_COMMAND_COUNT];
-		IMG_UINT32 aui32SyncCountList[OMAPLFB_COMMAND_COUNT][2];
+	if (psDevInfo == NULL) {
+		IMG_BOOL (*pfnCmdProcList[OMAPLFB_COMMAND_COUNT])
+							(void *, u32, void *);
+		u32 aui32SyncCountList[OMAPLFB_COMMAND_COUNT][2];
 
-		psDevInfo =
-		    (OMAPLFB_DEVINFO *)
-		    OMAPLFBAllocKernelMem(sizeof(OMAPLFB_DEVINFO));
+		psDevInfo = (struct OMAPLFB_DEVINFO *)
+			  OMAPLFBAllocKernelMem(sizeof(struct OMAPLFB_DEVINFO));
 
-		if (!psDevInfo) {
+		if (!psDevInfo)
 			return PVRSRV_ERROR_OUT_OF_MEMORY;
-		}
 
-		memset(psDevInfo, 0, sizeof(OMAPLFB_DEVINFO));
+		memset(psDevInfo, 0, sizeof(struct OMAPLFB_DEVINFO));
 
-		SetAnchorPtr((IMG_VOID *) psDevInfo);
+		SetAnchorPtr((void *) psDevInfo);
 
 		psDevInfo->ui32RefCount = 0;
 
-		if (InitDev(psDevInfo) != PVRSRV_OK) {
+		if (InitDev(psDevInfo) != PVRSRV_OK)
 			return PVRSRV_ERROR_INIT_FAILURE;
-		}
 
 		if (OMAPLFBGetLibFuncAddr
 		    ("PVRGetDisplayClassJTable",
-		     &pfnGetPVRJTable) != PVRSRV_OK) {
+		     &pfnGetPVRJTable) != PVRSRV_OK)
 			return PVRSRV_ERROR_INIT_FAILURE;
-		}
 
-		if (!(*pfnGetPVRJTable) (&psDevInfo->sPVRJTable)) {
+		if (!(*pfnGetPVRJTable) (&psDevInfo->sPVRJTable))
 			return PVRSRV_ERROR_INIT_FAILURE;
-		}
 
 		spin_lock_init(&psDevInfo->SwapChainLock);
 
-		psDevInfo->psSwapChain = IMG_NULL;
+		psDevInfo->psSwapChain = NULL;
 		psDevInfo->bFlushCommands = IMG_FALSE;
 		psDevInfo->bDeviceSuspended = IMG_FALSE;
 
@@ -1173,11 +1111,11 @@ PVRSRV_ERROR OMAPLFBInit(IMG_VOID)
 			DISPLAY_DEVICE_NAME, MAX_DISPLAY_NAME_SIZE);
 
 		DEBUG_PRINTK((KERN_INFO DRIVER_PREFIX
-			      ": Maximum number of swap chain buffers: %lu\n",
+			      ": Maximum number of swap chain buffers: %u\n",
 			      psDevInfo->sDisplayInfo.ui32MaxSwapChainBuffers));
 
 		psDevInfo->sDCJTable.ui32TableSize =
-		    sizeof(PVRSRV_DC_SRV2DISP_KMJTABLE);
+		    sizeof(struct PVRSRV_DC_SRV2DISP_KMJTABLE);
 		psDevInfo->sDCJTable.pfnOpenDCDevice = OpenDCDevice;
 		psDevInfo->sDCJTable.pfnCloseDCDevice = CloseDCDevice;
 		psDevInfo->sDCJTable.pfnEnumDCFormats = EnumDCFormats;
@@ -1199,9 +1137,8 @@ PVRSRV_ERROR OMAPLFBInit(IMG_VOID)
 		if (psDevInfo->sPVRJTable.
 		    pfnPVRSRVRegisterDCDevice(&psDevInfo->sDCJTable,
 					      &psDevInfo->ui32DeviceID) !=
-		    PVRSRV_OK) {
+		    PVRSRV_OK)
 			return PVRSRV_ERROR_DEVICE_REGISTER_FAILED;
-		}
 
 		pfnCmdProcList[DC_FLIP_COMMAND] = ProcessFlip;
 
@@ -1227,65 +1164,59 @@ PVRSRV_ERROR OMAPLFBInit(IMG_VOID)
 
 }
 
-PVRSRV_ERROR OMAPLFBDeinit(IMG_VOID)
+enum PVRSRV_ERROR OMAPLFBDeinit(void)
 {
-	OMAPLFB_DEVINFO *psDevInfo, *psDevFirst;
+	struct OMAPLFB_DEVINFO *psDevInfo, *psDevFirst;
 
 	psDevFirst = GetAnchorPtr();
 	psDevInfo = psDevFirst;
 
-	if (psDevInfo == IMG_NULL) {
+	if (psDevInfo == NULL)
 		return PVRSRV_ERROR_GENERIC;
-	}
 
 	psDevInfo->ui32RefCount--;
 
 	if (psDevInfo->ui32RefCount == 0) {
-
-		PVRSRV_DC_DISP2SRV_KMJTABLE *psJTable = &psDevInfo->sPVRJTable;
-
+		struct PVRSRV_DC_DISP2SRV_KMJTABLE *psJTable =
+							&psDevInfo->sPVRJTable;
 		if (psDevInfo->sPVRJTable.
 		    pfnPVRSRVRemoveCmdProcList(psDevInfo->ui32DeviceID,
 					       OMAPLFB_COMMAND_COUNT) !=
-		    PVRSRV_OK) {
+		    PVRSRV_OK)
 			return PVRSRV_ERROR_GENERIC;
-		}
 
 		if (psJTable->
 		    pfnPVRSRVRemoveDCDevice(psDevInfo->ui32DeviceID) !=
-		    PVRSRV_OK) {
+		    PVRSRV_OK)
 			return PVRSRV_ERROR_GENERIC;
-		}
 
 		DeInitDev(psDevInfo);
 
 		OMAPLFBFreeKernelMem(psDevInfo);
 	}
 
-	SetAnchorPtr(IMG_NULL);
+	SetAnchorPtr(NULL);
 
 	return PVRSRV_OK;
 }
 
-IMG_VOID OMAPLFBDriverSuspend(IMG_VOID)
+void OMAPLFBDriverSuspend(void)
 {
-	OMAPLFB_DEVINFO *psDevInfo = GetAnchorPtr();
+	struct OMAPLFB_DEVINFO *psDevInfo = GetAnchorPtr();
 	unsigned long ulLockFlags;
 
 	spin_lock_irqsave(&psDevInfo->SwapChainLock, ulLockFlags);
 
-	if (psDevInfo->bDeviceSuspended) {
+	if (psDevInfo->bDeviceSuspended)
 		goto ExitUnlock;
-	}
 	psDevInfo->bDeviceSuspended = IMG_TRUE;
 
 	SetFlushStateInternalNoLock(psDevInfo, IMG_TRUE);
 
 	spin_unlock_irqrestore(&psDevInfo->SwapChainLock, ulLockFlags);
 
-	if (psDevInfo->psSwapChain != IMG_NULL) {
+	if (psDevInfo->psSwapChain != NULL)
 		OMAPLFBDisableDisplayRegisterAccess();
-	}
 
 	return;
 
@@ -1293,18 +1224,16 @@ ExitUnlock:
 	spin_unlock_irqrestore(&psDevInfo->SwapChainLock, ulLockFlags);
 }
 
-IMG_VOID OMAPLFBDriverResume(IMG_VOID)
+void OMAPLFBDriverResume(void)
 {
-	OMAPLFB_DEVINFO *psDevInfo = GetAnchorPtr();
+	struct OMAPLFB_DEVINFO *psDevInfo = GetAnchorPtr();
 	unsigned long ulLockFlags;
 
-	if (!psDevInfo->bDeviceSuspended) {
+	if (!psDevInfo->bDeviceSuspended)
 		return;
-	}
 
-	if (psDevInfo->psSwapChain != IMG_NULL) {
+	if (psDevInfo->psSwapChain != NULL)
 		OMAPLFBEnableDisplayRegisterAccess();
-	}
 
 	spin_lock_irqsave(&psDevInfo->SwapChainLock, ulLockFlags);
 

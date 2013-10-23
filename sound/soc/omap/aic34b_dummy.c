@@ -134,6 +134,12 @@ void aic34b_set_mic_bias(int bias)
 }
 EXPORT_SYMBOL(aic34b_set_mic_bias);
 
+int aic34b_get_mic_bias(void)
+{
+	return aic34b_bias;
+}
+EXPORT_SYMBOL(aic34b_get_mic_bias);
+
 int aic34b_set_volume(u8 volume)
 {
 	u8 val;

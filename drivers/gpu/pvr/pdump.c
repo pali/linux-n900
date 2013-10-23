@@ -1,30 +1,30 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
-#if defined (PDUMP)
+#if defined(PDUMP)
 #include "sgxdefs.h"
 #include "services_headers.h"
 
@@ -38,111 +38,106 @@
 
 #include <linux/tty.h>
 
-static IMG_BOOL PDumpWriteString2(IMG_CHAR * pszString, IMG_UINT32 ui32Flags);
-static IMG_BOOL PDumpWriteILock(PDBG_STREAM psStream, IMG_UINT8 * pui8Data,
-				IMG_UINT32 ui32Count, IMG_UINT32 ui32Flags);
-static IMG_VOID DbgSetFrame(PDBG_STREAM psStream, IMG_UINT32 ui32Frame);
-static IMG_UINT32 DbgGetFrame(PDBG_STREAM psStream);
-static IMG_VOID DbgSetMarker(PDBG_STREAM psStream, IMG_UINT32 ui32Marker);
-static IMG_UINT32 DbgWrite(PDBG_STREAM psStream, IMG_UINT8 * pui8Data,
-			   IMG_UINT32 ui32BCount, IMG_UINT32 ui32Flags);
+static IMG_BOOL PDumpWriteString2(char *pszString, u32 ui32Flags);
+static IMG_BOOL PDumpWriteILock(struct DBG_STREAM *psStream, u8 *pui8Data,
+				u32 ui32Count, u32 ui32Flags);
+static void DbgSetFrame(struct DBG_STREAM *psStream, u32 ui32Frame);
+static u32 DbgGetFrame(struct DBG_STREAM *psStream);
+static void DbgSetMarker(struct DBG_STREAM *psStream, u32 ui32Marker);
+static u32 DbgWrite(struct DBG_STREAM *psStream, u8 *pui8Data,
+			   u32 ui32BCount, u32 ui32Flags);
 
 #define PDUMP_DATAMASTER_PIXEL		(1)
 
-#define MIN(a,b)       (a > b ? b : a)
+#define MIN(a, b)       (a > b ? b : a)
 
 #define MAX_FILE_SIZE	0x40000000
 
-static IMG_UINT32 gui32PDumpSuspended = 0;
+static u32 gui32PDumpSuspended;
 
-static PDBGKM_SERVICE_TABLE gpfnDbgDrv = IMG_NULL;
+static struct DBGKM_SERVICE_TABLE *gpfnDbgDrv;
 
 #define PDUMP_STREAM_PARAM2			0
 #define PDUMP_STREAM_SCRIPT2		1
 #define PDUMP_STREAM_DRIVERINFO		2
 #define PDUMP_NUM_STREAMS			3
 
-IMG_CHAR *pszStreamName[PDUMP_NUM_STREAMS] = { "ParamStream2",
+char *pszStreamName[PDUMP_NUM_STREAMS] = { "ParamStream2",
 	"ScriptStream2",
 	"DriverInfoStream"
 };
 
-#define __PDBG_PDUMP_STATE_GET_MSG_STRING(ERROR) \
-    	IMG_CHAR *pszMsg = gsDBGPdumpState.pszMsg; \
-	if(!pszMsg) return ERROR
+#define __PDBG_PDUMP_STATE_GET_MSG_STRING(ERROR)	\
+	char *pszMsg = gsDBGPdumpState.pszMsg;		\
+	if (!pszMsg)					\
+		return ERROR
 
-#define __PDBG_PDUMP_STATE_GET_SCRIPT_STRING(ERROR) \
-    	IMG_CHAR *pszScript = gsDBGPdumpState.pszScript; \
-	if(!pszScript) return ERROR
+#define __PDBG_PDUMP_STATE_GET_SCRIPT_STRING(ERROR)	\
+	char *pszScript = gsDBGPdumpState.pszScript;	\
+	if (!pszScript)					\
+		return ERROR
 
-#define __PDBG_PDUMP_STATE_GET_SCRIPT_AND_FILE_STRING(ERROR) \
-    	IMG_CHAR *pszScript = gsDBGPdumpState.pszScript; \
-    	IMG_CHAR *pszFile = gsDBGPdumpState.pszFile; \
-	if(!pszScript || !pszFile) return ERROR
+#define __PDBG_PDUMP_STATE_GET_SCRIPT_AND_FILE_STRING(ERROR)	\
+	char *pszScript = gsDBGPdumpState.pszScript;		\
+	char *pszFile = gsDBGPdumpState.pszFile;		\
+	if (!pszScript || !pszFile)				\
+		return ERROR
 
-typedef struct PDBG_PDUMP_STATE_TAG {
-	PDBG_STREAM psStream[PDUMP_NUM_STREAMS];
-	IMG_UINT32 ui32ParamFileNum;
+struct PDBG_PDUMP_STATE {
+	struct DBG_STREAM *psStream[PDUMP_NUM_STREAMS];
+	u32 ui32ParamFileNum;
 
-	IMG_CHAR *pszMsg;
-	IMG_CHAR *pszScript;
-	IMG_CHAR *pszFile;
+	char *pszMsg;
+	char *pszScript;
+	char *pszFile;
 
-} PDBG_PDUMP_STATE;
+};
 
-static PDBG_PDUMP_STATE gsDBGPdumpState =
-    { {IMG_NULL}, 0, IMG_NULL, IMG_NULL, IMG_NULL };
+static struct PDBG_PDUMP_STATE gsDBGPdumpState = {
+	{NULL}, 0, NULL, NULL, NULL
+};
 
-#define SZ_MSG_SIZE_MAX			PVRSRV_PDUMP_MAX_COMMENT_SIZE-1
-#define SZ_SCRIPT_SIZE_MAX		PVRSRV_PDUMP_MAX_COMMENT_SIZE-1
-#define SZ_FILENAME_SIZE_MAX	PVRSRV_PDUMP_MAX_COMMENT_SIZE-1
+#define SZ_MSG_SIZE_MAX			(PVRSRV_PDUMP_MAX_COMMENT_SIZE - 1)
+#define SZ_SCRIPT_SIZE_MAX		(PVRSRV_PDUMP_MAX_COMMENT_SIZE - 1)
+#define SZ_FILENAME_SIZE_MAX		(PVRSRV_PDUMP_MAX_COMMENT_SIZE - 1)
 
-void DBGDrvGetServiceTable(IMG_VOID ** fn_table);
-
-IMG_VOID PDumpInit(IMG_VOID)
+void PDumpInit(void)
 {
-	IMG_UINT32 i = 0;
+	u32 i = 0;
 
 	if (!gpfnDbgDrv) {
-		DBGDrvGetServiceTable((IMG_VOID **) & gpfnDbgDrv);
+		DBGDrvGetServiceTable((void **) &gpfnDbgDrv);
 
-		if (gpfnDbgDrv == IMG_NULL) {
+		if (gpfnDbgDrv == NULL)
 			return;
-		}
 
-		if (!gsDBGPdumpState.pszFile) {
+		if (!gsDBGPdumpState.pszFile)
 			if (OSAllocMem
 			    (PVRSRV_OS_PAGEABLE_HEAP, SZ_FILENAME_SIZE_MAX,
-			     (IMG_PVOID *) & gsDBGPdumpState.pszFile,
-			     0) != PVRSRV_OK) {
+			     (void **) &gsDBGPdumpState.pszFile,
+			     0) != PVRSRV_OK)
 				goto init_failed;
-			}
-		}
 
-		if (!gsDBGPdumpState.pszMsg) {
+		if (!gsDBGPdumpState.pszMsg)
 			if (OSAllocMem
 			    (PVRSRV_OS_PAGEABLE_HEAP, SZ_MSG_SIZE_MAX,
-			     (IMG_PVOID *) & gsDBGPdumpState.pszMsg,
-			     0) != PVRSRV_OK) {
+			     (void **) &gsDBGPdumpState.pszMsg,
+			     0) != PVRSRV_OK)
 				goto init_failed;
-			}
-		}
 
-		if (!gsDBGPdumpState.pszScript) {
+		if (!gsDBGPdumpState.pszScript)
 			if (OSAllocMem
 			    (PVRSRV_OS_PAGEABLE_HEAP, SZ_SCRIPT_SIZE_MAX,
-			     (IMG_PVOID *) & gsDBGPdumpState.pszScript,
-			     0) != PVRSRV_OK) {
+			     (void **) &gsDBGPdumpState.pszScript,
+			     0) != PVRSRV_OK)
 				goto init_failed;
-			}
-		}
 
 		for (i = 0; i < PDUMP_NUM_STREAMS; i++) {
 			gsDBGPdumpState.psStream[i] =
 			    gpfnDbgDrv->pfnCreateStream(pszStreamName[i],
-							DEBUG_CAPMODE_FRAMED,
-							DEBUG_OUTMODE_STREAMENABLE,
-							0, 10);
+						DEBUG_CAPMODE_FRAMED,
+						DEBUG_OUTMODE_STREAMENABLE,
+						0, 10);
 
 			gpfnDbgDrv->pfnSetCaptureMode(gsDBGPdumpState.
 						      psStream[i],
@@ -164,101 +159,97 @@ init_failed:
 
 	if (gsDBGPdumpState.pszFile) {
 		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, SZ_FILENAME_SIZE_MAX,
-			  (IMG_PVOID) gsDBGPdumpState.pszFile, 0);
-		gsDBGPdumpState.pszFile = IMG_NULL;
+			  (void *) gsDBGPdumpState.pszFile, 0);
+		gsDBGPdumpState.pszFile = NULL;
 	}
 
 	if (gsDBGPdumpState.pszScript) {
 		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, SZ_SCRIPT_SIZE_MAX,
-			  (IMG_PVOID) gsDBGPdumpState.pszScript, 0);
-		gsDBGPdumpState.pszScript = IMG_NULL;
+			  (void *) gsDBGPdumpState.pszScript, 0);
+		gsDBGPdumpState.pszScript = NULL;
 	}
 
 	if (gsDBGPdumpState.pszMsg) {
 		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, SZ_MSG_SIZE_MAX,
-			  (IMG_PVOID) gsDBGPdumpState.pszMsg, 0);
-		gsDBGPdumpState.pszMsg = IMG_NULL;
+			  (void *) gsDBGPdumpState.pszMsg, 0);
+		gsDBGPdumpState.pszMsg = NULL;
 	}
 
-	gpfnDbgDrv = IMG_NULL;
+	gpfnDbgDrv = NULL;
 }
 
-IMG_VOID PDumpDeInit(IMG_VOID)
+void PDumpDeInit(void)
 {
-	IMG_UINT32 i = 0;
+	u32 i = 0;
 
-	for (i = 0; i < PDUMP_NUM_STREAMS; i++) {
+	for (i = 0; i < PDUMP_NUM_STREAMS; i++)
 		gpfnDbgDrv->pfnDestroyStream(gsDBGPdumpState.psStream[i]);
-	}
 
 	if (gsDBGPdumpState.pszFile) {
 		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, SZ_FILENAME_SIZE_MAX,
-			  (IMG_PVOID) gsDBGPdumpState.pszFile, 0);
-		gsDBGPdumpState.pszFile = IMG_NULL;
+			  (void *) gsDBGPdumpState.pszFile, 0);
+		gsDBGPdumpState.pszFile = NULL;
 	}
 
 	if (gsDBGPdumpState.pszScript) {
 		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, SZ_SCRIPT_SIZE_MAX,
-			  (IMG_PVOID) gsDBGPdumpState.pszScript, 0);
-		gsDBGPdumpState.pszScript = IMG_NULL;
+			  (void *) gsDBGPdumpState.pszScript, 0);
+		gsDBGPdumpState.pszScript = NULL;
 	}
 
 	if (gsDBGPdumpState.pszMsg) {
 		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, SZ_MSG_SIZE_MAX,
-			  (IMG_PVOID) gsDBGPdumpState.pszMsg, 0);
-		gsDBGPdumpState.pszMsg = IMG_NULL;
+			  (void *) gsDBGPdumpState.pszMsg, 0);
+		gsDBGPdumpState.pszMsg = NULL;
 	}
 
-	gpfnDbgDrv = IMG_NULL;
+	gpfnDbgDrv = NULL;
 }
 
-IMG_VOID PDumpEndInitPhase(IMG_VOID)
+void PDumpEndInitPhase(void)
 {
-	IMG_UINT32 i;
+	u32 i;
 
 	PDUMPCOMMENT("End of Init Phase");
 
-	for (i = 0; i < PDUMP_NUM_STREAMS; i++) {
+	for (i = 0; i < PDUMP_NUM_STREAMS; i++)
 		gpfnDbgDrv->pfnEndInitPhase(gsDBGPdumpState.psStream[i]);
-	}
 }
 
-void PDumpComment(IMG_CHAR * pszFormat, ...)
+void PDumpComment(char *pszFormat, ...)
 {
 	__PDBG_PDUMP_STATE_GET_MSG_STRING();
 
 	vsnprintf(pszMsg, SZ_MSG_SIZE_MAX, pszFormat,
-		  (IMG_CHAR *) (&pszFormat + 1));
+		  (char *) (&pszFormat + 1));
 
 	PDumpCommentKM(pszMsg, PDUMP_FLAGS_CONTINUOUS);
 }
 
-void PDumpCommentWithFlags(IMG_UINT32 ui32Flags, IMG_CHAR * pszFormat, ...)
+void PDumpCommentWithFlags(u32 ui32Flags, char *pszFormat, ...)
 {
 	__PDBG_PDUMP_STATE_GET_MSG_STRING();
 
 	vsnprintf(pszMsg, SZ_MSG_SIZE_MAX, pszFormat,
-		  (IMG_CHAR *) (&pszFormat + 1));
+		  (char *) (&pszFormat + 1));
 
 	PDumpCommentKM(pszMsg, ui32Flags);
 }
 
-IMG_BOOL PDumpIsLastCaptureFrameKM(IMG_VOID)
+IMG_BOOL PDumpIsLastCaptureFrameKM(void)
 {
-	return gpfnDbgDrv->pfnIsLastCaptureFrame(gsDBGPdumpState.
-						 psStream
-						 [PDUMP_STREAM_SCRIPT2]);
+	return gpfnDbgDrv->pfnIsLastCaptureFrame(
+				gsDBGPdumpState.psStream[PDUMP_STREAM_SCRIPT2]);
 }
 
-IMG_BOOL PDumpIsCaptureFrameKM(IMG_VOID)
+IMG_BOOL PDumpIsCaptureFrameKM(void)
 {
-	return gpfnDbgDrv->pfnIsCaptureFrame(gsDBGPdumpState.
-					     psStream[PDUMP_STREAM_SCRIPT2],
-					     IMG_FALSE);
+	return gpfnDbgDrv->pfnIsCaptureFrame(
+			gsDBGPdumpState.psStream[PDUMP_STREAM_SCRIPT2],
+			IMG_FALSE);
 }
 
-PVRSRV_ERROR PDumpRegWithFlagsKM(IMG_UINT32 ui32Reg, IMG_UINT32 ui32Data,
-				 IMG_UINT32 ui32Flags)
+enum PVRSRV_ERROR PDumpRegWithFlagsKM(u32 ui32Reg, u32 ui32Data, u32 ui32Flags)
 {
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING(PVRSRV_ERROR_GENERIC);
 
@@ -269,7 +260,7 @@ PVRSRV_ERROR PDumpRegWithFlagsKM(IMG_UINT32 ui32Reg, IMG_UINT32 ui32Data,
 	return PVRSRV_OK;
 }
 
-void PDumpReg(IMG_UINT32 ui32Reg, IMG_UINT32 ui32Data)
+void PDumpReg(u32 ui32Reg, u32 ui32Data)
 {
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING();
 
@@ -278,15 +269,14 @@ void PDumpReg(IMG_UINT32 ui32Reg, IMG_UINT32 ui32Data)
 	PDumpWriteString2(pszScript, PDUMP_FLAGS_CONTINUOUS);
 }
 
-PVRSRV_ERROR PDumpRegPolWithFlagsKM(IMG_UINT32 ui32RegAddr,
-				    IMG_UINT32 ui32RegValue,
-				    IMG_UINT32 ui32Mask, IMG_UINT32 ui32Flags)
+enum PVRSRV_ERROR PDumpRegPolWithFlagsKM(u32 ui32RegAddr, u32 ui32RegValue,
+				    u32 ui32Mask, u32 ui32Flags)
 {
 #define POLL_DELAY			1000
 #define POLL_COUNT_LONG		(2000000000 / POLL_DELAY)
 #define POLL_COUNT_SHORT	(1000000 / POLL_DELAY)
 
-	IMG_UINT32 ui32PollCount;
+	u32 ui32PollCount;
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING(PVRSRV_ERROR_GENERIC);
 
 	if (((ui32RegAddr == EUR_CR_EVENT_STATUS) &&
@@ -296,11 +286,10 @@ PVRSRV_ERROR PDumpRegPolWithFlagsKM(IMG_UINT32 ui32RegAddr,
 		    EUR_CR_EVENT_STATUS_PIXELBE_END_RENDER_MASK))
 	    || ((ui32RegAddr == EUR_CR_EVENT_STATUS)
 		&& (ui32RegValue & ui32Mask &
-		    EUR_CR_EVENT_STATUS_DPM_3D_MEM_FREE_MASK))) {
+		    EUR_CR_EVENT_STATUS_DPM_3D_MEM_FREE_MASK)))
 		ui32PollCount = POLL_COUNT_LONG;
-	} else {
+	else
 		ui32PollCount = POLL_COUNT_SHORT;
-	}
 
 	snprintf(pszScript, SZ_SCRIPT_SIZE_MAX,
 		 "POL :SGXREG:0x%8.8lX 0x%8.8lX 0x%8.8lX %d %lu %d\r\n",
@@ -311,30 +300,27 @@ PVRSRV_ERROR PDumpRegPolWithFlagsKM(IMG_UINT32 ui32RegAddr,
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR PDumpRegPolKM(IMG_UINT32 ui32RegAddr, IMG_UINT32 ui32RegValue,
-			   IMG_UINT32 ui32Mask)
+enum PVRSRV_ERROR PDumpRegPolKM(u32 ui32RegAddr, u32 ui32RegValue, u32 ui32Mask)
 {
 	return PDumpRegPolWithFlagsKM(ui32RegAddr, ui32RegValue, ui32Mask,
 				      PDUMP_FLAGS_CONTINUOUS);
 }
 
-IMG_VOID PDumpMallocPages(PVRSRV_DEVICE_TYPE eDeviceType,
-			  IMG_UINT32 ui32DevVAddr,
-			  IMG_CPU_VIRTADDR pvLinAddr,
-			  IMG_HANDLE hOSMemHandle,
-			  IMG_UINT32 ui32NumBytes, IMG_HANDLE hUniqueTag)
+void PDumpMallocPages(enum PVRSRV_DEVICE_TYPE eDeviceType, u32 ui32DevVAddr,
+		      void *pvLinAddr, void *hOSMemHandle, u32 ui32NumBytes,
+		      void *hUniqueTag)
 {
-	IMG_UINT32 ui32Offset;
-	IMG_UINT32 ui32NumPages;
-	IMG_CPU_PHYADDR sCpuPAddr;
-	IMG_DEV_PHYADDR sDevPAddr;
-	IMG_UINT32 ui32Page;
+	u32 ui32Offset;
+	u32 ui32NumPages;
+	struct IMG_CPU_PHYADDR sCpuPAddr;
+	struct IMG_DEV_PHYADDR sDevPAddr;
+	u32 ui32Page;
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING();
 	PVR_UNREFERENCED_PARAMETER(pvLinAddr);
 
-	PVR_ASSERT(((IMG_UINT32) ui32DevVAddr & (SGX_MMU_PAGE_SIZE - 1)) == 0);
+	PVR_ASSERT(((u32) ui32DevVAddr & (SGX_MMU_PAGE_SIZE - 1)) == 0);
 	PVR_ASSERT(hOSMemHandle);
-	PVR_ASSERT(((IMG_UINT32) ui32NumBytes & (SGX_MMU_PAGE_SIZE - 1)) == 0);
+	PVR_ASSERT(((u32) ui32NumBytes & (SGX_MMU_PAGE_SIZE - 1)) == 0);
 
 	snprintf(pszScript, SZ_SCRIPT_SIZE_MAX,
 		 "-- MALLOC :SGXMEM:VA_%8.8lX 0x%8.8lX %lu\r\n", ui32DevVAddr,
@@ -359,26 +345,26 @@ IMG_VOID PDumpMallocPages(PVRSRV_DEVICE_TYPE eDeviceType,
 	}
 }
 
-IMG_VOID PDumpMallocPageTable(PVRSRV_DEVICE_TYPE eDeviceType,
-			      IMG_CPU_VIRTADDR pvLinAddr,
-			      IMG_UINT32 ui32NumBytes, IMG_HANDLE hUniqueTag)
+void PDumpMallocPageTable(enum PVRSRV_DEVICE_TYPE eDeviceType,
+			      void *pvLinAddr, u32 ui32NumBytes,
+			      void *hUniqueTag)
 {
-	IMG_PUINT8 pui8LinAddr;
-	IMG_UINT32 ui32NumPages;
-	IMG_CPU_PHYADDR sCpuPAddr;
-	IMG_DEV_PHYADDR sDevPAddr;
-	IMG_UINT32 ui32Page;
+	u8 *pui8LinAddr;
+	u32 ui32NumPages;
+	struct IMG_CPU_PHYADDR sCpuPAddr;
+	struct IMG_DEV_PHYADDR sDevPAddr;
+	u32 ui32Page;
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING();
 
-	PVR_ASSERT(((IMG_UINT32) pvLinAddr & (SGX_MMU_PAGE_SIZE - 1)) == 0);
-	PVR_ASSERT(((IMG_UINT32) ui32NumBytes & (SGX_MMU_PAGE_SIZE - 1)) == 0);
+	PVR_ASSERT(((u32) pvLinAddr & (SGX_MMU_PAGE_SIZE - 1)) == 0);
+	PVR_ASSERT(((u32) ui32NumBytes & (SGX_MMU_PAGE_SIZE - 1)) == 0);
 
 	snprintf(pszScript, SZ_SCRIPT_SIZE_MAX,
 		 "-- MALLOC :SGXMEM:PAGE_TABLE 0x%8.8lX %lu\r\n", ui32NumBytes,
 		 SGX_MMU_PAGE_SIZE);
 	PDumpWriteString2(pszScript, PDUMP_FLAGS_CONTINUOUS);
 
-	pui8LinAddr = (IMG_PUINT8) pvLinAddr;
+	pui8LinAddr = (u8 *) pvLinAddr;
 	ui32NumPages = ui32NumBytes >> SGX_MMU_PAGE_SHIFT;
 	while (ui32NumPages--) {
 		sCpuPAddr = OSMapLinToCPUPhys(pui8LinAddr);
@@ -395,19 +381,17 @@ IMG_VOID PDumpMallocPageTable(PVRSRV_DEVICE_TYPE eDeviceType,
 	}
 }
 
-IMG_VOID PDumpFreePages(BM_HEAP * psBMHeap,
-			IMG_DEV_VIRTADDR sDevVAddr,
-			IMG_UINT32 ui32NumBytes,
-			IMG_HANDLE hUniqueTag, IMG_BOOL bInterleaved)
+void PDumpFreePages(struct BM_HEAP *psBMHeap, struct IMG_DEV_VIRTADDR sDevVAddr,
+		    u32 ui32NumBytes, void *hUniqueTag, IMG_BOOL bInterleaved)
 {
-	IMG_UINT32 ui32NumPages, ui32PageCounter;
-	IMG_DEV_PHYADDR sDevPAddr;
-	PVRSRV_DEVICE_NODE *psDeviceNode;
+	u32 ui32NumPages, ui32PageCounter;
+	struct IMG_DEV_PHYADDR sDevPAddr;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode;
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING();
 
-	PVR_ASSERT(((IMG_UINT32) sDevVAddr.uiAddr & (SGX_MMU_PAGE_SIZE - 1)) ==
+	PVR_ASSERT(((u32) sDevVAddr.uiAddr & (SGX_MMU_PAGE_SIZE - 1)) ==
 		   0);
-	PVR_ASSERT(((IMG_UINT32) ui32NumBytes & (SGX_MMU_PAGE_SIZE - 1)) == 0);
+	PVR_ASSERT(((u32) ui32NumBytes & (SGX_MMU_PAGE_SIZE - 1)) == 0);
 
 	snprintf(pszScript, SZ_SCRIPT_SIZE_MAX, "-- FREE :SGXMEM:VA_%8.8lX\r\n",
 		 sDevVAddr.uiAddr);
@@ -435,25 +419,24 @@ IMG_VOID PDumpFreePages(BM_HEAP * psBMHeap,
 	}
 }
 
-IMG_VOID PDumpFreePageTable(PVRSRV_DEVICE_TYPE eDeviceType,
-			    IMG_CPU_VIRTADDR pvLinAddr,
-			    IMG_UINT32 ui32NumBytes, IMG_HANDLE hUniqueTag)
+void PDumpFreePageTable(enum PVRSRV_DEVICE_TYPE eDeviceType, void *pvLinAddr,
+			u32 ui32NumBytes, void *hUniqueTag)
 {
-	IMG_PUINT8 pui8LinAddr;
-	IMG_UINT32 ui32NumPages;
-	IMG_CPU_PHYADDR sCpuPAddr;
-	IMG_DEV_PHYADDR sDevPAddr;
-	IMG_UINT32 ui32Page;
+	u8 *pui8LinAddr;
+	u32 ui32NumPages;
+	struct IMG_CPU_PHYADDR sCpuPAddr;
+	struct IMG_DEV_PHYADDR sDevPAddr;
+	u32 ui32Page;
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING();
 
-	PVR_ASSERT(((IMG_UINT32) pvLinAddr & (SGX_MMU_PAGE_SIZE - 1)) == 0);
-	PVR_ASSERT(((IMG_UINT32) ui32NumBytes & (SGX_MMU_PAGE_SIZE - 1)) == 0);
+	PVR_ASSERT(((u32) pvLinAddr & (SGX_MMU_PAGE_SIZE - 1)) == 0);
+	PVR_ASSERT(((u32) ui32NumBytes & (SGX_MMU_PAGE_SIZE - 1)) == 0);
 
 	snprintf(pszScript, SZ_SCRIPT_SIZE_MAX,
 		 "-- FREE :SGXMEM:PAGE_TABLE\r\n");
 	PDumpWriteString2(pszScript, PDUMP_FLAGS_CONTINUOUS);
 
-	pui8LinAddr = (IMG_PUINT8) pvLinAddr;
+	pui8LinAddr = (u8 *) pvLinAddr;
 	ui32NumPages = ui32NumBytes >> SGX_MMU_PAGE_SHIFT;
 	while (ui32NumPages--) {
 		sCpuPAddr = OSMapLinToCPUPhys(pui8LinAddr);
@@ -468,8 +451,7 @@ IMG_VOID PDumpFreePageTable(PVRSRV_DEVICE_TYPE eDeviceType,
 	}
 }
 
-IMG_VOID PDumpPDReg(IMG_UINT32 ui32Reg,
-		    IMG_UINT32 ui32Data, IMG_HANDLE hUniqueTag)
+void PDumpPDReg(u32 ui32Reg, u32 ui32Data, void *hUniqueTag)
 {
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING();
 
@@ -483,9 +465,8 @@ IMG_VOID PDumpPDReg(IMG_UINT32 ui32Reg,
 	PDumpWriteString2(pszScript, PDUMP_FLAGS_CONTINUOUS);
 }
 
-IMG_VOID PDumpPDRegWithFlags(IMG_UINT32 ui32Reg,
-			     IMG_UINT32 ui32Data,
-			     IMG_UINT32 ui32Flags, IMG_HANDLE hUniqueTag)
+void PDumpPDRegWithFlags(u32 ui32Reg, u32 ui32Data, u32 ui32Flags,
+			 void *hUniqueTag)
 {
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING();
 
@@ -499,43 +480,38 @@ IMG_VOID PDumpPDRegWithFlags(IMG_UINT32 ui32Reg,
 	PDumpWriteString2(pszScript, ui32Flags);
 }
 
-PVRSRV_ERROR PDumpMemPolKM(PVRSRV_KERNEL_MEM_INFO * psMemInfo,
-			   IMG_UINT32 ui32Offset,
-			   IMG_UINT32 ui32Value,
-			   IMG_UINT32 ui32Mask,
-			   PDUMP_POLL_OPERATOR eOperator,
-			   IMG_BOOL bLastFrame,
-			   IMG_BOOL bOverwrite, IMG_HANDLE hUniqueTag)
+enum PVRSRV_ERROR PDumpMemPolKM(struct PVRSRV_KERNEL_MEM_INFO *psMemInfo,
+			   u32 ui32Offset, u32 ui32Value, u32 ui32Mask,
+			   enum PDUMP_POLL_OPERATOR eOperator,
+			   IMG_BOOL bLastFrame, IMG_BOOL bOverwrite,
+			   void *hUniqueTag)
 {
 #define MEMPOLL_DELAY		(1000)
 #define MEMPOLL_COUNT		(2000000000 / MEMPOLL_DELAY)
 
-	IMG_UINT32 ui32PageOffset;
-	IMG_DEV_PHYADDR sDevPAddr;
-	IMG_DEV_VIRTADDR sDevVPageAddr;
-	IMG_CPU_PHYADDR CpuPAddr;
-	IMG_UINT32 ui32Flags;
+	u32 ui32PageOffset;
+	struct IMG_DEV_PHYADDR sDevPAddr;
+	struct IMG_DEV_VIRTADDR sDevVPageAddr;
+	struct IMG_CPU_PHYADDR CpuPAddr;
+	u32 ui32Flags;
 	__PDBG_PDUMP_STATE_GET_SCRIPT_AND_FILE_STRING(PVRSRV_ERROR_GENERIC);
 
-	PVR_ASSERT((ui32Offset + sizeof(IMG_UINT32)) <=
+	PVR_ASSERT((ui32Offset + sizeof(u32)) <=
 		   psMemInfo->ui32AllocSize);
 
-	if (gsDBGPdumpState.ui32ParamFileNum == 0) {
+	if (gsDBGPdumpState.ui32ParamFileNum == 0)
 		snprintf(pszFile, SZ_FILENAME_SIZE_MAX, "%%0%%.prm");
-	} else {
+	else
 		snprintf(pszFile, SZ_FILENAME_SIZE_MAX, "%%0%%%lu.prm",
 			 gsDBGPdumpState.ui32ParamFileNum);
-	}
 
 	ui32Flags = 0;
 
-	if (bLastFrame) {
+	if (bLastFrame)
 		ui32Flags |= PDUMP_FLAGS_LASTFRAME;
-	}
 
-	if (bOverwrite) {
+	if (bOverwrite)
 		ui32Flags |= PDUMP_FLAGS_RESETLFBUFFER;
-	}
 
 	CpuPAddr =
 	    OSMemHandleToCpuPAddr(psMemInfo->sMemBlk.hOSMemHandle, ui32Offset);
@@ -550,7 +526,7 @@ PVRSRV_ERROR PDumpMemPolKM(PVRSRV_KERNEL_MEM_INFO * psMemInfo,
 
 	snprintf(pszScript,
 		 SZ_SCRIPT_SIZE_MAX,
-		 "POL :SGXMEM:PA_%p%8.8lX:0x%8.8lX 0x%8.8lX 0x%8.8lX %d %d %d\r\n",
+	      "POL :SGXMEM:PA_%p%8.8lX:0x%8.8lX 0x%8.8lX 0x%8.8lX %d %d %d\r\n",
 		 hUniqueTag,
 		 sDevPAddr.uiAddr & ~(SGX_MMU_PAGE_SIZE - 1),
 		 sDevPAddr.uiAddr & (SGX_MMU_PAGE_SIZE - 1),
@@ -560,42 +536,40 @@ PVRSRV_ERROR PDumpMemPolKM(PVRSRV_KERNEL_MEM_INFO * psMemInfo,
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR PDumpMemKM(IMG_PVOID pvAltLinAddr,
-			PVRSRV_KERNEL_MEM_INFO * psMemInfo,
-			IMG_UINT32 ui32Offset,
-			IMG_UINT32 ui32Bytes,
-			IMG_UINT32 ui32Flags, IMG_HANDLE hUniqueTag)
+enum PVRSRV_ERROR PDumpMemKM(void *pvAltLinAddr,
+			struct PVRSRV_KERNEL_MEM_INFO *psMemInfo,
+			u32 ui32Offset, u32 ui32Bytes, u32 ui32Flags,
+			void *hUniqueTag)
 {
-	IMG_UINT32 ui32PageByteOffset;
-	IMG_UINT8 *pui8DataLinAddr;
-	IMG_DEV_VIRTADDR sDevVPageAddr;
-	IMG_DEV_VIRTADDR sDevVAddr;
-	IMG_DEV_PHYADDR sDevPAddr;
-	IMG_CPU_PHYADDR CpuPAddr;
-	IMG_UINT32 ui32ParamOutPos;
-	IMG_UINT32 ui32CurrentOffset;
-	IMG_UINT32 ui32BytesRemaining;
-	LinuxMemArea *psLinuxMemArea;
-	LINUX_MEM_AREA_TYPE eRootAreaType;
-	IMG_CHAR *pui8TransientCpuVAddr;
+	u32 ui32PageByteOffset;
+	u8 *pui8DataLinAddr;
+	struct IMG_DEV_VIRTADDR sDevVPageAddr;
+	struct IMG_DEV_VIRTADDR sDevVAddr;
+	struct IMG_DEV_PHYADDR sDevPAddr;
+	struct IMG_CPU_PHYADDR CpuPAddr;
+	u32 ui32ParamOutPos;
+	u32 ui32CurrentOffset;
+	u32 ui32BytesRemaining;
+	struct LinuxMemArea *psLinuxMemArea;
+	enum LINUX_MEM_AREA_TYPE eRootAreaType;
+	char *pui8TransientCpuVAddr;
 
 	__PDBG_PDUMP_STATE_GET_SCRIPT_AND_FILE_STRING(PVRSRV_ERROR_GENERIC);
 
 	PVR_ASSERT((ui32Offset + ui32Bytes) <= psMemInfo->ui32AllocSize);
 
-	if (ui32Bytes == 0 || gui32PDumpSuspended) {
+	if (ui32Bytes == 0 || gui32PDumpSuspended)
 		return PVRSRV_OK;
-	}
 
 	if (pvAltLinAddr) {
 		pui8DataLinAddr = pvAltLinAddr;
 	} else if (psMemInfo->pvLinAddrKM) {
 		pui8DataLinAddr =
-		    (IMG_UINT8 *) psMemInfo->pvLinAddrKM + ui32Offset;
+		    (u8 *) psMemInfo->pvLinAddrKM + ui32Offset;
 	} else {
 		pui8DataLinAddr = 0;
 		psLinuxMemArea =
-		    (LinuxMemArea *) psMemInfo->sMemBlk.hOSMemHandle;
+		    (struct LinuxMemArea *)psMemInfo->sMemBlk.hOSMemHandle;
 		eRootAreaType = LinuxMemAreaRootType(psLinuxMemArea);
 	}
 
@@ -606,12 +580,9 @@ PVRSRV_ERROR PDumpMemKM(IMG_PVOID pvAltLinAddr,
 	if (pui8DataLinAddr) {
 		if (!PDumpWriteILock
 		    (gsDBGPdumpState.psStream[PDUMP_STREAM_PARAM2],
-		     pui8DataLinAddr, ui32Bytes, ui32Flags)) {
+		     pui8DataLinAddr, ui32Bytes, ui32Flags))
 			return PVRSRV_ERROR_GENERIC;
-		}
-	}
-
-	else if (eRootAreaType == LINUX_MEM_AREA_IO) {
+	} else if (eRootAreaType == LINUX_MEM_AREA_IO) {
 
 		CpuPAddr =
 		    OSMemHandleToCpuPAddr(psMemInfo->sMemBlk.hOSMemHandle,
@@ -633,7 +604,7 @@ PVRSRV_ERROR PDumpMemKM(IMG_PVOID pvAltLinAddr,
 		ui32CurrentOffset = ui32Offset;
 
 		while (ui32BytesRemaining > 0) {
-			IMG_UINT32 ui32BlockBytes =
+			u32 ui32BlockBytes =
 			    MIN(ui32BytesRemaining, PAGE_SIZE);
 			struct page *psCurrentPage = NULL;
 
@@ -642,21 +613,19 @@ PVRSRV_ERROR PDumpMemKM(IMG_PVOID pvAltLinAddr,
 						  hOSMemHandle,
 						  ui32CurrentOffset);
 
-			if (CpuPAddr.uiAddr & (PAGE_SIZE - 1)) {
+			if (CpuPAddr.uiAddr & (PAGE_SIZE - 1))
 				ui32BlockBytes =
 				    MIN(ui32BytesRemaining,
 					PAGE_ALIGN(CpuPAddr.uiAddr) -
 					CpuPAddr.uiAddr);
-			}
 
 			psCurrentPage =
 			    LinuxMemAreaOffsetToPage(psLinuxMemArea,
 						     ui32CurrentOffset);
 			pui8TransientCpuVAddr = KMapWrapper(psCurrentPage);
 			pui8TransientCpuVAddr += (CpuPAddr.uiAddr & ~PAGE_MASK);
-			if (!pui8TransientCpuVAddr) {
+			if (!pui8TransientCpuVAddr)
 				return PVRSRV_ERROR_GENERIC;
-			}
 
 			if (!PDumpWriteILock
 			    (gsDBGPdumpState.psStream[PDUMP_STREAM_PARAM2],
@@ -675,12 +644,11 @@ PVRSRV_ERROR PDumpMemKM(IMG_PVOID pvAltLinAddr,
 
 	}
 
-	if (gsDBGPdumpState.ui32ParamFileNum == 0) {
+	if (gsDBGPdumpState.ui32ParamFileNum == 0)
 		snprintf(pszFile, SZ_FILENAME_SIZE_MAX, "%%0%%.prm");
-	} else {
+	else
 		snprintf(pszFile, SZ_FILENAME_SIZE_MAX, "%%0%%%lu.prm",
 			 gsDBGPdumpState.ui32ParamFileNum);
-	}
 
 	snprintf(pszScript,
 		 SZ_SCRIPT_SIZE_MAX,
@@ -700,7 +668,7 @@ PVRSRV_ERROR PDumpMemKM(IMG_PVOID pvAltLinAddr,
 	ui32CurrentOffset = ui32Offset;
 
 	while (ui32BytesRemaining > 0) {
-		IMG_UINT32 ui32BlockBytes = MIN(ui32BytesRemaining, PAGE_SIZE);
+		u32 ui32BlockBytes = MIN(ui32BytesRemaining, PAGE_SIZE);
 		CpuPAddr =
 		    OSMemHandleToCpuPAddr(psMemInfo->sMemBlk.hOSMemHandle,
 					  ui32CurrentOffset);
@@ -723,7 +691,8 @@ PVRSRV_ERROR PDumpMemKM(IMG_PVOID pvAltLinAddr,
 
 		snprintf(pszScript,
 			 SZ_SCRIPT_SIZE_MAX,
-			 "LDB :SGXMEM:PA_%p%8.8lX:0x%8.8lX 0x%8.8lX 0x%8.8lX %s\r\n",
+			 "LDB :SGXMEM:PA_%p%8.8lX:0x%8.8lX 0x%8.8lX "
+			 "0x%8.8lX %s\r\n",
 			 hUniqueTag,
 			 sDevPAddr.uiAddr & ~(SGX_MMU_PAGE_SIZE - 1),
 			 sDevPAddr.uiAddr & (SGX_MMU_PAGE_SIZE - 1),
@@ -739,33 +708,30 @@ PVRSRV_ERROR PDumpMemKM(IMG_PVOID pvAltLinAddr,
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR PDumpMem2KM(PVRSRV_DEVICE_TYPE eDeviceType,
-			 IMG_CPU_VIRTADDR pvLinAddr,
-			 IMG_UINT32 ui32Bytes,
-			 IMG_UINT32 ui32Flags,
-			 IMG_BOOL bInitialisePages,
-			 IMG_HANDLE hUniqueTag1, IMG_HANDLE hUniqueTag2)
+enum PVRSRV_ERROR PDumpMem2KM(enum PVRSRV_DEVICE_TYPE eDeviceType,
+			 void *pvLinAddr, u32 ui32Bytes, u32 ui32Flags,
+			 IMG_BOOL bInitialisePages, void *hUniqueTag1,
+			 void *hUniqueTag2)
 {
-	IMG_UINT32 ui32NumPages;
-	IMG_UINT32 ui32PageOffset;
-	IMG_UINT32 ui32BlockBytes;
-	IMG_UINT8 *pui8LinAddr;
-	IMG_DEV_PHYADDR sDevPAddr;
-	IMG_CPU_PHYADDR sCpuPAddr;
-	IMG_UINT32 ui32Offset;
-	IMG_UINT32 ui32ParamOutPos;
+	u32 ui32NumPages;
+	u32 ui32PageOffset;
+	u32 ui32BlockBytes;
+	u8 *pui8LinAddr;
+	struct IMG_DEV_PHYADDR sDevPAddr;
+	struct IMG_CPU_PHYADDR sCpuPAddr;
+	u32 ui32Offset;
+	u32 ui32ParamOutPos;
 
 	__PDBG_PDUMP_STATE_GET_SCRIPT_AND_FILE_STRING(PVRSRV_ERROR_GENERIC);
 
-	if (ui32Flags) ;
+	if (ui32Flags)
+		;
 
-	if (!pvLinAddr) {
+	if (!pvLinAddr)
 		return PVRSRV_ERROR_GENERIC;
-	}
 
-	if (gui32PDumpSuspended) {
+	if (gui32PDumpSuspended)
 		return PVRSRV_OK;
-	}
 
 	ui32ParamOutPos =
 	    gpfnDbgDrv->pfnGetStreamOffset(gsDBGPdumpState.
@@ -775,40 +741,38 @@ PVRSRV_ERROR PDumpMem2KM(PVRSRV_DEVICE_TYPE eDeviceType,
 
 		if (!PDumpWriteILock
 		    (gsDBGPdumpState.psStream[PDUMP_STREAM_PARAM2], pvLinAddr,
-		     ui32Bytes, PDUMP_FLAGS_CONTINUOUS)) {
+		     ui32Bytes, PDUMP_FLAGS_CONTINUOUS))
 			return PVRSRV_ERROR_GENERIC;
-		}
 
-		if (gsDBGPdumpState.ui32ParamFileNum == 0) {
+		if (gsDBGPdumpState.ui32ParamFileNum == 0)
 			snprintf(pszFile, SZ_FILENAME_SIZE_MAX, "%%0%%.prm");
-		} else {
+		else
 			snprintf(pszFile, SZ_FILENAME_SIZE_MAX, "%%0%%%lu.prm",
 				 gsDBGPdumpState.ui32ParamFileNum);
-		}
 	}
 
-	ui32PageOffset = (IMG_UINT32) pvLinAddr & (HOST_PAGESIZE() - 1);
+	ui32PageOffset = (u32) pvLinAddr & (HOST_PAGESIZE() - 1);
 	ui32NumPages =
 	    (ui32PageOffset + ui32Bytes + HOST_PAGESIZE() -
 	     1) / HOST_PAGESIZE();
-	pui8LinAddr = (IMG_UINT8 *) pvLinAddr;
+	pui8LinAddr = (u8 *) pvLinAddr;
 
 	while (ui32NumPages--) {
 		sCpuPAddr = OSMapLinToCPUPhys(pui8LinAddr);
 		sDevPAddr = SysCpuPAddrToDevPAddr(eDeviceType, sCpuPAddr);
 
-		if (ui32PageOffset + ui32Bytes > HOST_PAGESIZE()) {
+		if (ui32PageOffset + ui32Bytes > HOST_PAGESIZE())
 
 			ui32BlockBytes = HOST_PAGESIZE() - ui32PageOffset;
-		} else {
+		else
 
 			ui32BlockBytes = ui32Bytes;
-		}
 
 		if (bInitialisePages) {
 			snprintf(pszScript,
 				 SZ_SCRIPT_SIZE_MAX,
-				 "LDB :SGXMEM:PA_%p%8.8lX:0x%8.8lX 0x%8.8lX 0x%8.8lX %s\r\n",
+				 "LDB :SGXMEM:PA_%p%8.8lX:0x%8.8lX 0x%8.8lX "
+				 "0x%8.8lX %s\r\n",
 				 hUniqueTag1,
 				 sDevPAddr.uiAddr & ~(SGX_MMU_PAGE_SIZE - 1),
 				 sDevPAddr.uiAddr & (SGX_MMU_PAGE_SIZE - 1),
@@ -816,15 +780,17 @@ PVRSRV_ERROR PDumpMem2KM(PVRSRV_DEVICE_TYPE eDeviceType,
 			PDumpWriteString2(pszScript, PDUMP_FLAGS_CONTINUOUS);
 		} else {
 			for (ui32Offset = 0; ui32Offset < ui32BlockBytes;
-			     ui32Offset += sizeof(IMG_UINT32)) {
-				IMG_UINT32 ui32PTE =
-				    *((IMG_UINT32 *) (pui8LinAddr +
+			     ui32Offset += sizeof(u32)) {
+				u32 ui32PTE =
+				    *((u32 *) (pui8LinAddr +
 						      ui32Offset));
 
 				if ((ui32PTE & SGX_MMU_PDE_ADDR_MASK) != 0) {
 					snprintf(pszScript,
 						 SZ_SCRIPT_SIZE_MAX,
-						 "WRW :SGXMEM:PA_%p%8.8lX:0x%8.8lX :SGXMEM:PA_%p%8.8lX:0x%8.8lX\r\n",
+						 "WRW :SGXMEM:PA_%p%8.8lX:"
+						 "0x%8.8lX :SGXMEM:"
+						 "PA_%p%8.8lX:0x%8.8lX\r\n",
 						 hUniqueTag1,
 						 (sDevPAddr.uiAddr +
 						  ui32Offset) &
@@ -842,7 +808,8 @@ PVRSRV_ERROR PDumpMem2KM(PVRSRV_DEVICE_TYPE eDeviceType,
 						   (ui32PTE &
 						    SGX_MMU_PTE_VALID));
 					snprintf(pszScript, SZ_SCRIPT_SIZE_MAX,
-						 "WRW :SGXMEM:PA_%p%8.8lX:0x%8.8lX 0x%8.8lX%p\r\n",
+						 "WRW :SGXMEM:PA_%p%8.8lX:"
+						 "0x%8.8lX 0x%8.8lX%p\r\n",
 						 hUniqueTag1,
 						 (sDevPAddr.uiAddr +
 						  ui32Offset) &
@@ -858,28 +825,25 @@ PVRSRV_ERROR PDumpMem2KM(PVRSRV_DEVICE_TYPE eDeviceType,
 		}
 
 		ui32PageOffset = 0;
-
 		ui32Bytes -= ui32BlockBytes;
-
 		pui8LinAddr += ui32BlockBytes;
-
 		ui32ParamOutPos += ui32BlockBytes;
 	}
 
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR PDumpPDDevPAddrKM(PVRSRV_KERNEL_MEM_INFO * psMemInfo,
-			       IMG_UINT32 ui32Offset,
-			       IMG_DEV_PHYADDR sPDDevPAddr,
-			       IMG_HANDLE hUniqueTag1, IMG_HANDLE hUniqueTag2)
+enum PVRSRV_ERROR PDumpPDDevPAddrKM(struct PVRSRV_KERNEL_MEM_INFO *psMemInfo,
+			       u32 ui32Offset,
+			       struct IMG_DEV_PHYADDR sPDDevPAddr,
+			       void *hUniqueTag1, void *hUniqueTag2)
 {
-	IMG_UINT32 ui32ParamOutPos;
-	IMG_CPU_PHYADDR CpuPAddr;
-	IMG_UINT32 ui32PageByteOffset;
-	IMG_DEV_VIRTADDR sDevVAddr;
-	IMG_DEV_VIRTADDR sDevVPageAddr;
-	IMG_DEV_PHYADDR sDevPAddr;
+	u32 ui32ParamOutPos;
+	struct IMG_CPU_PHYADDR CpuPAddr;
+	u32 ui32PageByteOffset;
+	struct IMG_DEV_VIRTADDR sDevVAddr;
+	struct IMG_DEV_VIRTADDR sDevVPageAddr;
+	struct IMG_DEV_PHYADDR sDevPAddr;
 
 	__PDBG_PDUMP_STATE_GET_SCRIPT_AND_FILE_STRING(PVRSRV_ERROR_GENERIC);
 
@@ -888,17 +852,15 @@ PVRSRV_ERROR PDumpPDDevPAddrKM(PVRSRV_KERNEL_MEM_INFO * psMemInfo,
 					   psStream[PDUMP_STREAM_PARAM2]);
 
 	if (!PDumpWriteILock(gsDBGPdumpState.psStream[PDUMP_STREAM_PARAM2],
-			     (IMG_UINT8 *) & sPDDevPAddr,
-			     sizeof(IMG_DEV_PHYADDR), PDUMP_FLAGS_CONTINUOUS)) {
+			     (u8 *)&sPDDevPAddr, sizeof(struct IMG_DEV_PHYADDR),
+			     PDUMP_FLAGS_CONTINUOUS))
 		return PVRSRV_ERROR_GENERIC;
-	}
 
-	if (gsDBGPdumpState.ui32ParamFileNum == 0) {
+	if (gsDBGPdumpState.ui32ParamFileNum == 0)
 		snprintf(pszFile, SZ_FILENAME_SIZE_MAX, "%%0%%.prm");
-	} else {
+	else
 		snprintf(pszFile, SZ_FILENAME_SIZE_MAX, "%%0%%%lu.prm",
 			 gsDBGPdumpState.ui32ParamFileNum);
-	}
 
 	CpuPAddr =
 	    OSMemHandleToCpuPAddr(psMemInfo->sMemBlk.hOSMemHandle, ui32Offset);
@@ -914,7 +876,8 @@ PVRSRV_ERROR PDumpPDDevPAddrKM(PVRSRV_KERNEL_MEM_INFO * psMemInfo,
 	if ((sPDDevPAddr.uiAddr & SGX_MMU_PDE_ADDR_MASK) != 0) {
 		snprintf(pszScript,
 			 SZ_SCRIPT_SIZE_MAX,
-			 "WRW :SGXMEM:PA_%p%8.8lX:0x%8.8lX :SGXMEM:PA_%p%8.8lX:0x%8.8lX\r\n",
+			 "WRW :SGXMEM:PA_%p%8.8lX:0x%8.8lX :"
+			 "SGXMEM:PA_%p%8.8lX:0x%8.8lX\r\n",
 			 hUniqueTag1,
 			 sDevPAddr.uiAddr & ~(SGX_MMU_PAGE_SIZE - 1),
 			 sDevPAddr.uiAddr & (SGX_MMU_PAGE_SIZE - 1),
@@ -936,21 +899,21 @@ PVRSRV_ERROR PDumpPDDevPAddrKM(PVRSRV_KERNEL_MEM_INFO * psMemInfo,
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR PDumpSetFrameKM(IMG_UINT32 ui32Frame)
+enum PVRSRV_ERROR PDumpSetFrameKM(u32 ui32Frame)
 {
-	IMG_UINT32 ui32Stream;
+	u32 ui32Stream;
 
 	for (ui32Stream = 0; ui32Stream < PDUMP_NUM_STREAMS; ui32Stream++) {
-		if (gsDBGPdumpState.psStream[ui32Stream]) {
+		if (gsDBGPdumpState.psStream[ui32Stream])
 			DbgSetFrame(gsDBGPdumpState.psStream[ui32Stream],
 				    ui32Frame);
-		}
+
 	}
 
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR PDumpGetFrameKM(IMG_PUINT32 pui32Frame)
+enum PVRSRV_ERROR PDumpGetFrameKM(u32 *pui32Frame)
 {
 	*pui32Frame =
 	    DbgGetFrame(gsDBGPdumpState.psStream[PDUMP_STREAM_SCRIPT2]);
@@ -958,27 +921,24 @@ PVRSRV_ERROR PDumpGetFrameKM(IMG_PUINT32 pui32Frame)
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR PDumpCommentKM(IMG_CHAR * pszComment, IMG_UINT32 ui32Flags)
+enum PVRSRV_ERROR PDumpCommentKM(char *pszComment, u32 ui32Flags)
 {
-	IMG_UINT32 ui32Count = 0;
-	PVRSRV_ERROR eError;
+	u32 ui32Count = 0;
+	enum PVRSRV_ERROR eError;
 	__PDBG_PDUMP_STATE_GET_MSG_STRING(PVRSRV_ERROR_GENERIC);
 
-	if (ui32Flags & PDUMP_FLAGS_CONTINUOUS) {
+	if (ui32Flags & PDUMP_FLAGS_CONTINUOUS)
 		eError = PVRSRV_ERROR_GENERIC;
-	} else {
+	else
 		eError = PVRSRV_ERROR_CMD_NOT_PROCESSED;
-	}
 
-	if (!PDumpWriteString2("-- ", ui32Flags)) {
+	if (!PDumpWriteString2("-- ", ui32Flags))
 		return eError;
-	}
 
 	snprintf(pszMsg, SZ_MSG_SIZE_MAX, "%s", pszComment);
 
-	while ((pszMsg[ui32Count] != 0) && (ui32Count < SZ_MSG_SIZE_MAX)) {
+	while ((pszMsg[ui32Count] != 0) && (ui32Count < SZ_MSG_SIZE_MAX))
 		ui32Count++;
-	}
 
 	if ((pszMsg[ui32Count - 1] != '\n') && (ui32Count < SZ_MSG_SIZE_MAX)) {
 		pszMsg[ui32Count] = '\n';
@@ -997,16 +957,15 @@ PVRSRV_ERROR PDumpCommentKM(IMG_CHAR * pszComment, IMG_UINT32 ui32Flags)
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR PDumpDriverInfoKM(IMG_CHAR * pszString, IMG_UINT32 ui32Flags)
+enum PVRSRV_ERROR PDumpDriverInfoKM(char *pszString, u32 ui32Flags)
 {
-	IMG_UINT32 ui32Count = 0;
+	u32 ui32Count = 0;
 	__PDBG_PDUMP_STATE_GET_MSG_STRING(PVRSRV_ERROR_GENERIC);
 
 	snprintf(pszMsg, SZ_MSG_SIZE_MAX, "%s", pszString);
 
-	while ((pszMsg[ui32Count] != 0) && (ui32Count < SZ_MSG_SIZE_MAX)) {
+	while ((pszMsg[ui32Count] != 0) && (ui32Count < SZ_MSG_SIZE_MAX))
 		ui32Count++;
-	}
 
 	if ((pszMsg[ui32Count - 1] != '\n') && (ui32Count < SZ_MSG_SIZE_MAX)) {
 		pszMsg[ui32Count] = '\n';
@@ -1021,51 +980,39 @@ PVRSRV_ERROR PDumpDriverInfoKM(IMG_CHAR * pszString, IMG_UINT32 ui32Flags)
 	}
 
 	if (!PDumpWriteILock(gsDBGPdumpState.psStream[PDUMP_STREAM_DRIVERINFO],
-			     (IMG_UINT8 *) pszMsg, ui32Count, ui32Flags)) {
-		if (ui32Flags & PDUMP_FLAGS_CONTINUOUS) {
+			     (u8 *) pszMsg, ui32Count, ui32Flags)) {
+		if (ui32Flags & PDUMP_FLAGS_CONTINUOUS)
 			return PVRSRV_ERROR_GENERIC;
-		} else {
+		else
 			return PVRSRV_ERROR_CMD_NOT_PROCESSED;
-		}
 	}
 
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR PDumpBitmapKM(IMG_CHAR * pszFileName,
-			   IMG_UINT32 ui32FileOffset,
-			   IMG_UINT32 ui32Width,
-			   IMG_UINT32 ui32Height,
-			   IMG_UINT32 ui32StrideInBytes,
-			   IMG_DEV_VIRTADDR sDevBaseAddr,
-			   IMG_UINT32 ui32Size,
-			   PDUMP_PIXEL_FORMAT ePixelFormat,
-			   PDUMP_MEM_FORMAT eMemFormat,
-			   IMG_UINT32 ui32PDumpFlags)
+enum PVRSRV_ERROR PDumpBitmapKM(char *pszFileName, u32 ui32FileOffset,
+			   u32 ui32Width, u32 ui32Height, u32 ui32StrideInBytes,
+			   struct IMG_DEV_VIRTADDR sDevBaseAddr,
+			   u32 ui32Size, enum PDUMP_PIXEL_FORMAT ePixelFormat,
+			   enum PDUMP_MEM_FORMAT eMemFormat, u32 ui32PDumpFlags)
 {
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING(PVRSRV_ERROR_GENERIC);
 	PDUMPCOMMENTWITHFLAGS(ui32PDumpFlags,
 			      "\r\n-- Dump bitmap of render\r\n");
 
-	snprintf(pszScript,
-		 SZ_SCRIPT_SIZE_MAX,
-		 "SII %s %s.bin :SGXMEM:v:0x%08lX 0x%08lX 0x%08lX 0x%08X 0x%08lX 0x%08lX 0x%08lX 0x%08X\r\n",
-		 pszFileName,
-		 pszFileName,
-		 sDevBaseAddr.uiAddr,
-		 ui32Size,
-		 ui32FileOffset,
-		 ePixelFormat,
-		 ui32Width, ui32Height, ui32StrideInBytes, eMemFormat);
+	snprintf(pszScript, SZ_SCRIPT_SIZE_MAX,
+		 "SII %s %s.bin :SGXMEM:v:0x%08lX 0x%08lX 0x%08lX 0x%08X "
+		 "0x%08lX 0x%08lX 0x%08lX 0x%08X\r\n",
+		 pszFileName, pszFileName, sDevBaseAddr.uiAddr, ui32Size,
+		 ui32FileOffset, ePixelFormat, ui32Width, ui32Height,
+		 ui32StrideInBytes, eMemFormat);
 
 	PDumpWriteString2(pszScript, ui32PDumpFlags);
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR PDumpReadRegKM(IMG_CHAR * pszFileName,
-			    IMG_UINT32 ui32FileOffset,
-			    IMG_UINT32 ui32Address,
-			    IMG_UINT32 ui32Size, IMG_UINT32 ui32PDumpFlags)
+enum PVRSRV_ERROR PDumpReadRegKM(char *pszFileName, u32 ui32FileOffset,
+			    u32 ui32Address, u32 ui32Size, u32 ui32PDumpFlags)
 {
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING(PVRSRV_ERROR_GENERIC);
 
@@ -1079,30 +1026,28 @@ PVRSRV_ERROR PDumpReadRegKM(IMG_CHAR * pszFileName,
 	return PVRSRV_OK;
 }
 
-static IMG_BOOL PDumpWriteString2(IMG_CHAR * pszString, IMG_UINT32 ui32Flags)
+static IMG_BOOL PDumpWriteString2(char *pszString, u32 ui32Flags)
 {
 	return PDumpWriteILock(gsDBGPdumpState.psStream[PDUMP_STREAM_SCRIPT2],
-			       (IMG_UINT8 *) pszString, strlen(pszString),
-			       ui32Flags);
+			      (u8 *)pszString, strlen(pszString), ui32Flags);
 }
 
-static IMG_BOOL PDumpWriteILock(PDBG_STREAM psStream, IMG_UINT8 * pui8Data,
-				IMG_UINT32 ui32Count, IMG_UINT32 ui32Flags)
+static IMG_BOOL PDumpWriteILock(struct DBG_STREAM *psStream, u8 *pui8Data,
+				u32 ui32Count, u32 ui32Flags)
 {
-	IMG_UINT32 ui32Written = 0;
-	IMG_UINT32 ui32Off = 0;
+	u32 ui32Written = 0;
+	u32 ui32Off = 0;
 
-	if (!psStream || gui32PDumpSuspended || (ui32Flags & PDUMP_FLAGS_NEVER)) {
+	if (!psStream || gui32PDumpSuspended || (ui32Flags & PDUMP_FLAGS_NEVER))
 		return IMG_TRUE;
-	}
 
 	if (psStream == gsDBGPdumpState.psStream[PDUMP_STREAM_PARAM2]) {
-		IMG_UINT32 ui32ParamOutPos =
+		u32 ui32ParamOutPos =
 		    gpfnDbgDrv->pfnGetStreamOffset(gsDBGPdumpState.
 						   psStream
 						   [PDUMP_STREAM_PARAM2]);
 
-		if (ui32ParamOutPos + ui32Count > MAX_FILE_SIZE) {
+		if (ui32ParamOutPos + ui32Count > MAX_FILE_SIZE)
 			if ((gsDBGPdumpState.psStream[PDUMP_STREAM_SCRIPT2]
 			     &&
 			     PDumpWriteString2
@@ -1113,17 +1058,15 @@ static IMG_BOOL PDumpWriteILock(PDBG_STREAM psStream, IMG_UINT8 * pui8Data,
 					     ui32ParamOutPos);
 				gsDBGPdumpState.ui32ParamFileNum++;
 			}
-		}
 	}
 
-	while (((IMG_UINT32) ui32Count > 0) && (ui32Written != 0xFFFFFFFF)) {
+	while (((u32) ui32Count > 0) && (ui32Written != 0xFFFFFFFF)) {
 		ui32Written =
 		    DbgWrite(psStream, &pui8Data[ui32Off], ui32Count,
 			     ui32Flags);
 
-		if (ui32Written == 0) {
+		if (ui32Written == 0)
 			OSReleaseThreadQuanta();
-		}
 
 		if (ui32Written != 0xFFFFFFFF) {
 			ui32Off += ui32Written;
@@ -1131,34 +1074,33 @@ static IMG_BOOL PDumpWriteILock(PDBG_STREAM psStream, IMG_UINT8 * pui8Data,
 		}
 	}
 
-	if (ui32Written == 0xFFFFFFFF) {
+	if (ui32Written == 0xFFFFFFFF)
 		return IMG_FALSE;
-	}
 
 	return IMG_TRUE;
 }
 
-static IMG_VOID DbgSetFrame(PDBG_STREAM psStream, IMG_UINT32 ui32Frame)
+static void DbgSetFrame(struct DBG_STREAM *psStream, u32 ui32Frame)
 {
 	gpfnDbgDrv->pfnSetFrame(psStream, ui32Frame);
 }
 
-static IMG_UINT32 DbgGetFrame(PDBG_STREAM psStream)
+static u32 DbgGetFrame(struct DBG_STREAM *psStream)
 {
 	return gpfnDbgDrv->pfnGetFrame(psStream);
 }
 
-static IMG_VOID DbgSetMarker(PDBG_STREAM psStream, IMG_UINT32 ui32Marker)
+static void DbgSetMarker(struct DBG_STREAM *psStream, u32 ui32Marker)
 {
 	gpfnDbgDrv->pfnSetMarker(psStream, ui32Marker);
 }
 
-static IMG_UINT32 DbgWrite(PDBG_STREAM psStream, IMG_UINT8 * pui8Data,
-			   IMG_UINT32 ui32BCount, IMG_UINT32 ui32Flags)
+static u32 DbgWrite(struct DBG_STREAM *psStream, u8 *pui8Data,
+			   u32 ui32BCount, u32 ui32Flags)
 {
-	IMG_UINT32 ui32BytesWritten;
+	u32 ui32BytesWritten;
 
-	if (ui32Flags & PDUMP_FLAGS_CONTINUOUS) {
+	if (ui32Flags & PDUMP_FLAGS_CONTINUOUS)
 
 		if ((psStream->ui32CapMode & DEBUG_CAPMODE_FRAMED) &&
 		    (psStream->ui32Start == 0xFFFFFFFF) &&
@@ -1170,14 +1112,13 @@ static IMG_UINT32 DbgWrite(PDBG_STREAM psStream, IMG_UINT8 * pui8Data,
 			    gpfnDbgDrv->pfnDBGDrivWrite2(psStream, pui8Data,
 							 ui32BCount, 1);
 		}
-	} else {
+	else
 		if (ui32Flags & PDUMP_FLAGS_LASTFRAME) {
-			IMG_UINT32 ui32DbgFlags;
+			u32 ui32DbgFlags;
 
 			ui32DbgFlags = 0;
-			if (ui32Flags & PDUMP_FLAGS_RESETLFBUFFER) {
+			if (ui32Flags & PDUMP_FLAGS_RESETLFBUFFER)
 				ui32DbgFlags |= WRITELF_FLAGS_RESETBUF;
-			}
 
 			ui32BytesWritten =
 			    gpfnDbgDrv->pfnWriteLF(psStream, pui8Data,
@@ -1187,12 +1128,11 @@ static IMG_UINT32 DbgWrite(PDBG_STREAM psStream, IMG_UINT8 * pui8Data,
 			    gpfnDbgDrv->pfnWriteBINCM(psStream, pui8Data,
 						      ui32BCount, 1);
 		}
-	}
 
 	return ui32BytesWritten;
 }
 
-IMG_BOOL PDumpTestNextFrame(IMG_UINT32 ui32CurrentFrame)
+IMG_BOOL PDumpTestNextFrame(u32 ui32CurrentFrame)
 {
 	IMG_BOOL bFrameDumped;
 
@@ -1204,13 +1144,11 @@ IMG_BOOL PDumpTestNextFrame(IMG_UINT32 ui32CurrentFrame)
 	return bFrameDumped;
 }
 
-IMG_VOID PDump3DSignatureRegisters(IMG_UINT32 ui32DumpFrameNum,
-				   IMG_BOOL bLastFrame,
-				   IMG_UINT32 * pui32Registers,
-				   IMG_UINT32 ui32NumRegisters)
+void PDump3DSignatureRegisters(u32 ui32DumpFrameNum, IMG_BOOL bLastFrame,
+				   u32 *pui32Registers, u32 ui32NumRegisters)
 {
-	IMG_UINT32 ui32FileOffset, ui32Flags;
-	IMG_UINT32 i;
+	u32 ui32FileOffset, ui32Flags;
+	u32 i;
 
 	__PDBG_PDUMP_STATE_GET_SCRIPT_AND_FILE_STRING();
 
@@ -1224,16 +1162,13 @@ IMG_VOID PDump3DSignatureRegisters(IMG_UINT32 ui32DumpFrameNum,
 
 	for (i = 0; i < ui32NumRegisters; i++) {
 		PDumpReadRegKM(pszFile, ui32FileOffset, pui32Registers[i],
-			       sizeof(IMG_UINT32), ui32Flags);
-		ui32FileOffset += sizeof(IMG_UINT32);
+			       sizeof(u32), ui32Flags);
+		ui32FileOffset += sizeof(u32);
 	}
 }
 
-static IMG_VOID PDumpCountRead(IMG_CHAR * pszFileName,
-			       IMG_UINT32 ui32Address,
-			       IMG_UINT32 ui32Size,
-			       IMG_UINT32 * pui32FileOffset,
-			       IMG_BOOL bLastFrame)
+static void PDumpCountRead(char *pszFileName, u32 ui32Address, u32 ui32Size,
+			   u32 *pui32FileOffset, IMG_BOOL bLastFrame)
 {
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING();
 
@@ -1245,13 +1180,11 @@ static IMG_VOID PDumpCountRead(IMG_CHAR * pszFileName,
 	*pui32FileOffset += ui32Size;
 }
 
-IMG_VOID PDumpCounterRegisters(IMG_UINT32 ui32DumpFrameNum,
-			       IMG_BOOL bLastFrame,
-			       IMG_UINT32 * pui32Registers,
-			       IMG_UINT32 ui32NumRegisters)
+void PDumpCounterRegisters(u32 ui32DumpFrameNum, IMG_BOOL bLastFrame,
+			       u32 *pui32Registers, u32 ui32NumRegisters)
 {
-	IMG_UINT32 ui32FileOffset;
-	IMG_UINT32 i;
+	u32 ui32FileOffset;
+	u32 i;
 
 	__PDBG_PDUMP_STATE_GET_SCRIPT_AND_FILE_STRING();
 
@@ -1261,20 +1194,19 @@ IMG_VOID PDumpCounterRegisters(IMG_UINT32 ui32DumpFrameNum,
 		 ui32DumpFrameNum);
 	ui32FileOffset = 0;
 
-	for (i = 0; i < ui32NumRegisters; i++) {
-		PDumpCountRead(pszFile, pui32Registers[i], sizeof(IMG_UINT32),
+	for (i = 0; i < ui32NumRegisters; i++)
+		PDumpCountRead(pszFile, pui32Registers[i], sizeof(u32),
 			       &ui32FileOffset, bLastFrame);
-	}
 }
 
-IMG_VOID PDumpTASignatureRegisters(IMG_UINT32 ui32DumpFrameNum,
-				   IMG_UINT32 ui32TAKickCount,
+void PDumpTASignatureRegisters(u32 ui32DumpFrameNum,
+				   u32 ui32TAKickCount,
 				   IMG_BOOL bLastFrame,
-				   IMG_UINT32 * pui32Registers,
-				   IMG_UINT32 ui32NumRegisters)
+				   u32 *pui32Registers,
+				   u32 ui32NumRegisters)
 {
-	IMG_UINT32 ui32FileOffset, ui32Flags;
-	IMG_UINT32 i;
+	u32 ui32FileOffset, ui32Flags;
+	u32 i;
 
 	__PDBG_PDUMP_STATE_GET_SCRIPT_AND_FILE_STRING();
 
@@ -1284,17 +1216,16 @@ IMG_VOID PDumpTASignatureRegisters(IMG_UINT32 ui32DumpFrameNum,
 	snprintf(pszFile, SZ_FILENAME_SIZE_MAX, "out%lu_ta.sig",
 		 ui32DumpFrameNum);
 
-	ui32FileOffset =
-	    ui32TAKickCount * ui32NumRegisters * sizeof(IMG_UINT32);
+	ui32FileOffset = ui32TAKickCount * ui32NumRegisters * sizeof(u32);
 
 	for (i = 0; i < ui32NumRegisters; i++) {
 		PDumpReadRegKM(pszFile, ui32FileOffset, pui32Registers[i],
-			       sizeof(IMG_UINT32), ui32Flags);
-		ui32FileOffset += sizeof(IMG_UINT32);
+			       sizeof(u32), ui32Flags);
+		ui32FileOffset += sizeof(u32);
 	}
 }
 
-IMG_VOID PDumpRegRead(const IMG_UINT32 ui32RegOffset, IMG_UINT32 ui32Flags)
+void PDumpRegRead(const u32 ui32RegOffset, u32 ui32Flags)
 {
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING();
 
@@ -1303,7 +1234,7 @@ IMG_VOID PDumpRegRead(const IMG_UINT32 ui32RegOffset, IMG_UINT32 ui32Flags)
 	PDumpWriteString2(pszScript, ui32Flags);
 }
 
-IMG_VOID PDumpCycleCountRegRead(const IMG_UINT32 ui32RegOffset,
+void PDumpCycleCountRegRead(const u32 ui32RegOffset,
 				IMG_BOOL bLastFrame)
 {
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING();
@@ -1313,22 +1244,19 @@ IMG_VOID PDumpCycleCountRegRead(const IMG_UINT32 ui32RegOffset,
 	PDumpWriteString2(pszScript, bLastFrame ? PDUMP_FLAGS_LASTFRAME : 0);
 }
 
-void PDumpCBP(PPVRSRV_KERNEL_MEM_INFO psROffMemInfo,
-	      IMG_UINT32 ui32ROffOffset,
-	      IMG_UINT32 ui32WPosVal,
-	      IMG_UINT32 ui32PacketSize,
-	      IMG_UINT32 ui32BufferSize,
-	      IMG_UINT32 ui32Flags, IMG_HANDLE hUniqueTag)
+void PDumpCBP(struct PVRSRV_KERNEL_MEM_INFO *psROffMemInfo,
+	      u32 ui32ROffOffset, u32 ui32WPosVal, u32 ui32PacketSize,
+	      u32 ui32BufferSize, u32 ui32Flags, void *hUniqueTag)
 {
-	IMG_UINT32 ui32PageOffset;
-	IMG_DEV_VIRTADDR sDevVAddr;
-	IMG_DEV_PHYADDR sDevPAddr;
-	IMG_DEV_VIRTADDR sDevVPageAddr;
-	IMG_CPU_PHYADDR CpuPAddr;
+	u32 ui32PageOffset;
+	struct IMG_DEV_VIRTADDR sDevVAddr;
+	struct IMG_DEV_PHYADDR sDevPAddr;
+	struct IMG_DEV_VIRTADDR sDevVPageAddr;
+	struct IMG_CPU_PHYADDR CpuPAddr;
 
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING();
 
-	PVR_ASSERT((ui32ROffOffset + sizeof(IMG_UINT32)) <=
+	PVR_ASSERT((ui32ROffOffset + sizeof(u32)) <=
 		   psROffMemInfo->ui32AllocSize);
 
 	sDevVAddr = psROffMemInfo->sDevVAddr;
@@ -1348,7 +1276,8 @@ void PDumpCBP(PPVRSRV_KERNEL_MEM_INFO psROffMemInfo,
 
 	snprintf(pszScript,
 		 SZ_SCRIPT_SIZE_MAX,
-		 "CBP :SGXMEM:PA_%p%8.8lX:0x%8.8lX 0x%8.8lX 0x%8.8lX 0x%8.8lX\r\n",
+		 "CBP :SGXMEM:PA_%p%8.8lX:0x%8.8lX 0x%8.8lX 0x%8.8lX "
+		 "0x%8.8lX\r\n",
 		 hUniqueTag,
 		 sDevPAddr.uiAddr & ~(SGX_MMU_PAGE_SIZE - 1),
 		 sDevPAddr.uiAddr & (SGX_MMU_PAGE_SIZE - 1),
@@ -1356,7 +1285,7 @@ void PDumpCBP(PPVRSRV_KERNEL_MEM_INFO psROffMemInfo,
 	PDumpWriteString2(pszScript, ui32Flags);
 }
 
-IMG_VOID PDumpIDLWithFlags(IMG_UINT32 ui32Clocks, IMG_UINT32 ui32Flags)
+void PDumpIDLWithFlags(u32 ui32Clocks, u32 ui32Flags)
 {
 	__PDBG_PDUMP_STATE_GET_SCRIPT_STRING();
 
@@ -1364,17 +1293,17 @@ IMG_VOID PDumpIDLWithFlags(IMG_UINT32 ui32Clocks, IMG_UINT32 ui32Flags)
 	PDumpWriteString2(pszScript, ui32Flags);
 }
 
-IMG_VOID PDumpIDL(IMG_UINT32 ui32Clocks)
+void PDumpIDL(u32 ui32Clocks)
 {
 	PDumpIDLWithFlags(ui32Clocks, PDUMP_FLAGS_CONTINUOUS);
 }
 
-IMG_VOID PDumpSuspendKM(IMG_VOID)
+void PDumpSuspendKM(void)
 {
 	gui32PDumpSuspended++;
 }
 
-IMG_VOID PDumpResumeKM(IMG_VOID)
+void PDumpResumeKM(void)
 {
 	gui32PDumpSuspended--;
 }

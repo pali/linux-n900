@@ -28,7 +28,7 @@ static const char llc_ip_hdr[8] = {0xAA, 0xAA, 0x3, 0, 0, 0, 0x08, 0};
 /* Given a data frame determine the 802.1p/1d tag to use.  */
 static unsigned int classify_1d(struct sk_buff *skb)
 {
-	unsigned int dscp;
+	unsigned int dscp, priority;
 
 	/* skb->priority values from 256->263 are magic values to
 	 * directly indicate a specific 802.1d priority.  This is used
@@ -47,7 +47,13 @@ static unsigned int classify_1d(struct sk_buff *skb)
 		return 0;
 	}
 
-	return dscp >> 5;
+	priority = dscp >> 5;
+
+	/* hack: compatibility with diablo SO_PRIORITY values */
+	if (priority == 0 && skb->priority >= 1 && skb->priority <= 7)
+		return skb->priority;
+
+	return priority;
 }
 
 

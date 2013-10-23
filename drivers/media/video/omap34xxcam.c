@@ -1384,7 +1384,8 @@ static int vidioc_enum_framesizes(struct file *file, void *fh,
 	pix_out.height = frms->discrete.height;
 	pix_out.pixelformat = frms->pixel_format;
 
-	ival = vdev->want_timeperframe;
+	ival.numerator = 0;
+	ival.denominator = 0;
 	rval = try_pix_parm(vdev, &pix_in, &pix_out, &ival);
 	if (rval < 0)
 		goto done;

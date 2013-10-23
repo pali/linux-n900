@@ -486,6 +486,21 @@ static int previewer_vb_lock_vma(struct videobuf_buffer *vb, int lock)
 	if (vb->memory == V4L2_MEMORY_MMAP)
 		return 0;
 
+	if (current->flags & PF_EXITING) {
+		/*
+		 * task is getting shutdown.
+		 * current->mm could have been released.
+		 *
+		 * For locking, we return error.
+		 * For unlocking, the subsequent release of
+		 * buffer should set things right
+		 */
+		if (lock)
+			return -EINVAL;
+		else
+			return 0;
+	}
+
 	end = vb->baddr + vb->bsize;
 
 	down_write(&current->mm->mmap_sem);

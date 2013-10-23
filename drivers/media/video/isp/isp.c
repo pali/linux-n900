@@ -775,6 +775,10 @@ static irqreturn_t isp_isr(int irq, void *_pdev)
 		bufs->wait_hs_vs--;
 	if (irqstatus & HS_VS && bufs->wait_stats && !bufs->wait_hs_vs)
 		bufs->wait_stats = 0;
+
+	if (irqstatus & LSC_PRE_ERR)
+		ispccdc_lsc_error_handler(&isp->isp_ccdc);
+
 	/*
 	 * We need to wait for the first HS_VS interrupt from CCDC.
 	 * Otherwise our frame (and everything else) might be bad.
@@ -834,7 +838,6 @@ static irqreturn_t isp_isr(int irq, void *_pdev)
 	if (irqstatus & LSC_PRE_ERR) {
 		/* Mark buffer faulty. */
 		buf->vb_state = VIDEOBUF_ERROR;
-		ispccdc_lsc_error_handler(&isp->isp_ccdc);
 		dev_dbg(dev, "lsc prefetch error\n");
 	}
 

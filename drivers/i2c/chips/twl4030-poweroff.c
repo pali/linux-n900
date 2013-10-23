@@ -33,6 +33,13 @@
 
 #define TWL4030_WATCHDOG_CFG_REG_OFFS   0x3
 
+static u8 twl4030_usb_suspended;
+
+void twl4030_upd_usb_suspended(u8 suspended)
+{
+	twl4030_usb_suspended = suspended;
+}
+
 static void twl4030_poweroff(void)
 {
 	u8 val;
@@ -44,7 +51,7 @@ static void twl4030_poweroff(void)
 		printk(KERN_WARNING "I2C error %d while reading TWL4030"
 				    " PM_MASTER HW_CONDITIONS\n", err);
 
-	if (val & STS_VBUS) {
+	if ((val & STS_VBUS) && !twl4030_usb_suspended) {
 		printk(KERN_EMERG "twl4030-poweroff: VBUS on,"
 				  " forcing restart!\n");
 		/* Set watchdog, Triton goes to WAIT-ON state.

@@ -220,6 +220,8 @@ DSP_STATUS DRV_InsertProcContext(struct DRV_OBJECT *hDrVObject, HANDLE hPCtxt)
 	spin_lock_init(&(*pCtxt)->proc_list_lock);
 	INIT_LIST_HEAD(&(*pCtxt)->processor_list);
 
+	spin_lock_init(&(*pCtxt)->dmm_list_lock);
+
 	GT_0trace(curTrace, GT_ENTER,
 		 "\n In DRV_InsertProcContext Calling "
 		 "DRV_GetProcCtxtList\n");
@@ -451,7 +453,7 @@ DSP_STATUS DRV_InsertDMMResElement(HANDLE hDMMRes, HANDLE hPCtxt)
 
 /* Release DMM resource element context
 * This is called from Proc_UnMap. after the actual resource is freed */
-DSP_STATUS 	DRV_RemoveDMMResElement(HANDLE hDMMRes, HANDLE hPCtxt)
+DSP_STATUS DRV_RemoveDMMResElement(HANDLE hDMMRes, HANDLE hPCtxt)
 {
 	struct PROCESS_CONTEXT *pCtxt = (struct PROCESS_CONTEXT *)hPCtxt;
 	struct DMM_RES_OBJECT *pDMMRes = (struct DMM_RES_OBJECT *)hDMMRes;
@@ -502,7 +504,7 @@ DSP_STATUS DRV_UpdateDMMResElement(HANDLE hDMMRes, u32 pMpuAddr, u32 ulSize,
 }
 
 /* Actual DMM De-Allocation */
-DSP_STATUS  DRV_ProcFreeDMMRes(HANDLE hPCtxt)
+DSP_STATUS DRV_ProcFreeDMMRes(HANDLE hPCtxt)
 {
 	struct PROCESS_CONTEXT *pCtxt = (struct PROCESS_CONTEXT *)hPCtxt;
 	DSP_STATUS status = DSP_SOK;

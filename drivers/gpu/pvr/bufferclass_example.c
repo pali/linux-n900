@@ -1,80 +1,79 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
 #include "bufferclass_example.h"
 
-static IMG_VOID *gpvAnchor = IMG_NULL;
-static PFN_BC_GET_PVRJTABLE pfnGetPVRJTable = IMG_NULL;
+static void *gpvAnchor;
+static IMG_BOOL (*pfnGetPVRJTable)(struct PVRSRV_BC_BUFFER2SRV_KMJTABLE *);
 
-BC_EXAMPLE_DEVINFO *GetAnchorPtr(IMG_VOID)
+struct BC_EXAMPLE_DEVINFO *GetAnchorPtr(void)
 {
-	return (BC_EXAMPLE_DEVINFO *) gpvAnchor;
+	return (struct BC_EXAMPLE_DEVINFO *)gpvAnchor;
 }
 
-static IMG_VOID SetAnchorPtr(BC_EXAMPLE_DEVINFO * psDevInfo)
+static void SetAnchorPtr(struct BC_EXAMPLE_DEVINFO *psDevInfo)
 {
-	gpvAnchor = (IMG_VOID *) psDevInfo;
+	gpvAnchor = (void *) psDevInfo;
 }
 
-static PVRSRV_ERROR OpenBCDevice(IMG_HANDLE * phDevice)
+static enum PVRSRV_ERROR OpenBCDevice(void **phDevice)
 {
-	BC_EXAMPLE_DEVINFO *psDevInfo;
+	struct BC_EXAMPLE_DEVINFO *psDevInfo;
 
 	psDevInfo = GetAnchorPtr();
 
-	*phDevice = (IMG_HANDLE) psDevInfo;
+	*phDevice = (void *) psDevInfo;
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR CloseBCDevice(IMG_HANDLE hDevice)
+static enum PVRSRV_ERROR CloseBCDevice(void *hDevice)
 {
 	PVR_UNREFERENCED_PARAMETER(hDevice);
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR GetBCBuffer(IMG_HANDLE hDevice,
-				IMG_UINT32 ui32BufferNumber,
-				PVRSRV_SYNC_DATA * psSyncData,
-				IMG_HANDLE * phBuffer)
+static enum PVRSRV_ERROR GetBCBuffer(void *hDevice,
+				u32 ui32BufferNumber,
+				struct PVRSRV_SYNC_DATA *psSyncData,
+				void **phBuffer)
 {
-	BC_EXAMPLE_DEVINFO *psDevInfo;
+	struct BC_EXAMPLE_DEVINFO *psDevInfo;
 
-	if (!hDevice || !phBuffer) {
+	if (!hDevice || !phBuffer)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	psDevInfo = (BC_EXAMPLE_DEVINFO *) hDevice;
+	psDevInfo = (struct BC_EXAMPLE_DEVINFO *)hDevice;
 
 	if (ui32BufferNumber < psDevInfo->sBufferInfo.ui32BufferCount) {
 		psDevInfo->psSystemBuffer[ui32BufferNumber].psSyncData =
 		    psSyncData;
 		*phBuffer =
-		    (IMG_HANDLE) & psDevInfo->psSystemBuffer[ui32BufferNumber];
+		    (void *) &psDevInfo->psSystemBuffer[ui32BufferNumber];
 	} else {
 		return PVRSRV_ERROR_INVALID_PARAMS;
 	}
@@ -82,92 +81,84 @@ static PVRSRV_ERROR GetBCBuffer(IMG_HANDLE hDevice,
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR GetBCInfo(IMG_HANDLE hDevice, BUFFER_INFO * psBCInfo)
+static enum PVRSRV_ERROR GetBCInfo(void *hDevice, struct BUFFER_INFO *psBCInfo)
 {
-	BC_EXAMPLE_DEVINFO *psDevInfo;
+	struct BC_EXAMPLE_DEVINFO *psDevInfo;
 
-	if (!hDevice || !psBCInfo) {
+	if (!hDevice || !psBCInfo)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	psDevInfo = (BC_EXAMPLE_DEVINFO *) hDevice;
+	psDevInfo = (struct BC_EXAMPLE_DEVINFO *)hDevice;
 
 	*psBCInfo = psDevInfo->sBufferInfo;
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR GetBCBufferAddr(IMG_HANDLE hDevice,
-				    IMG_HANDLE hBuffer,
-				    IMG_SYS_PHYADDR ** ppsSysAddr,
-				    IMG_UINT32 * pui32ByteSize,
-				    IMG_VOID ** ppvCpuVAddr,
-				    IMG_HANDLE * phOSMapInfo,
-				    IMG_BOOL * pbIsContiguous)
+static enum PVRSRV_ERROR GetBCBufferAddr(void *hDevice,
+				    void *hBuffer,
+				    struct IMG_SYS_PHYADDR **ppsSysAddr,
+				    u32 *pui32ByteSize,
+				    void **ppvCpuVAddr,
+				    void **phOSMapInfo,
+				    IMG_BOOL *pbIsContiguous)
 {
-	BC_EXAMPLE_BUFFER *psBuffer;
+	struct BC_EXAMPLE_BUFFER *psBuffer;
 
-	if (!hDevice || !hBuffer || !ppsSysAddr || !pui32ByteSize) {
+	if (!hDevice || !hBuffer || !ppsSysAddr || !pui32ByteSize)
 		return PVRSRV_ERROR_INVALID_PARAMS;
-	}
 
-	psBuffer = (BC_EXAMPLE_BUFFER *) hBuffer;
+	psBuffer = (struct BC_EXAMPLE_BUFFER *)hBuffer;
 
 	*ppsSysAddr = &psBuffer->sPageAlignSysAddr;
 	*ppvCpuVAddr = psBuffer->sCPUVAddr;
 
 	*pui32ByteSize = psBuffer->ui32Size;
 
-	*phOSMapInfo = IMG_NULL;
+	*phOSMapInfo = NULL;
 	*pbIsContiguous = IMG_TRUE;
 
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR BC_Example_Init(IMG_VOID)
+enum PVRSRV_ERROR BC_Example_Init(void)
 {
-	BC_EXAMPLE_DEVINFO *psDevInfo;
-	IMG_CPU_PHYADDR sSystemBufferCPUPAddr;
-	IMG_UINT32 i;
+	struct BC_EXAMPLE_DEVINFO *psDevInfo;
+	struct IMG_CPU_PHYADDR sSystemBufferCPUPAddr;
+	u32 i;
 
 	psDevInfo = GetAnchorPtr();
 
-	if (psDevInfo == IMG_NULL) {
+	if (psDevInfo == NULL) {
 
-		psDevInfo =
-		    (BC_EXAMPLE_DEVINFO *)
-		    BCAllocKernelMem(sizeof(BC_EXAMPLE_DEVINFO));
+		psDevInfo = (struct BC_EXAMPLE_DEVINFO *)
+			BCAllocKernelMem(sizeof(struct BC_EXAMPLE_DEVINFO));
 
-		if (!psDevInfo) {
+		if (!psDevInfo)
 			return PVRSRV_ERROR_OUT_OF_MEMORY;
-		}
 
-		SetAnchorPtr((IMG_VOID *) psDevInfo);
+		SetAnchorPtr((void *) psDevInfo);
 
 		psDevInfo->ui32RefCount = 0;
 
-		if (BCOpenPVRServices(&psDevInfo->hPVRServices) != PVRSRV_OK) {
+		if (BCOpenPVRServices(&psDevInfo->hPVRServices) != PVRSRV_OK)
 			return PVRSRV_ERROR_INIT_FAILURE;
-		}
 		if (BCGetLibFuncAddr
 		    (psDevInfo->hPVRServices, "PVRGetBufferClassJTable",
-		     &pfnGetPVRJTable) != PVRSRV_OK) {
+		     &pfnGetPVRJTable) != PVRSRV_OK)
 			return PVRSRV_ERROR_INIT_FAILURE;
-		}
 
-		if (!(*pfnGetPVRJTable) (&psDevInfo->sPVRJTable)) {
+		if (!(*pfnGetPVRJTable) (&psDevInfo->sPVRJTable))
 			return PVRSRV_ERROR_INIT_FAILURE;
-		}
 
 		psDevInfo->ui32NumBuffers = 0;
 
 		psDevInfo->psSystemBuffer =
-		    BCAllocKernelMem(sizeof(BC_EXAMPLE_BUFFER) *
+		    BCAllocKernelMem(sizeof(struct BC_EXAMPLE_BUFFER) *
 				     BC_EXAMPLE_NUM_BUFFERS);
 
-		if (!psDevInfo->psSystemBuffer) {
+		if (!psDevInfo->psSystemBuffer)
 			return PVRSRV_ERROR_OUT_OF_MEMORY;
-		}
 
 		psDevInfo->sBufferInfo.pixelformat = BC_EXAMPLE_PIXELFORMAT;
 		psDevInfo->sBufferInfo.ui32Width = BC_EXAMPLE_WIDTH;
@@ -179,16 +170,15 @@ PVRSRV_ERROR BC_Example_Init(IMG_VOID)
 		    PVRSRV_BC_FLAGS_YUVCSC_BT601;
 
 		for (i = 0; i < BC_EXAMPLE_NUM_BUFFERS; i++) {
-			IMG_UINT32 ui32Size =
+			u32 ui32Size =
 			    BC_EXAMPLE_HEIGHT * BC_EXAMPLE_STRIDE;
 
 			if (psDevInfo->sBufferInfo.pixelformat ==
-			    PVRSRV_PIXEL_FORMAT_NV12) {
+			    PVRSRV_PIXEL_FORMAT_NV12)
 
 				ui32Size +=
 				    ((BC_EXAMPLE_STRIDE >> 1) *
 				     (BC_EXAMPLE_HEIGHT >> 1) << 1);
-			}
 
 			if (BCAllocContigMemory(ui32Size,
 						&psDevInfo->psSystemBuffer[i].
@@ -196,9 +186,8 @@ PVRSRV_ERROR BC_Example_Init(IMG_VOID)
 						&psDevInfo->psSystemBuffer[i].
 						sCPUVAddr,
 						&sSystemBufferCPUPAddr) !=
-			    PVRSRV_OK) {
+			    PVRSRV_OK)
 				break;
-			}
 
 			psDevInfo->ui32NumBuffers++;
 
@@ -208,14 +197,14 @@ PVRSRV_ERROR BC_Example_Init(IMG_VOID)
 			psDevInfo->psSystemBuffer[i].sPageAlignSysAddr.uiAddr =
 			    (psDevInfo->psSystemBuffer[i].sSysAddr.
 			     uiAddr & 0xFFFFF000);
-			psDevInfo->psSystemBuffer[i].psSyncData = IMG_NULL;
+			psDevInfo->psSystemBuffer[i].psSyncData = NULL;
 		}
 
 		psDevInfo->sBufferInfo.ui32BufferCount =
 		    psDevInfo->ui32NumBuffers;
 
 		psDevInfo->sBCJTable.ui32TableSize =
-		    sizeof(PVRSRV_BC_SRV2BUFFER_KMJTABLE);
+		    sizeof(struct PVRSRV_BC_SRV2BUFFER_KMJTABLE);
 		psDevInfo->sBCJTable.pfnOpenBCDevice = OpenBCDevice;
 		psDevInfo->sBCJTable.pfnCloseBCDevice = CloseBCDevice;
 		psDevInfo->sBCJTable.pfnGetBCBuffer = GetBCBuffer;
@@ -225,9 +214,8 @@ PVRSRV_ERROR BC_Example_Init(IMG_VOID)
 		if (psDevInfo->sPVRJTable.
 		    pfnPVRSRVRegisterBCDevice(&psDevInfo->sBCJTable,
 					      &psDevInfo->ui32DeviceID) !=
-		    PVRSRV_OK) {
+		    PVRSRV_OK)
 			return PVRSRV_ERROR_DEVICE_REGISTER_FAILED;
-		}
 	}
 
 	psDevInfo->ui32RefCount++;
@@ -235,35 +223,33 @@ PVRSRV_ERROR BC_Example_Init(IMG_VOID)
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR BC_Example_Deinit(IMG_VOID)
+enum PVRSRV_ERROR BC_Example_Deinit(void)
 {
-	BC_EXAMPLE_DEVINFO *psDevInfo;
-	IMG_UINT32 i;
+	struct BC_EXAMPLE_DEVINFO *psDevInfo;
+	u32 i;
 	psDevInfo = GetAnchorPtr();
 
-	if (psDevInfo == IMG_NULL) {
+	if (psDevInfo == NULL)
 		return PVRSRV_ERROR_GENERIC;
-	}
 
 	psDevInfo->ui32RefCount--;
 
 	if (psDevInfo->ui32RefCount == 0) {
 
-		PVRSRV_BC_BUFFER2SRV_KMJTABLE *psJTable =
+		struct PVRSRV_BC_BUFFER2SRV_KMJTABLE *psJTable =
 		    &psDevInfo->sPVRJTable;
 
 		if (psJTable->
 		    pfnPVRSRVRemoveBCDevice(psDevInfo->ui32DeviceID) !=
-		    PVRSRV_OK) {
+		    PVRSRV_OK)
 			return PVRSRV_ERROR_GENERIC;
-		}
 
 		if (BCClosePVRServices(psDevInfo->hPVRServices) != PVRSRV_OK) {
-			psDevInfo->hPVRServices = IMG_NULL;
+			psDevInfo->hPVRServices = NULL;
 			return PVRSRV_ERROR_GENERIC;
 		}
 
-		for (i = 0; i < psDevInfo->ui32NumBuffers; i++) {
+		for (i = 0; i < psDevInfo->ui32NumBuffers; i++)
 			BCFreeContigMemory(psDevInfo->psSystemBuffer[i].
 					   ui32Size,
 					   psDevInfo->psSystemBuffer[i].
@@ -273,11 +259,10 @@ PVRSRV_ERROR BC_Example_Deinit(IMG_VOID)
 					   SysPAddrToCpuPAddrBC(psDevInfo->
 								psSystemBuffer
 								[i].sSysAddr));
-		}
 
 		BCFreeKernelMem(psDevInfo);
 
-		SetAnchorPtr(IMG_NULL);
+		SetAnchorPtr(NULL);
 	}
 
 	return PVRSRV_OK;

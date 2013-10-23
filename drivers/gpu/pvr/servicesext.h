@@ -1,35 +1,37 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
-#if !defined (__SERVICESEXT_H__)
+#if !defined(__SERVICESEXT_H__)
 #define __SERVICESEXT_H__
+
+#include "img_types.h"
 
 #define PVRSRV_LOCKFLG_READONLY     	(1)
 
-typedef enum _PVRSRV_ERROR_ {
+enum PVRSRV_ERROR {
 	PVRSRV_OK = 0,
 	PVRSRV_ERROR_GENERIC = 1,
 	PVRSRV_ERROR_OUT_OF_MEMORY = 2,
@@ -67,18 +69,18 @@ typedef enum _PVRSRV_ERROR_ {
 	PVRSRV_ERROR_RETRY = 34,
 
 	PVRSRV_ERROR_FORCE_I32 = 0x7fffffff
-} PVRSRV_ERROR;
+};
 
-typedef enum _PVRSRV_DEVICE_CLASS_ {
+enum PVRSRV_DEVICE_CLASS {
 	PVRSRV_DEVICE_CLASS_3D = 0,
 	PVRSRV_DEVICE_CLASS_DISPLAY = 1,
 	PVRSRV_DEVICE_CLASS_BUFFER = 2,
 	PVRSRV_DEVICE_CLASS_VIDEO = 3,
 
 	PVRSRV_DEVICE_CLASS_FORCE_I32 = 0x7fffffff
-} PVRSRV_DEVICE_CLASS;
+};
 
-typedef enum _PVRSRV_POWER_STATE_ {
+enum PVR_POWER_STATE {
 	PVRSRV_POWER_Unspecified = -1,
 	PVRSRV_POWER_STATE_D0 = 0,
 	PVRSRV_POWER_STATE_D1 = 1,
@@ -87,19 +89,11 @@ typedef enum _PVRSRV_POWER_STATE_ {
 	PVRSRV_POWER_STATE_D4 = 4,
 
 	PVRSRV_POWER_STATE_FORCE_I32 = 0x7fffffff
-} PVR_POWER_STATE, *PPVR_POWER_STATE;
+};
 
-typedef PVRSRV_ERROR(*PFN_PRE_POWER) (IMG_HANDLE, PVR_POWER_STATE,
-				      PVR_POWER_STATE);
-typedef PVRSRV_ERROR(*PFN_POST_POWER) (IMG_HANDLE, PVR_POWER_STATE,
-				       PVR_POWER_STATE);
 
-typedef PVRSRV_ERROR(*PFN_PRE_CLOCKSPEED_CHANGE) (IMG_HANDLE, IMG_BOOL,
-						  PVR_POWER_STATE);
-typedef PVRSRV_ERROR(*PFN_POST_CLOCKSPEED_CHANGE) (IMG_HANDLE, IMG_BOOL,
-						   PVR_POWER_STATE);
 
-typedef enum _PVRSRV_PIXEL_FORMAT_ {
+enum PVRSRV_PIXEL_FORMAT {
 	PVRSRV_PIXEL_FORMAT_UNKNOWN = 0,
 	PVRSRV_PIXEL_FORMAT_RGB565 = 1,
 	PVRSRV_PIXEL_FORMAT_RGB555 = 2,
@@ -190,185 +184,174 @@ typedef enum _PVRSRV_PIXEL_FORMAT_ {
 	PVRSRV_PIXEL_FORMAT_FOURCC_ORG_VYUY,
 
 	PVRSRV_PIXEL_FORMAT_FORCE_I32 = 0x7fffffff,
-} PVRSRV_PIXEL_FORMAT;
+};
 
-typedef enum _PVRSRV_ALPHA_FORMAT_ {
+enum PVRSRV_ALPHA_FORMAT {
 	PVRSRV_ALPHA_FORMAT_UNKNOWN = 0x00000000,
 	PVRSRV_ALPHA_FORMAT_PRE = 0x00000001,
 	PVRSRV_ALPHA_FORMAT_NONPRE = 0x00000002,
 	PVRSRV_ALPHA_FORMAT_MASK = 0x0000000F,
-} PVRSRV_ALPHA_FORMAT;
+};
 
-typedef enum _PVRSRV_COLOURSPACE_FORMAT_ {
+enum PVRSRV_COLOURSPACE_FORMAT {
 	PVRSRV_COLOURSPACE_FORMAT_UNKNOWN = 0x00000000,
 	PVRSRV_COLOURSPACE_FORMAT_LINEAR = 0x00010000,
 	PVRSRV_COLOURSPACE_FORMAT_NONLINEAR = 0x00020000,
 	PVRSRV_COLOURSPACE_FORMAT_MASK = 0x000F0000,
-} PVRSRV_COLOURSPACE_FORMAT;
+};
 
 #define PVRSRV_CREATE_SWAPCHAIN_SHARED		(1<<0)
 #define PVRSRV_CREATE_SWAPCHAIN_QUERY		(1<<1)
 
-typedef struct _PVRSRV_SYNC_DATA_ {
+struct PVRSRV_SYNC_DATA {
 
-	IMG_UINT32 ui32WriteOpsPending;
-	volatile IMG_UINT32 ui32WriteOpsComplete;
+	u32 ui32WriteOpsPending;
+	volatile u32 ui32WriteOpsComplete;
 
-	IMG_UINT32 ui32ReadOpsPending;
-	volatile IMG_UINT32 ui32ReadOpsComplete;
+	u32 ui32ReadOpsPending;
+	volatile u32 ui32ReadOpsComplete;
 
-	IMG_UINT32 ui32LastOpDumpVal;
-	IMG_UINT32 ui32LastReadOpDumpVal;
+	u32 ui32LastOpDumpVal;
+	u32 ui32LastReadOpDumpVal;
 
-} PVRSRV_SYNC_DATA;
+};
 
-typedef struct _PVRSRV_CLIENT_SYNC_INFO_ {
+struct PVRSRV_CLIENT_SYNC_INFO {
 
-	PVRSRV_SYNC_DATA *psSyncData;
+	struct PVRSRV_SYNC_DATA *psSyncData;
 
-	IMG_DEV_VIRTADDR sWriteOpsCompleteDevVAddr;
+	struct IMG_DEV_VIRTADDR sWriteOpsCompleteDevVAddr;
 
-	IMG_DEV_VIRTADDR sReadOpsCompleteDevVAddr;
+	struct IMG_DEV_VIRTADDR sReadOpsCompleteDevVAddr;
 
-	IMG_HANDLE hMappingInfo;
+	void *hMappingInfo;
 
-	IMG_HANDLE hKernelSyncInfo;
+	void *hKernelSyncInfo;
 
-} PVRSRV_CLIENT_SYNC_INFO, *PPVRSRV_CLIENT_SYNC_INFO;
+};
 
-typedef struct PVRSRV_RESOURCE_TAG {
-	volatile IMG_UINT32 ui32Lock;
-	IMG_UINT32 ui32ID;
-} PVRSRV_RESOURCE;
-typedef PVRSRV_RESOURCE PVRSRV_RES_HANDLE;
+struct PVRSRV_RESOURCE {
+	volatile u32 ui32Lock;
+	u32 ui32ID;
+};
 
-typedef IMG_VOID(*PFN_CMD_COMPLETE) (IMG_HANDLE);
-typedef IMG_VOID(**PPFN_CMD_COMPLETE) (IMG_HANDLE);
 
-typedef IMG_BOOL(*PFN_CMD_PROC) (IMG_HANDLE, IMG_UINT32, IMG_VOID *);
-typedef IMG_BOOL(**PPFN_CMD_PROC) (IMG_HANDLE, IMG_UINT32, IMG_VOID *);
 
-typedef struct _IMG_RECT_ {
-	IMG_INT32 x0;
-	IMG_INT32 y0;
-	IMG_INT32 x1;
-	IMG_INT32 y1;
-} IMG_RECT;
+struct IMG_RECT {
+	s32 x0;
+	s32 y0;
+	s32 x1;
+	s32 y1;
+};
 
-typedef struct _IMG_RECT_16_ {
-	IMG_INT16 x0;
-	IMG_INT16 y0;
-	IMG_INT16 x1;
-	IMG_INT16 y1;
-} IMG_RECT_16;
+struct IMG_RECT_16 {
+	s16 x0;
+	s16 y0;
+	s16 x1;
+	s16 y1;
+};
 
-typedef PVRSRV_ERROR(*PFN_GET_BUFFER_ADDR) (IMG_HANDLE,
-					    IMG_HANDLE,
-					    IMG_SYS_PHYADDR **,
-					    IMG_UINT32 *,
-					    IMG_VOID **,
-					    IMG_HANDLE *, IMG_BOOL *);
 
-typedef struct DISPLAY_DIMS_TAG {
-	IMG_UINT32 ui32ByteStride;
-	IMG_UINT32 ui32Width;
-	IMG_UINT32 ui32Height;
-} DISPLAY_DIMS;
+struct DISPLAY_DIMS {
+	u32 ui32ByteStride;
+	u32 ui32Width;
+	u32 ui32Height;
+};
 
-typedef struct DISPLAY_FORMAT_TAG {
+struct DISPLAY_FORMAT {
 
-	PVRSRV_PIXEL_FORMAT pixelformat;
-} DISPLAY_FORMAT;
+	enum PVRSRV_PIXEL_FORMAT pixelformat;
+};
 
-typedef struct DISPLAY_SURF_ATTRIBUTES_TAG {
+struct DISPLAY_SURF_ATTRIBUTES {
 
-	PVRSRV_PIXEL_FORMAT pixelformat;
+	enum PVRSRV_PIXEL_FORMAT pixelformat;
 
-	DISPLAY_DIMS sDims;
-} DISPLAY_SURF_ATTRIBUTES;
+	struct DISPLAY_DIMS sDims;
+};
 
-typedef struct DISPLAY_MODE_INFO_TAG {
+struct DISPLAY_MODE_INFO {
 
-	PVRSRV_PIXEL_FORMAT pixelformat;
+	enum PVRSRV_PIXEL_FORMAT pixelformat;
 
-	DISPLAY_DIMS sDims;
+	struct DISPLAY_DIMS sDims;
 
-	IMG_UINT32 ui32RefreshHZ;
+	u32 ui32RefreshHZ;
 
-	IMG_UINT32 ui32OEMFlags;
-} DISPLAY_MODE_INFO;
+	u32 ui32OEMFlags;
+};
 
 #define MAX_DISPLAY_NAME_SIZE	(50)
 
-typedef struct DISPLAY_INFO_TAG {
-	IMG_UINT32 ui32MaxSwapChains;
+struct DISPLAY_INFO {
+	u32 ui32MaxSwapChains;
 
-	IMG_UINT32 ui32MaxSwapChainBuffers;
+	u32 ui32MaxSwapChainBuffers;
 
-	IMG_UINT32 ui32MinSwapInterval;
+	u32 ui32MinSwapInterval;
 
-	IMG_UINT32 ui32MaxSwapInterval;
+	u32 ui32MaxSwapInterval;
 
-	IMG_CHAR szDisplayName[MAX_DISPLAY_NAME_SIZE];
+	char szDisplayName[MAX_DISPLAY_NAME_SIZE];
 
 
-} DISPLAY_INFO;
+};
 
-typedef struct ACCESS_INFO_TAG {
-	IMG_UINT32 ui32Size;
-	IMG_UINT32 ui32FBPhysBaseAddress;
-	IMG_UINT32 ui32FBMemAvailable;
-	IMG_UINT32 ui32SysPhysBaseAddress;
-	IMG_UINT32 ui32SysSize;
-	IMG_UINT32 ui32DevIRQ;
-} ACCESS_INFO;
+struct ACCESS_INFO {
+	u32 ui32Size;
+	u32 ui32FBPhysBaseAddress;
+	u32 ui32FBMemAvailable;
+	u32 ui32SysPhysBaseAddress;
+	u32 ui32SysSize;
+	u32 ui32DevIRQ;
+};
 
-typedef struct PVRSRV_CURSOR_SHAPE_TAG {
-	IMG_UINT16 ui16Width;
-	IMG_UINT16 ui16Height;
-	IMG_INT16 i16XHot;
-	IMG_INT16 i16YHot;
+struct PVRSRV_CURSOR_SHAPE {
+	u16 ui16Width;
+	u16 ui16Height;
+	s16 i16XHot;
+	s16 i16YHot;
 
-	IMG_VOID *pvMask;
-	IMG_INT16 i16MaskByteStride;
+	void *pvMask;
+	s16 i16MaskByteStride;
 
-	IMG_VOID *pvColour;
-	IMG_INT16 i16ColourByteStride;
-	PVRSRV_PIXEL_FORMAT eColourPixelFormat;
-} PVRSRV_CURSOR_SHAPE;
+	void *pvColour;
+	s16 i16ColourByteStride;
+	enum PVRSRV_PIXEL_FORMAT eColourPixelFormat;
+};
 
 #define PVRSRV_SET_CURSOR_VISIBILITY	(1<<0)
 #define PVRSRV_SET_CURSOR_POSITION		(1<<1)
 #define PVRSRV_SET_CURSOR_SHAPE			(1<<2)
 #define PVRSRV_SET_CURSOR_ROTATION		(1<<3)
 
-typedef struct PVRSRV_CURSOR_INFO_TAG {
+struct PVRSRV_CURSOR_INFO {
 
-	IMG_UINT32 ui32Flags;
+	u32 ui32Flags;
 
 	IMG_BOOL bVisible;
 
-	IMG_INT16 i16XPos;
-	IMG_INT16 i16YPos;
+	s16 i16XPos;
+	s16 i16YPos;
 
-	PVRSRV_CURSOR_SHAPE sCursorShape;
+	struct PVRSRV_CURSOR_SHAPE sCursorShape;
 
-	IMG_UINT32 ui32Rotation;
+	u32 ui32Rotation;
 
-} PVRSRV_CURSOR_INFO;
+};
 
-typedef struct _PVRSRV_REGISTRY_INFO_ {
-	IMG_UINT32 ui32DevCookie;
-	IMG_PCHAR pszKey;
-	IMG_PCHAR pszValue;
-	IMG_PCHAR pszBuf;
-	IMG_UINT32 ui32BufSize;
-} PVRSRV_REGISTRY_INFO, *PPVRSRV_REGISTRY_INFO;
+struct PVRSRV_REGISTRY_INFO {
+	u32 ui32DevCookie;
+	char *pszKey;
+	char *pszValue;
+	char *pszBuf;
+	u32 ui32BufSize;
+};
 
-PVRSRV_ERROR IMG_CALLCONV PVRSRVReadRegistryString(PPVRSRV_REGISTRY_INFO
-						   psRegInfo);
-PVRSRV_ERROR IMG_CALLCONV PVRSRVWriteRegistryString(PPVRSRV_REGISTRY_INFO
-						    psRegInfo);
+enum PVRSRV_ERROR PVRSRVReadRegistryString(
+				struct PVRSRV_REGISTRY_INFO *psRegInfo);
+enum PVRSRV_ERROR PVRSRVWriteRegistryString(
+				struct PVRSRV_REGISTRY_INFO *psRegInfo);
 
 #define PVRSRV_BC_FLAGS_YUVCSC_CONFORMANT_RANGE	(0 << 0)
 #define PVRSRV_BC_FLAGS_YUVCSC_FULL_RANGE		(1 << 0)
@@ -376,21 +359,21 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVWriteRegistryString(PPVRSRV_REGISTRY_INFO
 #define PVRSRV_BC_FLAGS_YUVCSC_BT601			(0 << 1)
 #define PVRSRV_BC_FLAGS_YUVCSC_BT709			(1 << 1)
 
-typedef struct BUFFER_INFO_TAG {
-	IMG_UINT32 ui32BufferCount;
-	IMG_UINT32 ui32BufferDeviceID;
-	PVRSRV_PIXEL_FORMAT pixelformat;
-	IMG_UINT32 ui32ByteStride;
-	IMG_UINT32 ui32Width;
-	IMG_UINT32 ui32Height;
-	IMG_UINT32 ui32Flags;
-} BUFFER_INFO;
+struct BUFFER_INFO {
+	u32 ui32BufferCount;
+	u32 ui32BufferDeviceID;
+	enum PVRSRV_PIXEL_FORMAT pixelformat;
+	u32 ui32ByteStride;
+	u32 ui32Width;
+	u32 ui32Height;
+	u32 ui32Flags;
+};
 
-typedef enum _OVERLAY_DEINTERLACE_MODE_ {
+enum OVERLAY_DEINTERLACE_MODE {
 	WEAVE = 0x0,
 	BOB_ODD,
 	BOB_EVEN,
 	BOB_EVEN_NONINTERLEAVED
-} OVERLAY_DEINTERLACE_MODE;
+};
 
 #endif

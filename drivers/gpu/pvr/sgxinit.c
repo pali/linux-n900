@@ -1,32 +1,33 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
 #include <stddef.h>
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
+#include <linux/slab.h>
 
 #include "sgxdefs.h"
 #include "sgxmmu.h"
@@ -38,6 +39,7 @@
 #include "sgxconfig.h"
 #include "sysconfig.h"
 #include "pvr_bridge_km.h"
+#include "sgx_bridge_km.h"
 
 #include "pdump_km.h"
 #include "ra.h"
@@ -47,28 +49,40 @@
 
 #include "sgxutils.h"
 
+static IMG_BOOL SGX_ISRHandler(void *pvData);
 
-IMG_BOOL SGX_ISRHandler(IMG_VOID * pvData);
+static u32 gui32EventStatusServicesByISR;
 
-IMG_UINT32 gui32EventStatusServicesByISR = 0;
-
-IMG_VOID SGXReset(PVRSRV_SGXDEV_INFO * psDevInfo, IMG_UINT32 ui32PDUMPFlags);
-
-static PVRSRV_ERROR SGXInitialise(PVRSRV_SGXDEV_INFO * psDevInfo,
+static enum PVRSRV_ERROR SGXInitialise(struct PVRSRV_SGXDEV_INFO *psDevInfo,
 				  IMG_BOOL bHardwareRecovery);
-PVRSRV_ERROR SGXDeinitialise(IMG_HANDLE hDevCookie);
+static enum PVRSRV_ERROR SGXDeinitialise(void *hDevCookie);
 
-typedef enum _PVR_DEVICE_POWER_STATE_ {
+struct timer_work_data {
+	struct PVRSRV_DEVICE_NODE *psDeviceNode;
+	struct delayed_work work;
+	struct workqueue_struct *work_queue;
+	unsigned int interval;
+	bool armed;
+};
+
+static enum PVRSRV_ERROR SGXOSTimerEnable(struct timer_work_data *data);
+static enum PVRSRV_ERROR SGXOSTimerCancel(struct timer_work_data *data);
+static struct timer_work_data *
+SGXOSTimerInit(struct PVRSRV_DEVICE_NODE *psDeviceNode);
+static void SGXOSTimerDeInit(struct timer_work_data *data);
+
+enum PVR_DEVICE_POWER_STATE {
 	PVR_DEVICE_POWER_STATE_ON = 0,
 	PVR_DEVICE_POWER_STATE_IDLE = 1,
 	PVR_DEVICE_POWER_STATE_OFF = 2,
 
 	PVR_DEVICE_POWER_STATE_FORCE_I32 = 0x7fffffff
-} PVR_DEVICE_POWER_STATE, *PPVR_DEVICE_POWER_STATE;
+};
 
-static PVR_DEVICE_POWER_STATE MapDevicePowerState(PVR_POWER_STATE ePowerState)
+static enum PVR_DEVICE_POWER_STATE MapDevicePowerState(enum PVR_POWER_STATE
+								ePowerState)
 {
-	PVR_DEVICE_POWER_STATE eDevicePowerState;
+	enum PVR_DEVICE_POWER_STATE eDevicePowerState;
 
 	switch (ePowerState) {
 	case PVRSRV_POWER_STATE_D0:
@@ -83,9 +97,9 @@ static PVR_DEVICE_POWER_STATE MapDevicePowerState(PVR_POWER_STATE ePowerState)
 		}
 	default:
 		{
-			PVR_DPF((PVR_DBG_ERROR,
+			PVR_DPF(PVR_DBG_ERROR,
 				 "MapDevicePowerState: Invalid state: %ld",
-				 ePowerState));
+				 ePowerState);
 			eDevicePowerState = PVR_DEVICE_POWER_STATE_FORCE_I32;
 			PVR_ASSERT(eDevicePowerState !=
 				   PVR_DEVICE_POWER_STATE_FORCE_I32);
@@ -95,71 +109,70 @@ static PVR_DEVICE_POWER_STATE MapDevicePowerState(PVR_POWER_STATE ePowerState)
 	return eDevicePowerState;
 }
 
-static IMG_VOID SGXCommandComplete(PVRSRV_DEVICE_NODE * psDeviceNode)
+static void SGXCommandComplete(struct PVRSRV_DEVICE_NODE *psDeviceNode)
 {
 	SGXScheduleProcessQueues(psDeviceNode);
 }
 
-static IMG_UINT32 DeinitDevInfo(PVRSRV_SGXDEV_INFO * psDevInfo)
+static u32 DeinitDevInfo(struct PVRSRV_SGXDEV_INFO *psDevInfo)
 {
-	if (psDevInfo->psKernelCCBInfo != IMG_NULL) {
-
-		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP, sizeof(PVRSRV_SGX_CCB_INFO),
-			  psDevInfo->psKernelCCBInfo, IMG_NULL);
-	}
+	if (psDevInfo->psKernelCCBInfo != NULL)
+		OSFreeMem(PVRSRV_OS_PAGEABLE_HEAP,
+			  sizeof(struct PVRSRV_SGX_CCB_INFO),
+			  psDevInfo->psKernelCCBInfo, NULL);
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR InitDevInfo(PVRSRV_PER_PROCESS_DATA * psPerProc,
-				PVRSRV_DEVICE_NODE * psDeviceNode,
-				SGX_BRIDGE_INIT_INFO * psInitInfo)
+static enum PVRSRV_ERROR InitDevInfo(struct PVRSRV_PER_PROCESS_DATA *psPerProc,
+				struct PVRSRV_DEVICE_NODE *psDeviceNode,
+				struct SGX_BRIDGE_INIT_INFO *psInitInfo)
 {
-	PVRSRV_SGXDEV_INFO *psDevInfo =
-	    (PVRSRV_SGXDEV_INFO *) psDeviceNode->pvDevice;
-	PVRSRV_ERROR eError;
+	struct PVRSRV_SGXDEV_INFO *psDevInfo =
+	    (struct PVRSRV_SGXDEV_INFO *)psDeviceNode->pvDevice;
+	enum PVRSRV_ERROR eError;
 
-	PVRSRV_SGX_CCB_INFO *psKernelCCBInfo = IMG_NULL;
+	struct PVRSRV_SGX_CCB_INFO *psKernelCCBInfo = NULL;
 
 	PVR_UNREFERENCED_PARAMETER(psPerProc);
 	psDevInfo->sScripts = psInitInfo->sScripts;
 
 	psDevInfo->psKernelCCBMemInfo =
-	    (PVRSRV_KERNEL_MEM_INFO *) psInitInfo->hKernelCCBMemInfo;
+	    (struct PVRSRV_KERNEL_MEM_INFO *)psInitInfo->hKernelCCBMemInfo;
 	psDevInfo->psKernelCCB =
-	    (PVRSRV_SGX_KERNEL_CCB *) psDevInfo->psKernelCCBMemInfo->
+	    (struct PVRSRV_SGX_KERNEL_CCB *)psDevInfo->psKernelCCBMemInfo->
 	    pvLinAddrKM;
 
 	psDevInfo->psKernelCCBCtlMemInfo =
-	    (PVRSRV_KERNEL_MEM_INFO *) psInitInfo->hKernelCCBCtlMemInfo;
+	    (struct PVRSRV_KERNEL_MEM_INFO *)psInitInfo->hKernelCCBCtlMemInfo;
 	psDevInfo->psKernelCCBCtl =
-	    (PVRSRV_SGX_CCB_CTL *) psDevInfo->psKernelCCBCtlMemInfo->
+	    (struct PVRSRV_SGX_CCB_CTL *)psDevInfo->psKernelCCBCtlMemInfo->
 	    pvLinAddrKM;
 
 	psDevInfo->psKernelCCBEventKickerMemInfo =
-	    (PVRSRV_KERNEL_MEM_INFO *) psInitInfo->hKernelCCBEventKickerMemInfo;
+	    (struct PVRSRV_KERNEL_MEM_INFO *)
+	    psInitInfo->hKernelCCBEventKickerMemInfo;
 	psDevInfo->pui32KernelCCBEventKicker =
-	    (IMG_UINT32 *) psDevInfo->psKernelCCBEventKickerMemInfo->
-	    pvLinAddrKM;
+	    (u32 *) psDevInfo->psKernelCCBEventKickerMemInfo->pvLinAddrKM;
 
 	psDevInfo->psKernelSGXHostCtlMemInfo =
-	    (PVRSRV_KERNEL_MEM_INFO *) psInitInfo->hKernelSGXHostCtlMemInfo;
+	  (struct PVRSRV_KERNEL_MEM_INFO *)psInitInfo->hKernelSGXHostCtlMemInfo;
 	psDevInfo->psSGXHostCtl =
-	    (PVRSRV_SGX_HOST_CTL *) psDevInfo->psKernelSGXHostCtlMemInfo->
+	    (struct PVRSRV_SGX_HOST_CTL *)psDevInfo->psKernelSGXHostCtlMemInfo->
 	    pvLinAddrKM;
 
 	psDevInfo->psKernelHWPerfCBMemInfo =
-	    (PVRSRV_KERNEL_MEM_INFO *) psInitInfo->hKernelHWPerfCBMemInfo;
+	    (struct PVRSRV_KERNEL_MEM_INFO *)psInitInfo->hKernelHWPerfCBMemInfo;
 
 	eError = OSAllocMem(PVRSRV_OS_PAGEABLE_HEAP,
-			    sizeof(PVRSRV_SGX_CCB_INFO),
-			    (IMG_VOID **) & psKernelCCBInfo, 0);
+			    sizeof(struct PVRSRV_SGX_CCB_INFO),
+			    (void **)&psKernelCCBInfo, NULL);
 	if (eError != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR, "InitDevInfo: Failed to alloc memory"));
+		PVR_DPF(PVR_DBG_ERROR, "InitDevInfo: Failed to alloc memory");
 		goto failed_allockernelccb;
 	}
 
-	OSMemSet(psKernelCCBInfo, 0, sizeof(PVRSRV_SGX_CCB_INFO));
+	OSMemSet(psKernelCCBInfo, 0, sizeof(struct PVRSRV_SGX_CCB_INFO));
 	psKernelCCBInfo->psCCBMemInfo = psDevInfo->psKernelCCBMemInfo;
 	psKernelCCBInfo->psCCBCtlMemInfo = psDevInfo->psKernelCCBCtlMemInfo;
 	psKernelCCBInfo->psCommands = psDevInfo->psKernelCCB->asCommands;
@@ -195,106 +208,85 @@ failed_allockernelccb:
 	return eError;
 }
 
-static IMG_VOID SGXGetTimingInfo(PVRSRV_DEVICE_NODE * psDeviceNode)
+static void SGXGetTimingInfo(struct PVRSRV_DEVICE_NODE *psDeviceNode)
 {
-	PVRSRV_SGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
-	SGX_TIMING_INFORMATION sSGXTimingInfo = { 0 };
-	IMG_UINT32 ui32ActivePowManSampleRate;
-	SGX_TIMING_INFORMATION *psSGXTimingInfo;
+	struct PVRSRV_SGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
+	struct SGX_TIMING_INFORMATION sSGXTimingInfo = { 0 };
+	u32 ui32ActivePowManSampleRate;
+	struct timer_work_data *data = psDevInfo->hTimer;
+	enum PVRSRV_ERROR eError;
 
-	psSGXTimingInfo = &sSGXTimingInfo;
-	SysGetSGXTimingInformation(psSGXTimingInfo);
+	SysGetSGXTimingInformation(&sSGXTimingInfo);
 
-	{
-		PVRSRV_ERROR eError;
-		IMG_UINT32 ui32OlduKernelFreq;
-
-		if (psDevInfo->hTimer != IMG_NULL) {
-			ui32OlduKernelFreq =
-			    psDevInfo->ui32CoreClockSpeed /
-			    psDevInfo->ui32uKernelTimerClock;
-			if (ui32OlduKernelFreq !=
-			    psSGXTimingInfo->ui32uKernelFreq) {
-				eError = OSRemoveTimer(psDevInfo->hTimer);
-				if (eError != PVRSRV_OK) {
-					PVR_DPF((PVR_DBG_ERROR,
-						 "SGXGetTimingInfo: Failed to remove timer"));
-				}
-				psDevInfo->hTimer = IMG_NULL;
-			}
-		}
-		if (psDevInfo->hTimer == IMG_NULL) {
-
-			/*
-			 * the magic calculation below sets the hardware lock-up
-			 * detection and recovery timer interval to ~150msecs
-			 */
-			psDevInfo->hTimer = OSAddTimer(SGXOSTimer, psDeviceNode,
-						       1000 * 150 /
-						       psSGXTimingInfo->
-						       ui32uKernelFreq);
-			if (psDevInfo->hTimer == IMG_NULL) {
-				PVR_DPF((PVR_DBG_ERROR,
-					 "SGXGetTimingInfo : Failed to register timer callback function"));
-			}
-		}
-
-		psDevInfo->psSGXHostCtl->ui32HWRecoverySampleRate =
-		    psSGXTimingInfo->ui32uKernelFreq /
-		    psSGXTimingInfo->ui32HWRecoveryFreq;
+	if (data) {
+		BUG_ON(data->armed);
+		/*
+		 * The magic calculation below sets the hardware lock-up
+		 * detection and recovery timer interval to ~150msecs.
+		 * The interval length will be scaled based on the SGX
+		 * functional clock frequency. The higher the frequency
+		 * the shorter the interval and vice versa.
+		 */
+		data->interval = 150 * SYS_SGX_PDS_TIMER_FREQ /
+			sSGXTimingInfo.ui32uKernelFreq;
 	}
 
-	psDevInfo->ui32CoreClockSpeed = psSGXTimingInfo->ui32CoreClockSpeed;
+	psDevInfo->psSGXHostCtl->ui32HWRecoverySampleRate =
+		sSGXTimingInfo.ui32uKernelFreq /
+		sSGXTimingInfo.ui32HWRecoveryFreq;
+
+	psDevInfo->ui32CoreClockSpeed = sSGXTimingInfo.ui32CoreClockSpeed;
 	psDevInfo->ui32uKernelTimerClock =
-	    psSGXTimingInfo->ui32CoreClockSpeed /
-	    psSGXTimingInfo->ui32uKernelFreq;
+		sSGXTimingInfo.ui32CoreClockSpeed /
+		sSGXTimingInfo.ui32uKernelFreq;
 
 	ui32ActivePowManSampleRate =
-	    psSGXTimingInfo->ui32uKernelFreq *
-	    psSGXTimingInfo->ui32ActivePowManLatencyms / 1000;
+		sSGXTimingInfo.ui32uKernelFreq *
+		sSGXTimingInfo.ui32ActivePowManLatencyms / 1000;
 	ui32ActivePowManSampleRate += 1;
 	psDevInfo->psSGXHostCtl->ui32ActivePowManSampleRate =
 	    ui32ActivePowManSampleRate;
 }
 
-static IMG_VOID SGXStartTimer(PVRSRV_SGXDEV_INFO * psDevInfo,
+static void SGXStartTimer(struct PVRSRV_SGXDEV_INFO *psDevInfo,
 			      IMG_BOOL bStartOSTimer)
 {
-	IMG_UINT32 ui32RegVal;
+	u32 ui32RegVal;
 
 
 	ui32RegVal =
 	    EUR_CR_EVENT_TIMER_ENABLE_MASK | psDevInfo->ui32uKernelTimerClock;
-	OSWriteHWReg(psDevInfo->pvRegsBaseKM, EUR_CR_EVENT_TIMER, ui32RegVal);
+	OSWriteHWReg((void __iomem *)psDevInfo->pvRegsBaseKM,
+		     EUR_CR_EVENT_TIMER, ui32RegVal);
 	PDUMPREGWITHFLAGS(EUR_CR_EVENT_TIMER, ui32RegVal,
 			  PDUMP_FLAGS_CONTINUOUS);
 
 	if (bStartOSTimer) {
-		PVRSRV_ERROR eError;
-		eError = OSEnableTimer(psDevInfo->hTimer);
-		if (eError != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "SGXStartTimer : Failed to enable host timer"));
-		}
+		enum PVRSRV_ERROR eError;
+		eError = SGXOSTimerEnable(psDevInfo->hTimer);
+		if (eError != PVRSRV_OK)
+			PVR_DPF(PVR_DBG_ERROR, "SGXStartTimer : "
+					"Failed to enable host timer");
 	}
 }
 
-static PVRSRV_ERROR SGXPrePowerState(IMG_HANDLE hDevHandle,
-				     PVR_DEVICE_POWER_STATE eNewPowerState,
-				     PVR_DEVICE_POWER_STATE eCurrentPowerState)
+static enum PVRSRV_ERROR SGXPrePowerState(void *hDevHandle,
+			 enum PVR_DEVICE_POWER_STATE eNewPowerState,
+			 enum PVR_DEVICE_POWER_STATE eCurrentPowerState)
 {
 	if ((eNewPowerState != eCurrentPowerState) &&
 	    (eNewPowerState != PVR_DEVICE_POWER_STATE_ON)) {
-		PVRSRV_ERROR eError;
-		PVRSRV_DEVICE_NODE *psDeviceNode = hDevHandle;
-		PVRSRV_SGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
-		PVRSRV_SGX_HOST_CTL *psSGXHostCtl = psDevInfo->psSGXHostCtl;
-		IMG_UINT32 ui32PowManRequest, ui32PowManComplete;
+		enum PVRSRV_ERROR eError;
+		struct PVRSRV_DEVICE_NODE *psDeviceNode = hDevHandle;
+		struct PVRSRV_SGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
+		struct PVRSRV_SGX_HOST_CTL *psSGXHostCtl =
+							psDevInfo->psSGXHostCtl;
+		u32 ui32PowManRequest, ui32PowManComplete;
 
-		eError = OSDisableTimer(psDevInfo->hTimer);
+		eError = SGXOSTimerCancel(psDevInfo->hTimer);
 		if (eError != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "SGXPrePowerState: Failed to disable timer"));
+			PVR_DPF(PVR_DBG_ERROR,
+				 "SGXPrePowerState: Failed to disable timer");
 			return eError;
 		}
 
@@ -314,9 +306,9 @@ static PVRSRV_ERROR SGXPrePowerState(IMG_HANDLE hDevHandle,
 
 		psSGXHostCtl->ui32PowManFlags |= ui32PowManRequest;
 #if defined(PDUMP)
-		PDUMPMEM(IMG_NULL, psDevInfo->psKernelSGXHostCtlMemInfo,
-			 offsetof(PVRSRV_SGX_HOST_CTL, ui32PowManFlags),
-			 sizeof(IMG_UINT32), PDUMP_FLAGS_CONTINUOUS,
+		PDUMPMEM(NULL, psDevInfo->psKernelSGXHostCtlMemInfo,
+			 offsetof(struct PVRSRV_SGX_HOST_CTL, ui32PowManFlags),
+			 sizeof(u32), PDUMP_FLAGS_CONTINUOUS,
 			 MAKEUNIQUETAG(psDevInfo->psKernelSGXHostCtlMemInfo));
 #endif
 
@@ -324,33 +316,30 @@ static PVRSRV_ERROR SGXPrePowerState(IMG_HANDLE hDevHandle,
 				   ui32PowManComplete,
 				   ui32PowManComplete,
 				   MAX_HW_TIME_US / WAIT_TRY_COUNT,
-				   WAIT_TRY_COUNT) != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "SGXPrePowerState: Wait for SGX ukernel power transition failed."));
-		}
+				   WAIT_TRY_COUNT) != PVRSRV_OK)
+			PVR_DPF(PVR_DBG_ERROR, "SGXPrePowerState: "
+			      "Wait for SGX ukernel power transition failed.");
 
 #if defined(PDUMP)
 		PDUMPCOMMENT
 		    ("TA/3D CCB Control - Wait for power event on uKernel.");
 		PDUMPMEMPOL(psDevInfo->psKernelSGXHostCtlMemInfo,
-			    offsetof(PVRSRV_SGX_HOST_CTL, ui32PowManFlags),
+			    offsetof(struct PVRSRV_SGX_HOST_CTL,
+				     ui32PowManFlags),
 			    ui32PowManComplete, ui32PowManComplete,
 			    PDUMP_POLL_OPERATOR_EQUAL, IMG_FALSE, IMG_FALSE,
 			    MAKEUNIQUETAG(psDevInfo->
 					  psKernelSGXHostCtlMemInfo));
 #endif
-
-
 		{
-			if (PollForValueKM
-			    ((IMG_UINT32 *) psDevInfo->pvRegsBaseKM +
-			     (EUR_CR_CLKGATESTATUS >> 2), 0,
+			if (PollForValueKM(
+					(u32 __force *)psDevInfo->pvRegsBaseKM +
+					(EUR_CR_CLKGATESTATUS >> 2), 0,
 			     psDevInfo->ui32ClkGateStatusMask,
 			     MAX_HW_TIME_US / WAIT_TRY_COUNT,
-			     WAIT_TRY_COUNT) != PVRSRV_OK) {
-				PVR_DPF((PVR_DBG_ERROR,
-					 "SGXPrePowerState: Wait for SGX clock gating failed."));
-			}
+			     WAIT_TRY_COUNT) != PVRSRV_OK)
+				PVR_DPF(PVR_DBG_ERROR, "SGXPrePowerState: "
+					 "Wait for SGX clock gating failed.");
 
 			PDUMPCOMMENT("Wait for SGX clock gating.");
 			PDUMPREGPOL(EUR_CR_CLKGATESTATUS, 0,
@@ -360,9 +349,8 @@ static PVRSRV_ERROR SGXPrePowerState(IMG_HANDLE hDevHandle,
 		if (eNewPowerState == PVR_DEVICE_POWER_STATE_OFF) {
 			eError = SGXDeinitialise(psDevInfo);
 			if (eError != PVRSRV_OK) {
-				PVR_DPF((PVR_DBG_ERROR,
-					 "SGXPrePowerState: SGXDeinitialise failed: %lu",
-					 eError));
+				PVR_DPF(PVR_DBG_ERROR, "SGXPrePowerState: "
+					"SGXDeinitialise failed: %lu", eError);
 				return eError;
 			}
 		}
@@ -371,23 +359,24 @@ static PVRSRV_ERROR SGXPrePowerState(IMG_HANDLE hDevHandle,
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR SGXPostPowerState(IMG_HANDLE hDevHandle,
-				      PVR_DEVICE_POWER_STATE eNewPowerState,
-				      PVR_DEVICE_POWER_STATE eCurrentPowerState)
+static enum PVRSRV_ERROR SGXPostPowerState(void *hDevHandle,
+				 enum PVR_DEVICE_POWER_STATE eNewPowerState,
+				 enum PVR_DEVICE_POWER_STATE eCurrentPowerState)
 {
 	if ((eNewPowerState != eCurrentPowerState) &&
 	    (eCurrentPowerState != PVR_DEVICE_POWER_STATE_ON)) {
-		PVRSRV_ERROR eError;
-		PVRSRV_DEVICE_NODE *psDeviceNode = hDevHandle;
-		PVRSRV_SGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
-		PVRSRV_SGX_HOST_CTL *psSGXHostCtl = psDevInfo->psSGXHostCtl;
+		enum PVRSRV_ERROR eError;
+		struct PVRSRV_DEVICE_NODE *psDeviceNode = hDevHandle;
+		struct PVRSRV_SGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
+		struct PVRSRV_SGX_HOST_CTL *psSGXHostCtl =
+							psDevInfo->psSGXHostCtl;
 
 		psSGXHostCtl->ui32PowManFlags = 0;
 		PDUMPCOMMENT("TA/3D CCB Control - Reset Power Manager flags");
 #if defined(PDUMP)
-		PDUMPMEM(IMG_NULL, psDevInfo->psKernelSGXHostCtlMemInfo,
-			 offsetof(PVRSRV_SGX_HOST_CTL, ui32PowManFlags),
-			 sizeof(IMG_UINT32), PDUMP_FLAGS_CONTINUOUS,
+		PDUMPMEM(NULL, psDevInfo->psKernelSGXHostCtlMemInfo,
+			 offsetof(struct PVRSRV_SGX_HOST_CTL, ui32PowManFlags),
+			 sizeof(u32), PDUMP_FLAGS_CONTINUOUS,
 			 MAKEUNIQUETAG(psDevInfo->psKernelSGXHostCtlMemInfo));
 #endif
 
@@ -397,8 +386,8 @@ static PVRSRV_ERROR SGXPostPowerState(IMG_HANDLE hDevHandle,
 
 			eError = SGXInitialise(psDevInfo, IMG_FALSE);
 			if (eError != PVRSRV_OK) {
-				PVR_DPF((PVR_DBG_ERROR,
-					 "SGXPostPowerState: SGXInitialise failed"));
+				PVR_DPF(PVR_DBG_ERROR, "SGXPostPowerState: "
+					"SGXInitialise failed");
 				return eError;
 			}
 		}
@@ -407,82 +396,78 @@ static PVRSRV_ERROR SGXPostPowerState(IMG_HANDLE hDevHandle,
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR SGXPrePowerStateExt(IMG_HANDLE hDevHandle,
-				 PVR_POWER_STATE eNewPowerState,
-				 PVR_POWER_STATE eCurrentPowerState)
+static enum PVRSRV_ERROR SGXPrePowerStateExt(void *hDevHandle,
+					enum PVR_POWER_STATE eNewPowerState,
+					enum PVR_POWER_STATE eCurrentPowerState)
 {
-	PVR_DEVICE_POWER_STATE eNewDevicePowerState =
+	enum PVR_DEVICE_POWER_STATE eNewDevicePowerState =
 	    MapDevicePowerState(eNewPowerState);
-	PVR_DEVICE_POWER_STATE eCurrentDevicePowerState =
+	enum PVR_DEVICE_POWER_STATE eCurrentDevicePowerState =
 	    MapDevicePowerState(eCurrentPowerState);
 
 	return SGXPrePowerState(hDevHandle, eNewDevicePowerState,
 				eCurrentDevicePowerState);
 }
 
-PVRSRV_ERROR SGXPostPowerStateExt(IMG_HANDLE hDevHandle,
-				  PVR_POWER_STATE eNewPowerState,
-				  PVR_POWER_STATE eCurrentPowerState)
+static enum PVRSRV_ERROR SGXPostPowerStateExt(void *hDevHandle,
+				  enum PVR_POWER_STATE eNewPowerState,
+				  enum PVR_POWER_STATE eCurrentPowerState)
 {
-	PVRSRV_ERROR eError;
-	PVR_DEVICE_POWER_STATE eNewDevicePowerState =
+	enum PVRSRV_ERROR eError;
+	enum PVR_DEVICE_POWER_STATE eNewDevicePowerState =
 	    MapDevicePowerState(eNewPowerState);
-	PVR_DEVICE_POWER_STATE eCurrentDevicePowerState =
+	enum PVR_DEVICE_POWER_STATE eCurrentDevicePowerState =
 	    MapDevicePowerState(eCurrentPowerState);
 
 	eError =
 	    SGXPostPowerState(hDevHandle, eNewDevicePowerState,
 			      eCurrentDevicePowerState);
-	if (eError != PVRSRV_OK) {
+	if (eError != PVRSRV_OK)
 		return eError;
-	}
 
-	PVR_DPF((PVR_DBG_WARNING,
+	PVR_DPF(PVR_DBG_WARNING,
 		 "SGXPostPowerState : SGX Power Transition from %d to %d OK",
-		 eCurrentPowerState, eNewPowerState));
+		 eCurrentPowerState, eNewPowerState);
 
 	return eError;
 }
 
-static PVRSRV_ERROR SGXPreClockSpeedChange(IMG_HANDLE hDevHandle,
-					   IMG_BOOL bIdleDevice,
-					   PVR_POWER_STATE eCurrentPowerState)
+static enum PVRSRV_ERROR SGXPreClockSpeedChange(void *hDevHandle,
+					IMG_BOOL bIdleDevice,
+					enum PVR_POWER_STATE eCurrentPowerState)
 {
-	PVRSRV_ERROR eError;
-	PVRSRV_DEVICE_NODE *psDeviceNode = hDevHandle;
-	PVRSRV_SGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
+	enum PVRSRV_ERROR eError;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode = hDevHandle;
+	struct PVRSRV_SGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
 
 	PVR_UNREFERENCED_PARAMETER(psDevInfo);
 
-	if (eCurrentPowerState == PVRSRV_POWER_STATE_D0) {
+	if (eCurrentPowerState == PVRSRV_POWER_STATE_D0)
 		if (bIdleDevice) {
-
 			eError =
 			    SGXPrePowerState(hDevHandle,
 					     PVR_DEVICE_POWER_STATE_IDLE,
 					     PVR_DEVICE_POWER_STATE_ON);
 
-			if (eError != PVRSRV_OK) {
+			if (eError != PVRSRV_OK)
 				return eError;
-			}
 		}
-	}
 
-	PVR_DPF((PVR_DBG_MESSAGE,
+	PVR_DPF(PVR_DBG_MESSAGE,
 		 "SGXPreClockSpeedChange: SGX clock speed was %luHz",
-		 psDevInfo->ui32CoreClockSpeed));
+		 psDevInfo->ui32CoreClockSpeed);
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR SGXPostClockSpeedChange(IMG_HANDLE hDevHandle,
-					    IMG_BOOL bIdleDevice,
-					    PVR_POWER_STATE eCurrentPowerState)
+static enum PVRSRV_ERROR SGXPostClockSpeedChange(void *hDevHandle,
+				    IMG_BOOL bIdleDevice,
+				    enum PVR_POWER_STATE eCurrentPowerState)
 {
-	PVRSRV_ERROR eError = PVRSRV_OK;
-	PVRSRV_DEVICE_NODE *psDeviceNode = hDevHandle;
-	PVRSRV_SGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
-	IMG_UINT32 ui32OldClockSpeed = psDevInfo->ui32CoreClockSpeed;
+	enum PVRSRV_ERROR eError = PVRSRV_OK;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode = hDevHandle;
+	struct PVRSRV_SGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
+	u32 ui32OldClockSpeed = psDevInfo->ui32CoreClockSpeed;
 
 	PVR_UNREFERENCED_PARAMETER(ui32OldClockSpeed);
 
@@ -494,33 +479,33 @@ static PVRSRV_ERROR SGXPostClockSpeedChange(IMG_HANDLE hDevHandle,
 					      PVR_DEVICE_POWER_STATE_ON,
 					      PVR_DEVICE_POWER_STATE_IDLE);
 
-			if (eError != PVRSRV_OK) {
+			if (eError != PVRSRV_OK)
 				return eError;
-			}
 		}
 		SGXStartTimer(psDevInfo, IMG_TRUE);
 	}
 
-	PVR_DPF((PVR_DBG_MESSAGE,
-		 "SGXPostClockSpeedChange: SGX clock speed changed from %luHz to %luHz",
-		 ui32OldClockSpeed, psDevInfo->ui32CoreClockSpeed));
+	PVR_DPF(PVR_DBG_MESSAGE, "SGXPostClockSpeedChange: "
+		 "SGX clock speed changed from %luHz to %luHz",
+		 ui32OldClockSpeed, psDevInfo->ui32CoreClockSpeed);
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR SGXRunScript(PVRSRV_SGXDEV_INFO * psDevInfo,
-				 SGX_INIT_COMMAND * psScript,
-				 IMG_UINT32 ui32NumInitCommands)
+static enum PVRSRV_ERROR SGXRunScript(struct PVRSRV_SGXDEV_INFO *psDevInfo,
+				 union SGX_INIT_COMMAND *psScript,
+				 u32 ui32NumInitCommands)
 {
-	IMG_UINT32 ui32PC;
-	SGX_INIT_COMMAND *psComm;
+	u32 ui32PC;
+	union SGX_INIT_COMMAND *psComm;
 
 	for (ui32PC = 0, psComm = psScript;
 	     ui32PC < ui32NumInitCommands; ui32PC++, psComm++) {
 		switch (psComm->eOp) {
 		case SGX_INIT_OP_WRITE_HW_REG:
 			{
-				OSWriteHWReg(psDevInfo->pvRegsBaseKM,
+				OSWriteHWReg((void __iomem *)
+							psDevInfo->pvRegsBaseKM,
 					     psComm->sWriteHWReg.ui32Offset,
 					     psComm->sWriteHWReg.ui32Value);
 				PDUMPREG(psComm->sWriteHWReg.ui32Offset,
@@ -543,9 +528,9 @@ static PVRSRV_ERROR SGXRunScript(PVRSRV_SGXDEV_INFO * psDevInfo,
 
 		default:
 			{
-				PVR_DPF((PVR_DBG_ERROR,
-					 "SGXRunScript: PC %d: Illegal command: %d",
-					 ui32PC, psComm->eOp));
+				PVR_DPF(PVR_DBG_ERROR,
+				     "SGXRunScript: PC %d: Illegal command: %d",
+				      ui32PC, psComm->eOp);
 				return PVRSRV_ERROR_GENERIC;
 			}
 		}
@@ -555,11 +540,11 @@ static PVRSRV_ERROR SGXRunScript(PVRSRV_SGXDEV_INFO * psDevInfo,
 	return PVRSRV_ERROR_GENERIC;;
 }
 
-static PVRSRV_ERROR SGXInitialise(PVRSRV_SGXDEV_INFO * psDevInfo,
+static enum PVRSRV_ERROR SGXInitialise(struct PVRSRV_SGXDEV_INFO *psDevInfo,
 				  IMG_BOOL bHardwareRecovery)
 {
-	PVRSRV_ERROR eError;
-	IMG_UINT32 ui32ReadOffset, ui32WriteOffset;
+	enum PVRSRV_ERROR eError;
+	u32 ui32ReadOffset, ui32WriteOffset;
 
 	OSWriteHWReg(psDevInfo->pvRegsBaseKM, EUR_CR_CLKGATECTL,
 		     psDevInfo->ui32ClkGateCtl);
@@ -572,7 +557,7 @@ static PVRSRV_ERROR SGXInitialise(PVRSRV_SGXDEV_INFO * psDevInfo,
 
 	*psDevInfo->pui32KernelCCBEventKicker = 0;
 #if defined(PDUMP)
-	PDUMPMEM(IMG_NULL, psDevInfo->psKernelCCBEventKickerMemInfo, 0,
+	PDUMPMEM(NULL, psDevInfo->psKernelCCBEventKickerMemInfo, 0,
 		 sizeof(*psDevInfo->pui32KernelCCBEventKicker),
 		 PDUMP_FLAGS_CONTINUOUS,
 		 MAKEUNIQUETAG(psDevInfo->psKernelCCBEventKickerMemInfo));
@@ -582,13 +567,13 @@ static PVRSRV_ERROR SGXInitialise(PVRSRV_SGXDEV_INFO * psDevInfo,
 	psDevInfo->psSGXHostCtl->s3DHWPBDesc.uiAddr = 0;
 #if defined(PDUMP)
 	PDUMPCOMMENT(" CCB Control - Reset HW PBDesc records");
-	PDUMPMEM(IMG_NULL, psDevInfo->psKernelSGXHostCtlMemInfo,
-		 offsetof(PVRSRV_SGX_HOST_CTL, sTAHWPBDesc),
-		 sizeof(IMG_DEV_VIRTADDR), PDUMP_FLAGS_CONTINUOUS,
+	PDUMPMEM(NULL, psDevInfo->psKernelSGXHostCtlMemInfo,
+		 offsetof(struct PVRSRV_SGX_HOST_CTL, sTAHWPBDesc),
+		 sizeof(struct IMG_DEV_VIRTADDR), PDUMP_FLAGS_CONTINUOUS,
 		 MAKEUNIQUETAG(psDevInfo->psKernelSGXHostCtlMemInfo));
-	PDUMPMEM(IMG_NULL, psDevInfo->psKernelSGXHostCtlMemInfo,
-		 offsetof(PVRSRV_SGX_HOST_CTL, s3DHWPBDesc),
-		 sizeof(IMG_DEV_VIRTADDR), PDUMP_FLAGS_CONTINUOUS,
+	PDUMPMEM(NULL, psDevInfo->psKernelSGXHostCtlMemInfo,
+		 offsetof(struct PVRSRV_SGX_HOST_CTL, s3DHWPBDesc),
+		 sizeof(struct IMG_DEV_VIRTADDR), PDUMP_FLAGS_CONTINUOUS,
 		 MAKEUNIQUETAG(psDevInfo->psKernelSGXHostCtlMemInfo));
 #endif
 
@@ -596,24 +581,23 @@ static PVRSRV_ERROR SGXInitialise(PVRSRV_SGXDEV_INFO * psDevInfo,
 	    SGXRunScript(psDevInfo, psDevInfo->sScripts.asInitCommands,
 			 SGX_MAX_INIT_COMMANDS);
 	if (eError != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "SGXInitialise: SGXRunScript failed (%d)", eError));
-		return (PVRSRV_ERROR_GENERIC);
+		PVR_DPF(PVR_DBG_ERROR,
+			 "SGXInitialise: SGXRunScript failed (%d)", eError);
+		return PVRSRV_ERROR_GENERIC;
 	}
 
 	SGXStartTimer(psDevInfo, !bHardwareRecovery);
 
 	if (bHardwareRecovery) {
-		PVRSRV_SGX_HOST_CTL *psSGXHostCtl =
-		    (PVRSRV_SGX_HOST_CTL *) psDevInfo->psSGXHostCtl;
+		struct PVRSRV_SGX_HOST_CTL *psSGXHostCtl =
+		    (struct PVRSRV_SGX_HOST_CTL *)psDevInfo->psSGXHostCtl;
 
-		if (PollForValueKM
-		    ((volatile IMG_UINT32 *)(&psSGXHostCtl->
-					     ui32InterruptClearFlags), 0,
+		if (PollForValueKM((volatile u32 *)
+		     (&psSGXHostCtl->ui32InterruptClearFlags), 0,
 		     PVRSRV_USSE_EDM_INTERRUPT_HWR,
 		     MAX_HW_TIME_US / WAIT_TRY_COUNT, 1000) != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "SGXInitialise: Wait for uKernel HW Recovery failed"));
+			PVR_DPF(PVR_DBG_ERROR, "SGXInitialise: "
+					"Wait for uKernel HW Recovery failed");
 			return PVRSRV_ERROR_RETRY;
 		}
 	}
@@ -631,38 +615,38 @@ static PVRSRV_ERROR SGXInitialise(PVRSRV_SGXDEV_INFO * psDevInfo,
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR SGXDeinitialise(IMG_HANDLE hDevCookie)
+static enum PVRSRV_ERROR SGXDeinitialise(void *hDevCookie)
 {
-	PVRSRV_SGXDEV_INFO *psDevInfo = (PVRSRV_SGXDEV_INFO *) hDevCookie;
-	PVRSRV_ERROR eError;
+	struct PVRSRV_SGXDEV_INFO *psDevInfo = (struct PVRSRV_SGXDEV_INFO *)
+								   hDevCookie;
+	enum PVRSRV_ERROR eError;
 
-	if (psDevInfo->pvRegsBaseKM == IMG_NULL) {
+	if (psDevInfo->pvRegsBaseKM == NULL)
 		return PVRSRV_OK;
-	}
 
-	eError =
-	    SGXRunScript(psDevInfo, psDevInfo->sScripts.asDeinitCommands,
+	eError = SGXRunScript(psDevInfo, psDevInfo->sScripts.asDeinitCommands,
 			 SGX_MAX_DEINIT_COMMANDS);
 	if (eError != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "SGXDeinitialise: SGXRunScript failed (%d)", eError));
-		return (PVRSRV_ERROR_GENERIC);
+		PVR_DPF(PVR_DBG_ERROR,
+			 "SGXDeinitialise: SGXRunScript failed (%d)", eError);
+		return PVRSRV_ERROR_GENERIC;
 	}
 
 	return PVRSRV_OK;
 }
 
-static PVRSRV_ERROR DevInitSGXPart1(IMG_VOID * pvDeviceNode)
+static enum PVRSRV_ERROR DevInitSGXPart1(void *pvDeviceNode)
 {
-	PVRSRV_SGXDEV_INFO *psDevInfo;
-	IMG_HANDLE hKernelDevMemContext;
-	IMG_DEV_PHYADDR sPDDevPAddr;
-	IMG_UINT32 i;
-	PVRSRV_DEVICE_NODE *psDeviceNode = (PVRSRV_DEVICE_NODE *) pvDeviceNode;
-	DEVICE_MEMORY_HEAP_INFO *psDeviceMemoryHeap =
+	struct PVRSRV_SGXDEV_INFO *psDevInfo;
+	void *hKernelDevMemContext;
+	struct IMG_DEV_PHYADDR sPDDevPAddr;
+	u32 i;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode = (struct PVRSRV_DEVICE_NODE *)
+								   pvDeviceNode;
+	struct DEVICE_MEMORY_HEAP_INFO *psDeviceMemoryHeap =
 	    psDeviceNode->sDevMemoryInfo.psDeviceMemoryHeap;
-	IMG_HANDLE hDevInfoOSMemHandle = (IMG_HANDLE) IMG_NULL;
-	PVRSRV_ERROR eError;
+	void *hDevInfoOSMemHandle = (void *) NULL;
+	enum PVRSRV_ERROR eError;
 
 	PDUMPCOMMENT("SGX Initialisation Part 1");
 
@@ -676,30 +660,29 @@ static PVRSRV_ERROR DevInitSGXPart1(IMG_VOID * pvDeviceNode)
 
 	if (OSAllocPages
 	    (PVRSRV_OS_PAGEABLE_HEAP | PVRSRV_HAP_MULTI_PROCESS |
-	     PVRSRV_HAP_CACHED, sizeof(PVRSRV_SGXDEV_INFO),
-	     (IMG_VOID **) & psDevInfo, &hDevInfoOSMemHandle) != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "DevInitSGXPart1 : Failed to alloc memory for DevInfo"));
-		return (PVRSRV_ERROR_OUT_OF_MEMORY);
+	     PVRSRV_HAP_CACHED, sizeof(struct PVRSRV_SGXDEV_INFO),
+	     (void **) &psDevInfo, &hDevInfoOSMemHandle) != PVRSRV_OK) {
+		PVR_DPF(PVR_DBG_ERROR, "DevInitSGXPart1 : "
+			"Failed to alloc memory for DevInfo");
+		return PVRSRV_ERROR_OUT_OF_MEMORY;
 	}
-	OSMemSet(psDevInfo, 0, sizeof(PVRSRV_SGXDEV_INFO));
+	OSMemSet(psDevInfo, 0, sizeof(struct PVRSRV_SGXDEV_INFO));
 
 	psDevInfo->eDeviceType = DEV_DEVICE_TYPE;
 	psDevInfo->eDeviceClass = DEV_DEVICE_CLASS;
 
-	psDeviceNode->pvDevice = (IMG_PVOID) psDevInfo;
+	psDeviceNode->pvDevice = (void *) psDevInfo;
 	psDeviceNode->hDeviceOSMemHandle = hDevInfoOSMemHandle;
 
-	psDevInfo->pvDeviceMemoryHeap = (IMG_VOID *) psDeviceMemoryHeap;
+	psDevInfo->pvDeviceMemoryHeap = (void *) psDeviceMemoryHeap;
 
-	hKernelDevMemContext = BM_CreateContext(psDeviceNode,
-						&sPDDevPAddr,
-						IMG_NULL, IMG_NULL);
+	hKernelDevMemContext = BM_CreateContext(psDeviceNode, &sPDDevPAddr,
+						NULL, NULL);
 
 	psDevInfo->sKernelPDDevPAddr = sPDDevPAddr;
 
 	for (i = 0; i < psDeviceNode->sDevMemoryInfo.ui32HeapCount; i++) {
-		IMG_HANDLE hDevMemHeap;
+		void *hDevMemHeap;
 
 		switch (psDeviceMemoryHeap[i].DevMemHeapType) {
 		case DEVICE_MEMORY_HEAP_KERNEL:
@@ -718,71 +701,68 @@ static PVRSRV_ERROR DevInitSGXPart1(IMG_VOID * pvDeviceNode)
 
 	eError = MMU_BIFResetPDAlloc(psDevInfo);
 	if (eError != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "DevInitSGX : Failed to alloc memory for BIF reset"));
+		PVR_DPF(PVR_DBG_ERROR,
+			 "DevInitSGX : Failed to alloc memory for BIF reset");
 		return PVRSRV_ERROR_GENERIC;
 	}
 
 	return PVRSRV_OK;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR SGXGetInfoForSrvinitKM(IMG_HANDLE hDevHandle,
-					SGX_BRIDGE_INFO_FOR_SRVINIT *
-					psInitInfo)
+enum PVRSRV_ERROR SGXGetInfoForSrvinitKM(void *hDevHandle,
+				struct SGX_BRIDGE_INFO_FOR_SRVINIT *psInitInfo)
 {
-	PVRSRV_DEVICE_NODE *psDeviceNode;
-	PVRSRV_SGXDEV_INFO *psDevInfo;
-	PVRSRV_ERROR eError;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode;
+	struct PVRSRV_SGXDEV_INFO *psDevInfo;
+	enum PVRSRV_ERROR eError;
 
 	PDUMPCOMMENT("SGXGetInfoForSrvinit");
 
-	psDeviceNode = (PVRSRV_DEVICE_NODE *) hDevHandle;
-	psDevInfo = (PVRSRV_SGXDEV_INFO *) psDeviceNode->pvDevice;
+	psDeviceNode = (struct PVRSRV_DEVICE_NODE *)hDevHandle;
+	psDevInfo = (struct PVRSRV_SGXDEV_INFO *)psDeviceNode->pvDevice;
 
 	psInitInfo->sPDDevPAddr = psDevInfo->sKernelPDDevPAddr;
 
 	eError =
 	    PVRSRVGetDeviceMemHeapsKM(hDevHandle, &psInitInfo->asHeapInfo[0]);
 	if (eError != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "SGXGetInfoForSrvinit: PVRSRVGetDeviceMemHeapsKM failed (%d)",
-			 eError));
+		PVR_DPF(PVR_DBG_ERROR, "SGXGetInfoForSrvinit: "
+				"PVRSRVGetDeviceMemHeapsKM failed (%d)",
+			 eError);
 		return PVRSRV_ERROR_GENERIC;
 	}
 
 	return eError;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR DevInitSGXPart2KM(PVRSRV_PER_PROCESS_DATA * psPerProc,
-				   IMG_HANDLE hDevHandle,
-				   SGX_BRIDGE_INIT_INFO * psInitInfo)
+enum PVRSRV_ERROR DevInitSGXPart2KM(struct PVRSRV_PER_PROCESS_DATA *psPerProc,
+				   void *hDevHandle,
+				   struct SGX_BRIDGE_INIT_INFO *psInitInfo)
 {
-	PVRSRV_DEVICE_NODE *psDeviceNode;
-	PVRSRV_SGXDEV_INFO *psDevInfo;
-	PVRSRV_ERROR eError;
-	SGX_DEVICE_MAP *psSGXDeviceMap;
-	PVR_POWER_STATE eDefaultPowerState;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode;
+	struct PVRSRV_SGXDEV_INFO *psDevInfo;
+	enum PVRSRV_ERROR eError;
+	struct SGX_DEVICE_MAP *psSGXDeviceMap;
+	enum PVR_POWER_STATE eDefaultPowerState;
 
 	PDUMPCOMMENT("SGX Initialisation Part 2");
 
-	psDeviceNode = (PVRSRV_DEVICE_NODE *) hDevHandle;
-	psDevInfo = (PVRSRV_SGXDEV_INFO *) psDeviceNode->pvDevice;
+	psDeviceNode = (struct PVRSRV_DEVICE_NODE *)hDevHandle;
+	psDevInfo = (struct PVRSRV_SGXDEV_INFO *)psDeviceNode->pvDevice;
 
 	eError = InitDevInfo(psPerProc, psDeviceNode, psInitInfo);
 	if (eError != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "DevInitSGXPart2KM: Failed to load EDM program"));
+		PVR_DPF(PVR_DBG_ERROR,
+			 "DevInitSGXPart2KM: Failed to load EDM program");
 		goto failed_init_dev_info;
 	}
 
 
 	eError = SysGetDeviceMemoryMap(PVRSRV_DEVICE_TYPE_SGX,
-				       (IMG_VOID **) & psSGXDeviceMap);
+				       (void **) &psSGXDeviceMap);
 	if (eError != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "DevInitSGXPart2KM: Failed to get device memory map!"));
+		PVR_DPF(PVR_DBG_ERROR, "DevInitSGXPart2KM: "
+					"Failed to get device memory map!");
 		return PVRSRV_ERROR_INIT_FAILURE;
 	}
 
@@ -794,10 +774,10 @@ IMG_EXPORT
 		    OSMapPhysToLin(psSGXDeviceMap->sRegsCpuPBase,
 				   psSGXDeviceMap->ui32RegsSize,
 				   PVRSRV_HAP_KERNEL_ONLY | PVRSRV_HAP_UNCACHED,
-				   IMG_NULL);
+				   NULL);
 		if (!psDevInfo->pvRegsBaseKM) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "DevInitSGXPart2KM: Failed to map in regs\n"));
+			PVR_DPF(PVR_DBG_ERROR,
+				 "DevInitSGXPart2KM: Failed to map in regs\n");
 			return PVRSRV_ERROR_BAD_MAPPING;
 		}
 	}
@@ -820,32 +800,39 @@ IMG_EXPORT
 					   SGXPostPowerStateExt,
 					   SGXPreClockSpeedChange,
 					   SGXPostClockSpeedChange,
-					   (IMG_HANDLE) psDeviceNode,
+					   (void *) psDeviceNode,
 					   PVRSRV_POWER_STATE_D3,
 					   eDefaultPowerState);
 	if (eError != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "DevInitSGXPart2KM: failed to register device with power manager"));
+		PVR_DPF(PVR_DBG_ERROR, "DevInitSGXPart2KM: "
+			 "failed to register device with power manager");
 		return eError;
 	}
 
-	OSMemSet(psDevInfo->psKernelCCB, 0, sizeof(PVRSRV_SGX_KERNEL_CCB));
-	OSMemSet(psDevInfo->psKernelCCBCtl, 0, sizeof(PVRSRV_SGX_CCB_CTL));
+	OSMemSet(psDevInfo->psKernelCCB, 0,
+		 sizeof(struct PVRSRV_SGX_KERNEL_CCB));
+	OSMemSet(psDevInfo->psKernelCCBCtl, 0,
+		 sizeof(struct PVRSRV_SGX_CCB_CTL));
 	OSMemSet(psDevInfo->pui32KernelCCBEventKicker, 0,
 		 sizeof(*psDevInfo->pui32KernelCCBEventKicker));
 	PDUMPCOMMENT("Kernel CCB");
-	PDUMPMEM(IMG_NULL, psDevInfo->psKernelCCBMemInfo, 0,
-		 sizeof(PVRSRV_SGX_KERNEL_CCB), PDUMP_FLAGS_CONTINUOUS,
+	PDUMPMEM(NULL, psDevInfo->psKernelCCBMemInfo, 0,
+		 sizeof(struct PVRSRV_SGX_KERNEL_CCB), PDUMP_FLAGS_CONTINUOUS,
 		 MAKEUNIQUETAG(psDevInfo->psKernelCCBMemInfo));
 	PDUMPCOMMENT("Kernel CCB Control");
-	PDUMPMEM(IMG_NULL, psDevInfo->psKernelCCBCtlMemInfo, 0,
-		 sizeof(PVRSRV_SGX_CCB_CTL), PDUMP_FLAGS_CONTINUOUS,
+	PDUMPMEM(NULL, psDevInfo->psKernelCCBCtlMemInfo, 0,
+		 sizeof(struct PVRSRV_SGX_CCB_CTL), PDUMP_FLAGS_CONTINUOUS,
 		 MAKEUNIQUETAG(psDevInfo->psKernelCCBCtlMemInfo));
 	PDUMPCOMMENT("Kernel CCB Event Kicker");
-	PDUMPMEM(IMG_NULL, psDevInfo->psKernelCCBEventKickerMemInfo, 0,
+	PDUMPMEM(NULL, psDevInfo->psKernelCCBEventKickerMemInfo, 0,
 		 sizeof(*psDevInfo->pui32KernelCCBEventKicker),
 		 PDUMP_FLAGS_CONTINUOUS,
 		 MAKEUNIQUETAG(psDevInfo->psKernelCCBEventKickerMemInfo));
+
+	psDevInfo->hTimer = SGXOSTimerInit(psDeviceNode);
+	if (!psDevInfo->hTimer)
+		PVR_DPF(PVR_DBG_ERROR, "DevInitSGXPart2KM : "
+			"Failed to initialize HW recovery timer");
 
 	return PVRSRV_OK;
 
@@ -853,30 +840,26 @@ failed_init_dev_info:
 	return eError;
 }
 
-static PVRSRV_ERROR DevDeInitSGX(IMG_VOID * pvDeviceNode)
+static enum PVRSRV_ERROR DevDeInitSGX(void *pvDeviceNode)
 {
-	PVRSRV_DEVICE_NODE *psDeviceNode = (PVRSRV_DEVICE_NODE *) pvDeviceNode;
-	PVRSRV_SGXDEV_INFO *psDevInfo =
-	    (PVRSRV_SGXDEV_INFO *) psDeviceNode->pvDevice;
-	IMG_HANDLE hDevInfoOSMemHandle = psDeviceNode->hDeviceOSMemHandle;
-	PVRSRV_ERROR eError = PVRSRV_ERROR_INVALID_PARAMS;
-	IMG_UINT32 ui32Heap;
-	DEVICE_MEMORY_HEAP_INFO *psDeviceMemoryHeap;
-	SGX_DEVICE_MAP *psSGXDeviceMap;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode =
+		(struct PVRSRV_DEVICE_NODE *)pvDeviceNode;
+	struct PVRSRV_SGXDEV_INFO *psDevInfo =
+		(struct PVRSRV_SGXDEV_INFO *)psDeviceNode->pvDevice;
+	void *hDevInfoOSMemHandle = psDeviceNode->hDeviceOSMemHandle;
+	enum PVRSRV_ERROR eError = PVRSRV_ERROR_INVALID_PARAMS;
+	u32 ui32Heap;
+	struct DEVICE_MEMORY_HEAP_INFO *psDeviceMemoryHeap;
+	struct SGX_DEVICE_MAP *psSGXDeviceMap;
 
 	if (!psDevInfo) {
-
-		PVR_DPF((PVR_DBG_ERROR, "DevDeInitSGX: Null DevInfo"));
+		PVR_DPF(PVR_DBG_ERROR, "DevDeInitSGX: Null DevInfo");
 		return PVRSRV_OK;
 	}
 	if (psDevInfo->hTimer) {
-		eError = OSRemoveTimer(psDevInfo->hTimer);
-		if (eError != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "DevDeInitSGX: Failed to remove timer"));
-			return eError;
-		}
-		psDevInfo->hTimer = IMG_NULL;
+		SGXOSTimerCancel(psDevInfo->hTimer);
+		SGXOSTimerDeInit(psDevInfo->hTimer);
+		psDevInfo->hTimer = NULL;
 	}
 
 	MMU_BIFResetPDFree(psDevInfo);
@@ -885,7 +868,7 @@ static PVRSRV_ERROR DevDeInitSGX(IMG_VOID * pvDeviceNode)
 
 
 	psDeviceMemoryHeap =
-	    (DEVICE_MEMORY_HEAP_INFO *) psDevInfo->pvDeviceMemoryHeap;
+	    (struct DEVICE_MEMORY_HEAP_INFO *)psDevInfo->pvDeviceMemoryHeap;
 	for (ui32Heap = 0;
 	     ui32Heap < psDeviceNode->sDevMemoryInfo.ui32HeapCount;
 	     ui32Heap++) {
@@ -895,82 +878,74 @@ static PVRSRV_ERROR DevDeInitSGX(IMG_VOID * pvDeviceNode)
 		case DEVICE_MEMORY_HEAP_SHARED_EXPORTED:
 			{
 				if (psDeviceMemoryHeap[ui32Heap].hDevMemHeap !=
-				    IMG_NULL) {
+				    NULL)
 					BM_DestroyHeap(psDeviceMemoryHeap
 						       [ui32Heap].hDevMemHeap);
-				}
 				break;
 			}
 		}
 	}
 
-	eError =
-	    BM_DestroyContext(psDeviceNode->sDevMemoryInfo.pBMKernelContext,
-			      IMG_NULL);
-	if (eError != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "DevDeInitSGX : Failed to destroy kernel context"));
-		return eError;
-	}
+	if (!pvr_put_ctx(psDeviceNode->sDevMemoryInfo.pBMKernelContext))
+		pr_err("%s: kernel context still in use, can't free it",
+				__func__);
 
-	eError =
-	    PVRSRVRemovePowerDevice(((PVRSRV_DEVICE_NODE *) pvDeviceNode)->
-				    sDevId.ui32DeviceIndex);
-	if (eError != PVRSRV_OK) {
+
+	eError = PVRSRVRemovePowerDevice(
+				((struct PVRSRV_DEVICE_NODE *)pvDeviceNode)->
+				  sDevId.ui32DeviceIndex);
+	if (eError != PVRSRV_OK)
 		return eError;
-	}
 
 	eError = SysGetDeviceMemoryMap(PVRSRV_DEVICE_TYPE_SGX,
-				       (IMG_VOID **) & psSGXDeviceMap);
+				       (void **) &psSGXDeviceMap);
 	if (eError != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "DevDeInitSGX: Failed to get device memory map!"));
+		PVR_DPF(PVR_DBG_ERROR,
+			 "DevDeInitSGX: Failed to get device memory map!");
 		return eError;
 	}
 
-	if (!psSGXDeviceMap->pvRegsCpuVBase) {
-
-		if (psDevInfo->pvRegsBaseKM != IMG_NULL) {
+	if (!psSGXDeviceMap->pvRegsCpuVBase)
+		if (psDevInfo->pvRegsBaseKM != NULL)
 			OSUnMapPhysToLin(psDevInfo->pvRegsBaseKM,
 					 psDevInfo->ui32RegSize,
 					 PVRSRV_HAP_KERNEL_ONLY |
-					 PVRSRV_HAP_UNCACHED, IMG_NULL);
-		}
-	}
+					 PVRSRV_HAP_UNCACHED, NULL);
 
 	OSFreePages(PVRSRV_OS_PAGEABLE_HEAP | PVRSRV_HAP_MULTI_PROCESS,
-		    sizeof(PVRSRV_SGXDEV_INFO), psDevInfo, hDevInfoOSMemHandle);
-	psDeviceNode->pvDevice = IMG_NULL;
+		    sizeof(struct PVRSRV_SGXDEV_INFO), psDevInfo,
+		    hDevInfoOSMemHandle);
+	psDeviceNode->pvDevice = NULL;
 
-	if (psDeviceMemoryHeap != IMG_NULL) {
-
+	if (psDeviceMemoryHeap != NULL)
 		OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP,
-			  sizeof(DEVICE_MEMORY_HEAP_INFO) *
+			  sizeof(struct DEVICE_MEMORY_HEAP_INFO) *
 			  psDeviceNode->sDevMemoryInfo.ui32HeapCount,
-			  psDeviceMemoryHeap, 0);
-	}
+			  psDeviceMemoryHeap, NULL);
 
 	return PVRSRV_OK;
 }
 
 static
-IMG_VOID HWRecoveryResetSGX(PVRSRV_DEVICE_NODE * psDeviceNode,
-			    IMG_UINT32 ui32Component, IMG_UINT32 ui32CallerID)
+void HWRecoveryResetSGX(struct PVRSRV_DEVICE_NODE *psDeviceNode,
+			    u32 ui32Component, u32 ui32CallerID)
 {
-	PVRSRV_ERROR eError;
-	PVRSRV_SGXDEV_INFO *psDevInfo =
-	    (PVRSRV_SGXDEV_INFO *) psDeviceNode->pvDevice;
-	PVRSRV_SGX_HOST_CTL *psSGXHostCtl =
-	    (PVRSRV_SGX_HOST_CTL *) psDevInfo->psSGXHostCtl;
+	enum PVRSRV_ERROR eError;
+	struct PVRSRV_SGXDEV_INFO *psDevInfo =
+	    (struct PVRSRV_SGXDEV_INFO *)psDeviceNode->pvDevice;
+	struct PVRSRV_SGX_HOST_CTL *psSGXHostCtl =
+	    (struct PVRSRV_SGX_HOST_CTL *)psDevInfo->psSGXHostCtl;
 
 	PVR_UNREFERENCED_PARAMETER(ui32Component);
 
-	eError = PVRSRVPowerLock(ui32CallerID, IMG_FALSE);
-	if (eError != PVRSRV_OK) {
-
-		PVR_DPF((PVR_DBG_WARNING,
-			 "HWRecoveryResetSGX: Power transition in progress"));
-		return;
+	/* SGXOSTimer already has the lock as it needs to read SGX registers */
+	if (ui32CallerID != TIMER_ID) {
+		eError = PVRSRVPowerLock(ui32CallerID, IMG_FALSE);
+		if (eError != PVRSRV_OK) {
+			PVR_DPF(PVR_DBG_WARNING, "HWRecoveryResetSGX: "
+				"Power transition in progress");
+			return;
+		}
 	}
 
 	psSGXHostCtl->ui32InterruptClearFlags |= PVRSRV_USSE_EDM_INTERRUPT_HWR;
@@ -981,13 +956,11 @@ IMG_VOID HWRecoveryResetSGX(PVRSRV_DEVICE_NODE * psDeviceNode,
 
 	do {
 		eError = SGXInitialise(psDevInfo, IMG_TRUE);
-	}
-	while (eError == PVRSRV_ERROR_RETRY);
-	if (eError != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
+	} while (eError == PVRSRV_ERROR_RETRY);
+	if (eError != PVRSRV_OK)
+		PVR_DPF(PVR_DBG_ERROR,
 			 "HWRecoveryResetSGX: SGXInitialise failed (%d)",
-			 eError));
-	}
+			 eError);
 
 	PDUMPRESUME();
 
@@ -998,35 +971,35 @@ IMG_VOID HWRecoveryResetSGX(PVRSRV_DEVICE_NODE * psDeviceNode,
 	PVRSRVProcessQueues(ui32CallerID, IMG_TRUE);
 }
 
-static struct workdata {
-	PVRSRV_DEVICE_NODE *psDeviceNode;
-	IMG_UINT32 ui32Component;
-	IMG_UINT32 ui32CallerID;
-} gHWRecoveryParams;
-
-static void HWRecoveryWrapper(struct work_struct *work)
+static void SGXOSTimer(struct work_struct *work)
 {
-	HWRecoveryResetSGX(gHWRecoveryParams.psDeviceNode,
-			   gHWRecoveryParams.ui32Component,
-			   gHWRecoveryParams.ui32CallerID);
-}
-
-DECLARE_WORK(gWork, HWRecoveryWrapper);
-
-IMG_VOID SGXOSTimer(IMG_VOID * pvData)
-{
-	PVRSRV_DEVICE_NODE *psDeviceNode = pvData;
-	PVRSRV_SGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
-	static IMG_UINT32 ui32EDMTasks = 0;
-	static IMG_UINT32 ui32LockupCounter = 0;
-	static IMG_UINT32 ui32NumResets = 0;
-	IMG_UINT32 ui32CurrentEDMTasks;
+	struct timer_work_data *data = container_of(work,
+						    struct timer_work_data,
+						    work.work);
+	struct PVRSRV_DEVICE_NODE *psDeviceNode = data->psDeviceNode;
+	struct PVRSRV_SGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
+	static u32 ui32EDMTasks;
+	static u32 ui32LockupCounter;
+	static u32 ui32NumResets;
+	u32 ui32CurrentEDMTasks;
 	IMG_BOOL bLockup = IMG_FALSE;
 	IMG_BOOL bPoweredDown;
+	enum PVRSRV_ERROR eError;
 
 	psDevInfo->ui32TimeStamp++;
 
-	bPoweredDown = (IMG_BOOL) ! SGXIsDevicePowered(psDeviceNode);
+	eError = PVRSRVPowerLock(TIMER_ID, IMG_FALSE);
+	if (eError != PVRSRV_OK) {
+		/*
+		 * If a power transition is in progress then we're not really
+		 * sure what the state of world is going to be after, so we
+		 * just "pause" HW recovery and hopefully next time around we
+		 * get the lock and can decide what to do
+		 */
+		goto rearm;
+	}
+
+	bPoweredDown = (IMG_BOOL) !SGXIsDevicePowered(psDeviceNode);
 
 	if (bPoweredDown) {
 		ui32LockupCounter = 0;
@@ -1035,19 +1008,18 @@ IMG_VOID SGXOSTimer(IMG_VOID * pvData)
 		ui32CurrentEDMTasks =
 		    OSReadHWReg(psDevInfo->pvRegsBaseKM,
 				psDevInfo->ui32EDMTaskReg0);
-		if (psDevInfo->ui32EDMTaskReg1 != 0) {
+		if (psDevInfo->ui32EDMTaskReg1 != 0)
 			ui32CurrentEDMTasks ^=
 			    OSReadHWReg(psDevInfo->pvRegsBaseKM,
 					psDevInfo->ui32EDMTaskReg1);
-		}
 		if ((ui32CurrentEDMTasks == ui32EDMTasks) &&
 		    (psDevInfo->ui32NumResets == ui32NumResets)) {
 			ui32LockupCounter++;
 			if (ui32LockupCounter == 3) {
 				ui32LockupCounter = 0;
-				PVR_DPF((PVR_DBG_ERROR,
-					 "SGXOSTimer() detected SGX lockup (0x%x tasks)",
-					 ui32EDMTasks));
+				PVR_DPF(PVR_DBG_ERROR,
+				"SGXOSTimer() detected SGX lockup (0x%x tasks)",
+				 ui32EDMTasks);
 
 				bLockup = IMG_TRUE;
 			}
@@ -1059,41 +1031,92 @@ IMG_VOID SGXOSTimer(IMG_VOID * pvData)
 	}
 
 	if (bLockup) {
-		PVRSRV_SGX_HOST_CTL *psSGXHostCtl =
-		    (PVRSRV_SGX_HOST_CTL *) psDevInfo->psSGXHostCtl;
+		struct PVRSRV_SGX_HOST_CTL *psSGXHostCtl =
+		    (struct PVRSRV_SGX_HOST_CTL *)psDevInfo->psSGXHostCtl;
 
 		psSGXHostCtl->ui32HostDetectedLockups++;
 
-		/*
-		 * schedule HWRecoveryResetSGX from a work
-		 * in the shared queue
-		 */
-		gHWRecoveryParams.psDeviceNode = psDeviceNode;
-		gHWRecoveryParams.ui32Component = 0;
-		gHWRecoveryParams.ui32CallerID = TIMER_ID;
-		schedule_work(&gWork);
-	}
+		/* Note: This will release the lock when done */
+		HWRecoveryResetSGX(psDeviceNode, 0, TIMER_ID);
+	} else
+		PVRSRVPowerUnlock(TIMER_ID);
+
+ rearm:
+	queue_delayed_work(data->work_queue, &data->work,
+			   msecs_to_jiffies(data->interval));
 }
 
+static struct timer_work_data *
+SGXOSTimerInit(struct PVRSRV_DEVICE_NODE *psDeviceNode)
+{
+	struct timer_work_data *data;
 
-IMG_BOOL SGX_ISRHandler(IMG_VOID * pvData)
+	data = kzalloc(sizeof(struct timer_work_data), GFP_KERNEL);
+	if (!data)
+		return NULL;
+
+	data->work_queue = create_workqueue("SGXOSTimer");
+	if (!data->work_queue) {
+		kfree(data);
+		return NULL;
+	}
+
+	data->interval = 150;
+	data->psDeviceNode = psDeviceNode;
+	INIT_DELAYED_WORK(&data->work, SGXOSTimer);
+
+	return data;
+}
+
+static void SGXOSTimerDeInit(struct timer_work_data *data)
+{
+	destroy_workqueue(data->work_queue);
+	kfree(data);
+}
+
+static enum PVRSRV_ERROR SGXOSTimerEnable(struct timer_work_data *data)
+{
+	if (!data)
+		return PVRSRV_ERROR_GENERIC;
+
+	if (queue_delayed_work(data->work_queue, &data->work,
+			       msecs_to_jiffies(data->interval))) {
+		data->armed = true;
+		return PVRSRV_OK;
+	}
+
+	return PVRSRV_ERROR_GENERIC;
+}
+
+static enum PVRSRV_ERROR SGXOSTimerCancel(struct timer_work_data *data)
+{
+	if (!data)
+		return PVRSRV_ERROR_GENERIC;
+
+	cancel_delayed_work_sync(&data->work);
+	data->armed = false;
+
+	return PVRSRV_OK;
+}
+
+static IMG_BOOL SGX_ISRHandler(void *pvData)
 {
 	IMG_BOOL bInterruptProcessed = IMG_FALSE;
 
 	{
-		IMG_UINT32 ui32EventStatus, ui32EventEnable;
-		IMG_UINT32 ui32EventClear = 0;
-		PVRSRV_DEVICE_NODE *psDeviceNode;
-		PVRSRV_SGXDEV_INFO *psDevInfo;
+		u32 ui32EventStatus, ui32EventEnable;
+		u32 ui32EventClear = 0;
+		struct PVRSRV_DEVICE_NODE *psDeviceNode;
+		struct PVRSRV_SGXDEV_INFO *psDevInfo;
 
-		if (pvData == IMG_NULL) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "SGX_ISRHandler: Invalid params\n"));
+		if (pvData == NULL) {
+			PVR_DPF(PVR_DBG_ERROR,
+				 "SGX_ISRHandler: Invalid params\n");
 			return bInterruptProcessed;
 		}
 
-		psDeviceNode = (PVRSRV_DEVICE_NODE *) pvData;
-		psDevInfo = (PVRSRV_SGXDEV_INFO *) psDeviceNode->pvDevice;
+		psDeviceNode = (struct PVRSRV_DEVICE_NODE *)pvData;
+		psDevInfo = (struct PVRSRV_SGXDEV_INFO *)psDeviceNode->pvDevice;
 
 		ui32EventStatus =
 		    OSReadHWReg(psDevInfo->pvRegsBaseKM, EUR_CR_EVENT_STATUS);
@@ -1105,9 +1128,8 @@ IMG_BOOL SGX_ISRHandler(IMG_VOID * pvData)
 
 		ui32EventStatus &= ui32EventEnable;
 
-		if (ui32EventStatus & EUR_CR_EVENT_STATUS_SW_EVENT_MASK) {
+		if (ui32EventStatus & EUR_CR_EVENT_STATUS_SW_EVENT_MASK)
 			ui32EventClear |= EUR_CR_EVENT_HOST_CLEAR_SW_EVENT_MASK;
-		}
 
 		if (ui32EventClear) {
 			bInterruptProcessed = IMG_TRUE;
@@ -1123,26 +1145,26 @@ IMG_BOOL SGX_ISRHandler(IMG_VOID * pvData)
 	return bInterruptProcessed;
 }
 
-IMG_VOID SGX_MISRHandler(IMG_VOID * pvData)
+static void SGX_MISRHandler(void *pvData)
 {
-	PVRSRV_DEVICE_NODE *psDeviceNode = (PVRSRV_DEVICE_NODE *) pvData;
-	PVRSRV_SGXDEV_INFO *psDevInfo =
-	    (PVRSRV_SGXDEV_INFO *) psDeviceNode->pvDevice;
-	PVRSRV_SGX_HOST_CTL *psSGXHostCtl =
-	    (PVRSRV_SGX_HOST_CTL *) psDevInfo->psSGXHostCtl;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode =
+		(struct PVRSRV_DEVICE_NODE *)pvData;
+	struct PVRSRV_SGXDEV_INFO *psDevInfo =
+	    (struct PVRSRV_SGXDEV_INFO *)psDeviceNode->pvDevice;
+	struct PVRSRV_SGX_HOST_CTL *psSGXHostCtl =
+	    (struct PVRSRV_SGX_HOST_CTL *)psDevInfo->psSGXHostCtl;
 
 	if ((psSGXHostCtl->ui32InterruptFlags & PVRSRV_USSE_EDM_INTERRUPT_HWR)
 	    && !(psSGXHostCtl->
-		 ui32InterruptClearFlags & PVRSRV_USSE_EDM_INTERRUPT_HWR)) {
+		 ui32InterruptClearFlags & PVRSRV_USSE_EDM_INTERRUPT_HWR))
 		HWRecoveryResetSGX(psDeviceNode, 0, ISR_ID);
-	}
 	SGXTestActivePowerEvent(psDeviceNode, ISR_ID);
 }
 
-PVRSRV_ERROR SGXRegisterDevice(PVRSRV_DEVICE_NODE * psDeviceNode)
+enum PVRSRV_ERROR SGXRegisterDevice(struct PVRSRV_DEVICE_NODE *psDeviceNode)
 {
-	DEVICE_MEMORY_INFO *psDevMemoryInfo;
-	DEVICE_MEMORY_HEAP_INFO *psDeviceMemoryHeap;
+	struct DEVICE_MEMORY_INFO *psDevMemoryInfo;
+	struct DEVICE_MEMORY_HEAP_INFO *psDeviceMemoryHeap;
 
 	psDeviceNode->sDevId.eDeviceType = DEV_DEVICE_TYPE;
 	psDeviceNode->sDevId.eDeviceClass = DEV_DEVICE_CLASS;
@@ -1164,35 +1186,29 @@ PVRSRV_ERROR SGXRegisterDevice(PVRSRV_DEVICE_NODE * psDeviceNode)
 	psDeviceNode->pfnMMUGetPhysPageAddr = MMU_GetPhysPageAddr;
 	psDeviceNode->pfnMMUGetPDDevPAddr = MMU_GetPDDevPAddr;
 
-
 	psDeviceNode->pfnDeviceISR = SGX_ISRHandler;
 	psDeviceNode->pfnDeviceMISR = SGX_MISRHandler;
 
 	psDeviceNode->pfnDeviceCommandComplete = SGXCommandComplete;
 
 	psDevMemoryInfo = &psDeviceNode->sDevMemoryInfo;
-
 	psDevMemoryInfo->ui32AddressSpaceSizeLog2 = SGX_ADDRESS_SPACE_SIZE;
-
 	psDevMemoryInfo->ui32Flags = 0;
-
 	psDevMemoryInfo->ui32HeapCount = SGX_MAX_HEAP_ID;
-
 	psDevMemoryInfo->ui32SyncHeapID = SGX_SYNCINFO_HEAP_ID;
-
 	psDevMemoryInfo->ui32MappingHeapID = SGX_GENERAL_MAPPING_HEAP_ID;
 
 	if (OSAllocMem(PVRSRV_OS_PAGEABLE_HEAP,
-		       sizeof(DEVICE_MEMORY_HEAP_INFO) *
+		       sizeof(struct DEVICE_MEMORY_HEAP_INFO) *
 		       psDevMemoryInfo->ui32HeapCount,
-		       (IMG_VOID **) & psDevMemoryInfo->psDeviceMemoryHeap,
-		       0) != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "SGXRegisterDevice : Failed to alloc memory for DEVICE_MEMORY_HEAP_INFO"));
-		return (PVRSRV_ERROR_OUT_OF_MEMORY);
+		       (void **) &psDevMemoryInfo->psDeviceMemoryHeap,
+		       NULL) != PVRSRV_OK) {
+		PVR_DPF(PVR_DBG_ERROR,
+			 "SGXRegisterDevice : alloc failed for heap info");
+		return PVRSRV_ERROR_OUT_OF_MEMORY;
 	}
 	OSMemSet(psDevMemoryInfo->psDeviceMemoryHeap, 0,
-		 sizeof(DEVICE_MEMORY_HEAP_INFO) *
+		 sizeof(struct DEVICE_MEMORY_HEAP_INFO) *
 		 psDevMemoryInfo->ui32HeapCount);
 
 	psDeviceMemoryHeap = psDevMemoryInfo->psDeviceMemoryHeap;
@@ -1409,25 +1425,21 @@ PVRSRV_ERROR SGXRegisterDevice(PVRSRV_DEVICE_NODE * psDeviceNode)
 	psDeviceMemoryHeap[SGX_ALT_MAPPING_HEAP_ID].DevMemHeapType =
 	    DEVICE_MEMORY_HEAP_SHARED_EXPORTED;
 
-
 	return PVRSRV_OK;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR SGXGetClientInfoKM(IMG_HANDLE hDevCookie,
-				    PVR3DIF4_CLIENT_INFO * psClientInfo)
+enum PVRSRV_ERROR SGXGetClientInfoKM(void *hDevCookie,
+				    struct PVR3DIF4_CLIENT_INFO *psClientInfo)
 {
-	PVRSRV_SGXDEV_INFO *psDevInfo =
-	    (PVRSRV_SGXDEV_INFO *) ((PVRSRV_DEVICE_NODE *) hDevCookie)->
-	    pvDevice;
+	struct PVRSRV_SGXDEV_INFO *psDevInfo =
+	    (struct PVRSRV_SGXDEV_INFO *)
+			((struct PVRSRV_DEVICE_NODE *)hDevCookie)->pvDevice;
 
 	psDevInfo->ui32ClientRefCount++;
 #ifdef PDUMP
-	if (psDevInfo->ui32ClientRefCount == 1) {
+	if (psDevInfo->ui32ClientRefCount == 1)
 		psDevInfo->psKernelCCBInfo->ui32CCBDumpWOff = 0;
-	}
 #endif
-
 	psClientInfo->ui32ProcessID = OSGetCurrentProcessIDKM();
 
 	OSMemCopy(&psClientInfo->asDevData, &psDevInfo->asSGXDevData,
@@ -1436,9 +1448,8 @@ IMG_EXPORT
 	return PVRSRV_OK;
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR SGXGetMiscInfoKM(PVRSRV_SGXDEV_INFO * psDevInfo,
-				  SGX_MISC_INFO * psMiscInfo)
+enum PVRSRV_ERROR SGXGetMiscInfoKM(struct PVRSRV_SGXDEV_INFO *psDevInfo,
+				  struct SGX_MISC_INFO *psMiscInfo)
 {
 	switch (psMiscInfo->eRequest) {
 	case SGX_MISC_INFO_REQUEST_CLOCKSPEED:
@@ -1461,28 +1472,28 @@ IMG_EXPORT
 		}
 	case SGX_MISC_INFO_REQUEST_HWPERF_RETRIEVE_CB:
 		{
-			SGX_MISC_INFO_HWPERF_RETRIEVE_CB *psRetrieve =
+			struct SGX_MISC_INFO_HWPERF_RETRIEVE_CB *psRetrieve =
 			    &psMiscInfo->uData.sRetrieveCB;
-			PVRSRV_SGX_HWPERF_CB *psHWPerfCB =
-			    (PVRSRV_SGX_HWPERF_CB *) psDevInfo->
+			struct PVRSRV_SGX_HWPERF_CB *psHWPerfCB =
+			    (struct PVRSRV_SGX_HWPERF_CB *)psDevInfo->
 			    psKernelHWPerfCBMemInfo->pvLinAddrKM;
-			IMG_UINT i = 0;
+			unsigned i = 0;
 
 			for (;
 			     psHWPerfCB->ui32Woff != psHWPerfCB->ui32Roff
 			     && i < psRetrieve->ui32ArraySize; i++) {
-				PVRSRV_SGX_HWPERF_CBDATA *psData =
+				struct PVRSRV_SGX_HWPERF_CBDATA *psData =
 				    &psHWPerfCB->psHWPerfCBData[psHWPerfCB->
 								ui32Roff];
 				OSMemCopy(&psRetrieve->psHWPerfData[i], psData,
-					  sizeof(PVRSRV_SGX_HWPERF_CBDATA));
+				      sizeof(struct PVRSRV_SGX_HWPERF_CBDATA));
 				psRetrieve->psHWPerfData[i].ui32ClockSpeed =
 				    psDevInfo->ui32CoreClockSpeed;
 				psRetrieve->psHWPerfData[i].ui32TimeMax =
 				    psDevInfo->ui32uKernelTimerClock;
 				psHWPerfCB->ui32Roff =
-				    (psHWPerfCB->ui32Roff +
-				     1) & (PVRSRV_SGX_HWPERF_CBSIZE - 1);
+				    (psHWPerfCB->ui32Roff + 1) &
+				    (PVRSRV_SGX_HWPERF_CBSIZE - 1);
 			}
 			psRetrieve->ui32DataCount = i;
 			psRetrieve->ui32Time = OSClockus();
@@ -1496,34 +1507,26 @@ IMG_EXPORT
 	}
 }
 
-IMG_EXPORT
-    PVRSRV_ERROR SGXReadDiffCountersKM(IMG_HANDLE hDevHandle,
-				       IMG_UINT32 ui32Reg,
-				       IMG_UINT32 * pui32Old,
-				       IMG_BOOL bNew,
-				       IMG_UINT32 ui32New,
-				       IMG_UINT32 ui32NewReset,
-				       IMG_UINT32 ui32CountersReg,
-				       IMG_UINT32 * pui32Time,
-				       IMG_BOOL * pbActive,
-				       PVRSRV_SGXDEV_DIFF_INFO * psDiffs)
+enum PVRSRV_ERROR SGXReadDiffCountersKM(void *hDevHandle, u32 ui32Reg,
+				   u32 *pui32Old, IMG_BOOL bNew, u32 ui32New,
+				   u32 ui32NewReset, u32 ui32CountersReg,
+				   u32 *pui32Time, IMG_BOOL *pbActive,
+				   struct PVRSRV_SGXDEV_DIFF_INFO *psDiffs)
 {
-	PVRSRV_ERROR eError;
-	SYS_DATA *psSysData;
-	PVRSRV_POWER_DEV *psPowerDevice;
+	enum PVRSRV_ERROR eError;
+	struct SYS_DATA *psSysData;
+	struct PVRSRV_POWER_DEV *psPowerDevice;
 	IMG_BOOL bPowered = IMG_FALSE;
-	PVRSRV_DEVICE_NODE *psDeviceNode = hDevHandle;
-	PVRSRV_SGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
+	struct PVRSRV_DEVICE_NODE *psDeviceNode = hDevHandle;
+	struct PVRSRV_SGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
 
-	if (bNew) {
+	if (bNew)
 		psDevInfo->ui32HWGroupRequested = ui32New;
-	}
 	psDevInfo->ui32HWReset |= ui32NewReset;
 
 	eError = PVRSRVPowerLock(KERNEL_ID, IMG_FALSE);
-	if (eError != PVRSRV_OK) {
+	if (eError != PVRSRV_OK)
 		return eError;
-	}
 
 	SysAcquireData(&psSysData);
 
@@ -1543,13 +1546,12 @@ IMG_EXPORT
 	*pbActive = bPowered;
 
 	{
-		PVRSRV_SGXDEV_DIFF_INFO sNew, *psPrev = &psDevInfo->sDiffInfo;
-		IMG_UINT32 i;
+		struct PVRSRV_SGXDEV_DIFF_INFO sNew,
+					       *psPrev = &psDevInfo->sDiffInfo;
+		u32 i;
 
 		sNew.ui32Time[0] = OSClockus();
-
 		*pui32Time = sNew.ui32Time[0];
-
 		if (sNew.ui32Time[0] != psPrev->ui32Time[0] && bPowered) {
 
 			*pui32Old =
@@ -1600,10 +1602,8 @@ IMG_EXPORT
 
 			*psPrev = sNew;
 		} else {
-
-			for (i = 0; i < PVRSRV_SGX_DIFF_NUM_COUNTERS; ++i) {
+			for (i = 0; i < PVRSRV_SGX_DIFF_NUM_COUNTERS; ++i)
 				psDiffs->aui32Counters[i] = 0;
-			}
 
 			psDiffs->ui32Marker[0] = 0;
 			psDiffs->ui32Marker[1] = 0;

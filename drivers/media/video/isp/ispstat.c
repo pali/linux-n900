@@ -71,6 +71,7 @@ struct ispstat_buffer *ispstat_buf_next(struct ispstat *stat)
 	spin_lock_irqsave(&stat->lock, flags);
 
 	if (stat->active_buf) {
+		spin_unlock_irqrestore(&stat->lock, flags);
 		dev_dbg(stat->dev, "%s: new buffer requested without queuing "
 				   "active one.\n", stat->tag);
 		return stat->active_buf;

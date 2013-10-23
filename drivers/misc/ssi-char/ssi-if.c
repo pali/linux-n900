@@ -96,7 +96,6 @@ struct if_ssi_channel {
 
 struct if_ssi_iface {
 	struct if_ssi_channel channels[SSI_MAX_CHAR_DEVS];
-	int bootstrap;
 	spinlock_t lock;
 };
 
@@ -168,9 +167,7 @@ int if_ssi_poll(int ch)
 	struct if_ssi_channel *channel;
 	int ret = 0;
 	channel = &ssi_iface.channels[ch];
-	spin_lock_bh(&ssi_iface.lock);
 	ret = ssi_poll(channel->dev);
-	spin_unlock_bh(&ssi_iface.lock);
 	return ret;
 }
 
@@ -569,7 +566,6 @@ int __init if_ssi_init(unsigned int port, unsigned int *channels_map)
 	if (port >= SSI_MAX_PORTS)
 		return -EINVAL;
 
-	ssi_iface.bootstrap = 1;
 	spin_lock_init(&ssi_iface.lock);
 
 	for (i = 0; i < SSI_MAX_PORTS; i++)

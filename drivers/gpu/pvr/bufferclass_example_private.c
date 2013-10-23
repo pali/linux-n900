@@ -1,55 +1,55 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
 #include "bufferclass_example.h"
+#include "bufferclass_example_private.h"
 
-#define MIN(a,b) ((a)<(b)?(a):(b))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-void FillYUV420Image(void *pvDest, int width, int height, int bytestride)
+static void FillYUV420Image(void *pvDest, int width, int height, int bytestride)
 {
-	static int iPhase = 0;
+	static int iPhase;
 	int i, j;
 	unsigned char u, v, y;
 	unsigned char *pui8y = (unsigned char *)pvDest;
 	unsigned short *pui16uv;
 	unsigned int count = 0;
 
-	for (j = 0; j < height; j++) {
+	for (j = 0; j < height; j++)
 		for (i = 0; i < width; i++) {
 			y = (((i + iPhase) >> 6) % (2) == 0) ? 0x7f : 0x00;
 
 			pui8y[count++] = y;
 		}
-	}
 
 	pui16uv =
 	    (unsigned short *)((unsigned char *)pvDest + (width * height));
 	count = 0;
 
-	for (j = 0; j < height; j += 2) {
+	for (j = 0; j < height; j += 2)
 		for (i = 0; i < width; i += 2) {
 			u = (j <
 			     (height / 2)) ? ((i <
@@ -71,20 +71,19 @@ void FillYUV420Image(void *pvDest, int width, int height, int bytestride)
 			pui16uv[count++] = (v << 8) | u;
 
 		}
-	}
 
 	iPhase++;
 }
 
-void FillYUV422Image(void *pvDest, int width, int height, int bytestride)
+static void FillYUV422Image(void *pvDest, int width, int height, int bytestride)
 {
-	static int iPhase = 0;
+	static int iPhase;
 	int x, y;
 	unsigned char u, v, y0, y1;
 	unsigned int *pui32yuv = (unsigned int *)pvDest;
 	unsigned int count = 0;
 
-	for (y = 0; y < height; y++) {
+	for (y = 0; y < height; y++)
 		for (x = 0; x < width; x += 2) {
 			u = (y <
 			     (height / 2)) ? ((x <
@@ -110,19 +109,18 @@ void FillYUV422Image(void *pvDest, int width, int height, int bytestride)
 			    (y1 << 24) | (v << 16) | (y0 << 8) | u;
 
 		}
-	}
 
 	iPhase++;
 }
 
-void FillRGB565Image(void *pvDest, int width, int height, int bytestride)
+static void FillRGB565Image(void *pvDest, int width, int height, int bytestride)
 {
 	int i, Count;
 	unsigned long *pui32Addr = (unsigned long *)pvDest;
 	unsigned short *pui16Addr = (unsigned short *)pvDest;
 	unsigned long Colour32;
 	unsigned short Colour16;
-	static unsigned char Colour8 = 0;
+	static unsigned char Colour8;
 
 	Colour16 =
 	    (Colour8 >> 3) | ((Colour8 >> 2) << 5) | ((Colour8 >> 3) << 11);
@@ -130,9 +128,8 @@ void FillRGB565Image(void *pvDest, int width, int height, int bytestride)
 
 	Count = (height * bytestride) >> 2;
 
-	for (i = 0; i < Count; i++) {
+	for (i = 0; i < Count; i++)
 		pui32Addr[i] = Colour32;
-	}
 
 	Count = height;
 
@@ -150,23 +147,21 @@ void FillRGB565Image(void *pvDest, int width, int height, int bytestride)
 	    (unsigned long *)((unsigned char *)pvDest +
 			      (bytestride * (MIN(height - 1, 0xFF) - Colour8)));
 
-	for (i = 0; i < Count; i++) {
+	for (i = 0; i < Count; i++)
 		pui32Addr[i] = 0x001F001F;
-	}
 
 	Colour8 = (Colour8 + 1) % MIN(height - 1, 0xFF);
 }
 
 int FillBuffer(unsigned int ui32BufferIndex)
 {
-	BC_EXAMPLE_DEVINFO *psDevInfo = GetAnchorPtr();
-	BC_EXAMPLE_BUFFER *psBuffer;
-	BUFFER_INFO *psBufferInfo;
-	PVRSRV_SYNC_DATA *psSyncData;
+	struct BC_EXAMPLE_DEVINFO *psDevInfo = GetAnchorPtr();
+	struct BC_EXAMPLE_BUFFER *psBuffer;
+	struct BUFFER_INFO *psBufferInfo;
+	struct PVRSRV_SYNC_DATA *psSyncData;
 
-	if (psDevInfo == IMG_NULL) {
+	if (psDevInfo == NULL)
 		return -1;
-	}
 
 	psBuffer = &psDevInfo->psSystemBuffer[ui32BufferIndex];
 	psBufferInfo = &psDevInfo->sBufferInfo;
@@ -176,9 +171,8 @@ int FillBuffer(unsigned int ui32BufferIndex)
 	if (psSyncData) {
 
 		if (psSyncData->ui32ReadOpsPending !=
-		    psSyncData->ui32ReadOpsComplete) {
+		    psSyncData->ui32ReadOpsComplete)
 			return -1;
-		}
 
 		psSyncData->ui32WriteOpsPending++;
 	}
@@ -205,20 +199,18 @@ int FillBuffer(unsigned int ui32BufferIndex)
 		}
 	}
 
-	if (psSyncData) {
+	if (psSyncData)
 		psSyncData->ui32WriteOpsComplete++;
-	}
 
 	return 0;
 }
 
 int GetBufferCount(unsigned int *pui32BufferCount)
 {
-	BC_EXAMPLE_DEVINFO *psDevInfo = GetAnchorPtr();
+	struct BC_EXAMPLE_DEVINFO *psDevInfo = GetAnchorPtr();
 
-	if (psDevInfo == IMG_NULL) {
+	if (psDevInfo == NULL)
 		return -1;
-	}
 
 	*pui32BufferCount = psDevInfo->sBufferInfo.ui32BufferCount;
 

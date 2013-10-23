@@ -1,26 +1,26 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
@@ -34,11 +34,11 @@
 
 #define SGX_BIF_DIR_LIST_REG_EDM	EUR_CR_BIF_DIR_LIST_BASE0
 
-static IMG_VOID SGXResetSoftReset(PVRSRV_SGXDEV_INFO * psDevInfo,
-				  IMG_BOOL bResetBIF,
-				  IMG_UINT32 ui32PDUMPFlags, IMG_BOOL bPDump)
+static void SGXResetSoftReset(struct PVRSRV_SGXDEV_INFO *psDevInfo,
+				  IMG_BOOL bResetBIF, u32 ui32PDUMPFlags,
+				  IMG_BOOL bPDump)
 {
-	IMG_UINT32 ui32SoftResetRegVal =
+	u32 ui32SoftResetRegVal =
 #ifdef EUR_CR_SOFT_RESET_TWOD_RESET_MASK
 	    EUR_CR_SOFT_RESET_TWOD_RESET_MASK |
 #endif
@@ -51,20 +51,18 @@ static IMG_VOID SGXResetSoftReset(PVRSRV_SGXDEV_INFO * psDevInfo,
 	PVR_UNREFERENCED_PARAMETER(ui32PDUMPFlags);
 #endif
 
-	if (bResetBIF) {
+	if (bResetBIF)
 		ui32SoftResetRegVal |= EUR_CR_SOFT_RESET_BIF_RESET_MASK;
-	}
 
 	OSWriteHWReg(psDevInfo->pvRegsBaseKM, EUR_CR_SOFT_RESET,
 		     ui32SoftResetRegVal);
-	if (bPDump) {
+	if (bPDump)
 		PDUMPREGWITHFLAGS(EUR_CR_SOFT_RESET, ui32SoftResetRegVal,
 				  ui32PDUMPFlags);
-	}
 }
 
-static IMG_VOID SGXResetSleep(PVRSRV_SGXDEV_INFO * psDevInfo,
-			      IMG_UINT32 ui32PDUMPFlags, IMG_BOOL bPDump)
+static void SGXResetSleep(struct PVRSRV_SGXDEV_INFO *psDevInfo,
+			      u32 ui32PDUMPFlags, IMG_BOOL bPDump)
 {
 #if !defined(PDUMP)
 	PVR_UNREFERENCED_PARAMETER(ui32PDUMPFlags);
@@ -80,50 +78,46 @@ static IMG_VOID SGXResetSleep(PVRSRV_SGXDEV_INFO * psDevInfo,
 
 }
 
-static IMG_VOID SGXResetInvalDC(PVRSRV_SGXDEV_INFO * psDevInfo,
-				IMG_UINT32 ui32PDUMPFlags, IMG_BOOL bPDump)
+static void SGXResetInvalDC(struct PVRSRV_SGXDEV_INFO *psDevInfo,
+				u32 ui32PDUMPFlags, IMG_BOOL bPDump)
 {
-	IMG_UINT32 ui32RegVal;
+	u32 ui32RegVal;
 
 	ui32RegVal = EUR_CR_BIF_CTRL_INVALDC_MASK;
 	OSWriteHWReg(psDevInfo->pvRegsBaseKM, EUR_CR_BIF_CTRL, ui32RegVal);
-	if (bPDump) {
+	if (bPDump)
 		PDUMPREGWITHFLAGS(EUR_CR_BIF_CTRL, ui32RegVal, ui32PDUMPFlags);
-	}
 	SGXResetSleep(psDevInfo, ui32PDUMPFlags, bPDump);
 
 	ui32RegVal = 0;
 	OSWriteHWReg(psDevInfo->pvRegsBaseKM, EUR_CR_BIF_CTRL, ui32RegVal);
-	if (bPDump) {
+	if (bPDump)
 		PDUMPREGWITHFLAGS(EUR_CR_BIF_CTRL, ui32RegVal, ui32PDUMPFlags);
-	}
 	SGXResetSleep(psDevInfo, ui32PDUMPFlags, bPDump);
 
 	{
 
 		if (PollForValueKM
-		    ((IMG_UINT32 *) ((IMG_UINT8 *) psDevInfo->pvRegsBaseKM +
-				     EUR_CR_BIF_MEM_REQ_STAT), 0,
+		    ((u32 *)((u8 __force *)psDevInfo->pvRegsBaseKM +
+				   EUR_CR_BIF_MEM_REQ_STAT), 0,
 		     EUR_CR_BIF_MEM_REQ_STAT_READS_MASK,
 		     MAX_HW_TIME_US / WAIT_TRY_COUNT,
-		     WAIT_TRY_COUNT) != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "Wait for DC invalidate failed."));
-		}
+		     WAIT_TRY_COUNT) != PVRSRV_OK)
+			PVR_DPF(PVR_DBG_ERROR,
+				 "Wait for DC invalidate failed.");
 
-		if (bPDump) {
+		if (bPDump)
 			PDUMPREGPOLWITHFLAGS(EUR_CR_BIF_MEM_REQ_STAT, 0,
 					     EUR_CR_BIF_MEM_REQ_STAT_READS_MASK,
 					     ui32PDUMPFlags);
-		}
 	}
 }
 
-IMG_VOID SGXReset(PVRSRV_SGXDEV_INFO * psDevInfo, IMG_UINT32 ui32PDUMPFlags)
+void SGXReset(struct PVRSRV_SGXDEV_INFO *psDevInfo, u32 ui32PDUMPFlags)
 {
-	IMG_UINT32 ui32RegVal;
+	u32 ui32RegVal;
 
-	const IMG_UINT32 ui32BifFaultMask = EUR_CR_BIF_INT_STAT_FAULT_MASK;
+	const u32 ui32BifFaultMask = EUR_CR_BIF_INT_STAT_FAULT_MASK;
 
 
 #ifndef PDUMP
@@ -181,19 +175,18 @@ IMG_VOID SGXReset(PVRSRV_SGXDEV_INFO * psDevInfo, IMG_UINT32 ui32PDUMPFlags)
 	SGXResetInvalDC(psDevInfo, ui32PDUMPFlags, IMG_FALSE);
 
 	for (;;) {
-		IMG_UINT32 ui32BifIntStat =
+		u32 ui32BifIntStat =
 		    OSReadHWReg(psDevInfo->pvRegsBaseKM, EUR_CR_BIF_INT_STAT);
-		IMG_DEV_VIRTADDR sBifFault;
-		IMG_UINT32 ui32PDIndex, ui32PTIndex;
+		struct IMG_DEV_VIRTADDR sBifFault;
+		u32 ui32PDIndex, ui32PTIndex;
 
-		if ((ui32BifIntStat & ui32BifFaultMask) == 0) {
+		if ((ui32BifIntStat & ui32BifFaultMask) == 0)
 			break;
-		}
 
 		sBifFault.uiAddr =
 		    OSReadHWReg(psDevInfo->pvRegsBaseKM, EUR_CR_BIF_FAULT);
-		PVR_DPF((PVR_DBG_WARNING, "SGXReset: Page fault 0x%x/0x%x",
-			 ui32BifIntStat, sBifFault.uiAddr));
+		PVR_DPF(PVR_DBG_WARNING, "SGXReset: Page fault 0x%x/0x%x",
+			 ui32BifIntStat, sBifFault.uiAddr);
 		ui32PDIndex =
 		    sBifFault.uiAddr >> (SGX_MMU_PAGE_SHIFT + SGX_MMU_PT_SHIFT);
 		ui32PTIndex =
@@ -238,7 +231,7 @@ IMG_VOID SGXReset(PVRSRV_SGXDEV_INFO * psDevInfo, IMG_UINT32 ui32PDUMPFlags)
 
 	SGXResetInvalDC(psDevInfo, ui32PDUMPFlags, IMG_TRUE);
 
-	PVR_DPF((PVR_DBG_WARNING, "Soft Reset of SGX"));
+	PVR_DPF(PVR_DBG_WARNING, "Soft Reset of SGX");
 	SGXResetSleep(psDevInfo, ui32PDUMPFlags, IMG_TRUE);
 
 	ui32RegVal = 0;

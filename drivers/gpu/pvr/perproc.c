@@ -1,26 +1,26 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
@@ -31,107 +31,97 @@
 
 #define	HASH_TAB_INIT_SIZE 32
 
-static HASH_TABLE *psHashTab = IMG_NULL;
+static struct HASH_TABLE *psHashTab;
 
-static PVRSRV_ERROR FreePerProcessData(PVRSRV_PER_PROCESS_DATA * psPerProc)
+static enum PVRSRV_ERROR FreePerProcessData(
+				struct PVRSRV_PER_PROCESS_DATA *psPerProc)
 {
-	PVRSRV_ERROR eError;
-	IMG_UINTPTR_T uiPerProc;
+	enum PVRSRV_ERROR eError;
+	u32 uiPerProc;
 
-	PVR_ASSERT(psPerProc != IMG_NULL);
+	PVR_ASSERT(psPerProc != NULL);
 
-	uiPerProc = HASH_Remove(psHashTab, (IMG_UINTPTR_T) psPerProc->ui32PID);
+	uiPerProc = HASH_Remove(psHashTab, (u32)psPerProc->ui32PID);
 	if (uiPerProc == 0) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "FreePerProcessData: Couldn't find process in per-process data hash table"));
+		PVR_DPF(PVR_DBG_ERROR, "FreePerProcessData: "
+		       "Couldn't find process in per-process data hash table");
 
 		PVR_ASSERT(psPerProc->ui32PID == 0);
 	} else {
-		PVR_ASSERT((PVRSRV_PER_PROCESS_DATA *) uiPerProc == psPerProc);
-		PVR_ASSERT(((PVRSRV_PER_PROCESS_DATA *) uiPerProc)->ui32PID ==
-			   psPerProc->ui32PID);
+		PVR_ASSERT((struct PVRSRV_PER_PROCESS_DATA *)
+				uiPerProc == psPerProc);
+		PVR_ASSERT(((struct PVRSRV_PER_PROCESS_DATA *)uiPerProc)->
+				ui32PID == psPerProc->ui32PID);
 	}
 
-	if (psPerProc->psHandleBase != IMG_NULL) {
+	if (psPerProc->psHandleBase != NULL) {
 		eError = PVRSRVFreeHandleBase(psPerProc->psHandleBase);
 		if (eError != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "FreePerProcessData: Couldn't free handle base for process (%d)",
-				 eError));
+			PVR_DPF(PVR_DBG_ERROR, "FreePerProcessData: "
+				"Couldn't free handle base for process (%d)",
+				 eError);
 			return eError;
 		}
 	}
 
-	if (psPerProc->hPerProcData != IMG_NULL) {
+	if (psPerProc->hPerProcData != NULL) {
 		eError =
 		    PVRSRVReleaseHandle(KERNEL_HANDLE_BASE,
 					psPerProc->hPerProcData,
 					PVRSRV_HANDLE_TYPE_PERPROC_DATA);
 
 		if (eError != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "FreePerProcessData: Couldn't release per-process data handle (%d)",
-				 eError));
+			PVR_DPF(PVR_DBG_ERROR, "FreePerProcessData: "
+				"Couldn't release per-process data handle (%d)",
+				 eError);
 			return eError;
 		}
 	}
 
-	eError = OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP,
-			   sizeof(*psPerProc),
-			   psPerProc, psPerProc->hBlockAlloc);
-	if (eError != PVRSRV_OK) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "FreePerProcessData: Couldn't free per-process data (%d)",
-			 eError));
-		return eError;
-	}
+	OSFreeMem(PVRSRV_OS_NON_PAGEABLE_HEAP, sizeof(*psPerProc),
+			psPerProc, psPerProc->hBlockAlloc);
 
 	return PVRSRV_OK;
 }
 
-PVRSRV_PER_PROCESS_DATA *PVRSRVPerProcessData(IMG_UINT32 ui32PID)
+struct PVRSRV_PER_PROCESS_DATA *PVRSRVPerProcessData(u32 ui32PID)
 {
-	PVRSRV_PER_PROCESS_DATA *psPerProc;
+	struct PVRSRV_PER_PROCESS_DATA *psPerProc;
 
-	PVR_ASSERT(psHashTab != IMG_NULL);
+	PVR_ASSERT(psHashTab != NULL);
 
 	psPerProc =
-	    (PVRSRV_PER_PROCESS_DATA *) HASH_Retrieve(psHashTab,
-						      (IMG_UINTPTR_T) ui32PID);
+	    (struct PVRSRV_PER_PROCESS_DATA *)HASH_Retrieve(psHashTab,
+						      (u32) ui32PID);
 	return psPerProc;
 }
 
-PVRSRV_ERROR PVRSRVPerProcessDataConnect(IMG_UINT32 ui32PID)
+enum PVRSRV_ERROR PVRSRVPerProcessDataConnect(u32 ui32PID)
 {
-	PVRSRV_PER_PROCESS_DATA *psPerProc;
-	IMG_HANDLE hBlockAlloc;
-	PVRSRV_ERROR eError = PVRSRV_OK;
+	struct PVRSRV_PER_PROCESS_DATA *psPerProc;
+	void *hBlockAlloc;
+	enum PVRSRV_ERROR eError = PVRSRV_OK;
 
-	PVR_ASSERT(psHashTab != IMG_NULL);
+	PVR_ASSERT(psHashTab != NULL);
 
-	psPerProc =
-	    (PVRSRV_PER_PROCESS_DATA *) HASH_Retrieve(psHashTab,
-						      (IMG_UINTPTR_T) ui32PID);
-
-	if (psPerProc == IMG_NULL) {
-
+	psPerProc = (struct PVRSRV_PER_PROCESS_DATA *)HASH_Retrieve(psHashTab,
+						      (u32)ui32PID);
+	if (psPerProc == NULL) {
 		eError = OSAllocMem(PVRSRV_OS_NON_PAGEABLE_HEAP,
-				    sizeof(*psPerProc),
-				    (IMG_PVOID *) & psPerProc, &hBlockAlloc);
+				    sizeof(*psPerProc), (void **)&psPerProc,
+				    &hBlockAlloc);
 		if (eError != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "PVRSRVPerProcessDataConnect: Couldn't allocate per-process data (%d)",
-				 eError));
+			PVR_DPF(PVR_DBG_ERROR, "PVRSRVPerProcessDataConnect: "
+				 "Couldn't allocate per-process data (%d)",
+				 eError);
 			return eError;
 		}
 		OSMemSet(psPerProc, 0, sizeof(*psPerProc));
 		psPerProc->hBlockAlloc = hBlockAlloc;
 
-		if (!HASH_Insert
-		    (psHashTab, (IMG_UINTPTR_T) ui32PID,
-		     (IMG_UINTPTR_T) psPerProc)) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "PVRSRVPerProcessDataConnect: Couldn't insert per-process data into hash table"));
+		if (!HASH_Insert(psHashTab, (u32) ui32PID, (u32)psPerProc)) {
+			PVR_DPF(PVR_DBG_ERROR, "PVRSRVPerProcessDataConnect: "
+			   "Couldn't insert per-process data into hash table");
 			eError = PVRSRV_ERROR_GENERIC;
 			goto failure;
 		}
@@ -145,34 +135,34 @@ PVRSRV_ERROR PVRSRVPerProcessDataConnect(IMG_UINT32 ui32PID)
 					   PVRSRV_HANDLE_TYPE_PERPROC_DATA,
 					   PVRSRV_HANDLE_ALLOC_FLAG_NONE);
 		if (eError != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "PVRSRVPerProcessDataConnect: Couldn't allocate handle for per-process data (%d)",
-				 eError));
+			PVR_DPF(PVR_DBG_ERROR, "PVRSRVPerProcessDataConnect: "
+			   "Couldn't allocate handle for per-process data (%d)",
+			   eError);
 			goto failure;
 		}
 
-		eError =
-		    PVRSRVAllocHandleBase(&psPerProc->psHandleBase, ui32PID);
+		eError = PVRSRVAllocHandleBase(&psPerProc->psHandleBase,
+						ui32PID);
 		if (eError != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "PVRSRVPerProcessDataConnect: Couldn't allocate handle base for process (%d)",
-				 eError));
+			PVR_DPF(PVR_DBG_ERROR, "PVRSRVPerProcessDataConnect: "
+			       "Couldn't allocate handle base for process (%d)",
+			       eError);
 			goto failure;
 		}
 
-		eError =
-		    PVRSRVResManConnect(psPerProc, &psPerProc->hResManContext);
+		eError = PVRSRVResManConnect(psPerProc,
+					     &psPerProc->hResManContext);
 		if (eError != PVRSRV_OK) {
-			PVR_DPF((PVR_DBG_ERROR,
-				 "PVRSRVPerProcessDataConnect: Couldn't register with the resource manager"));
+			PVR_DPF(PVR_DBG_ERROR, "PVRSRVPerProcessDataConnect: "
+				"Couldn't register with the resource manager");
 			goto failure;
 		}
 	}
 
 	psPerProc->ui32RefCount++;
-	PVR_DPF((PVR_DBG_MESSAGE,
+	PVR_DPF(PVR_DBG_MESSAGE,
 		 "PVRSRVPerProcessDataConnect: Process 0x%x has ref-count %d",
-		 ui32PID, psPerProc->ui32RefCount));
+		 ui32PID, psPerProc->ui32RefCount);
 
 	return eError;
 
@@ -181,61 +171,58 @@ failure:
 	return eError;
 }
 
-IMG_VOID PVRSRVPerProcessDataDisconnect(IMG_UINT32 ui32PID)
+void PVRSRVPerProcessDataDisconnect(u32 ui32PID)
 {
-	PVRSRV_ERROR eError;
-	PVRSRV_PER_PROCESS_DATA *psPerProc;
+	enum PVRSRV_ERROR eError;
+	struct PVRSRV_PER_PROCESS_DATA *psPerProc;
 
-	PVR_ASSERT(psHashTab != IMG_NULL);
+	PVR_ASSERT(psHashTab != NULL);
 
-	psPerProc =
-	    (PVRSRV_PER_PROCESS_DATA *) HASH_Retrieve(psHashTab,
-						      (IMG_UINTPTR_T) ui32PID);
-	if (psPerProc == IMG_NULL) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "PVRSRVPerProcessDataDealloc: Couldn't locate per-process data for PID %u",
-			 ui32PID));
+	psPerProc = (struct PVRSRV_PER_PROCESS_DATA *)HASH_Retrieve(psHashTab,
+							      (u32)ui32PID);
+	if (psPerProc == NULL) {
+		PVR_DPF(PVR_DBG_ERROR, "PVRSRVPerProcessDataDealloc: "
+			 "Couldn't locate per-process data for PID %u",
+			 ui32PID);
 	} else {
 		psPerProc->ui32RefCount--;
 		if (psPerProc->ui32RefCount == 0) {
-			PVR_DPF((PVR_DBG_MESSAGE,
+			PVR_DPF(PVR_DBG_MESSAGE,
 				 "PVRSRVPerProcessDataDisconnect: "
 				 "Last close from process 0x%x received",
-				 ui32PID));
+				 ui32PID);
 
 			PVRSRVResManDisconnect(psPerProc->hResManContext,
 					       IMG_FALSE);
 
 			eError = FreePerProcessData(psPerProc);
-			if (eError != PVRSRV_OK) {
-				PVR_DPF((PVR_DBG_ERROR,
-					 "PVRSRVPerProcessDataDisconnect: Error freeing per-process data"));
-			}
+			if (eError != PVRSRV_OK)
+				PVR_DPF(PVR_DBG_ERROR,
+					 "PVRSRVPerProcessDataDisconnect: "
+					 "Error freeing per-process data");
 		}
 	}
 }
 
-PVRSRV_ERROR PVRSRVPerProcessDataInit(IMG_VOID)
+enum PVRSRV_ERROR PVRSRVPerProcessDataInit(void)
 {
-	PVR_ASSERT(psHashTab == IMG_NULL);
+	PVR_ASSERT(psHashTab == NULL);
 
 	psHashTab = HASH_Create(HASH_TAB_INIT_SIZE);
-	if (psHashTab == IMG_NULL) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "PVRSRVPerProcessDataInit: Couldn't create per-process data hash table"));
+	if (psHashTab == NULL) {
+		PVR_DPF(PVR_DBG_ERROR, "PVRSRVPerProcessDataInit: "
+				"Couldn't create per-process data hash table");
 		return PVRSRV_ERROR_GENERIC;
 	}
 
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR PVRSRVPerProcessDataDeInit(IMG_VOID)
+enum PVRSRV_ERROR PVRSRVPerProcessDataDeInit(void)
 {
-
-	if (psHashTab != IMG_NULL) {
-
+	if (psHashTab != NULL) {
 		HASH_Delete(psHashTab);
-		psHashTab = IMG_NULL;
+		psHashTab = NULL;
 	}
 
 	return PVRSRV_OK;

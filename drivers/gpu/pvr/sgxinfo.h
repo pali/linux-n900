@@ -1,30 +1,30 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
-#if !defined (__SGXINFO_H__)
+#if !defined(__SGXINFO_H__)
 #define __SGXINFO_H__
 
 #include "sgxscript.h"
@@ -37,78 +37,78 @@
 #define SGX_MAX_DEV_DATA		24
 #define	SGX_MAX_INIT_MEM_HANDLES	16
 
-typedef struct _SGX_BRIDGE_INFO_FOR_SRVINIT {
-	IMG_DEV_PHYADDR sPDDevPAddr;
-	PVRSRV_HEAP_INFO asHeapInfo[PVRSRV_MAX_CLIENT_HEAPS];
-} SGX_BRIDGE_INFO_FOR_SRVINIT;
+struct SGX_BRIDGE_INFO_FOR_SRVINIT {
+	struct IMG_DEV_PHYADDR sPDDevPAddr;
+	struct PVRSRV_HEAP_INFO asHeapInfo[PVRSRV_MAX_CLIENT_HEAPS];
+};
 
-typedef struct _SGX_BRIDGE_INIT_INFO_ {
-	IMG_HANDLE hKernelCCBMemInfo;
-	IMG_HANDLE hKernelCCBCtlMemInfo;
-	IMG_HANDLE hKernelCCBEventKickerMemInfo;
-	IMG_HANDLE hKernelSGXHostCtlMemInfo;
-	IMG_UINT32 ui32TAKickAddress;
-	IMG_UINT32 ui32VideoHandlerAddress;
-	IMG_HANDLE hKernelHWPerfCBMemInfo;
+struct SGX_BRIDGE_INIT_INFO {
+	void *hKernelCCBMemInfo;
+	void *hKernelCCBCtlMemInfo;
+	void *hKernelCCBEventKickerMemInfo;
+	void *hKernelSGXHostCtlMemInfo;
+	u32 ui32TAKickAddress;
+	u32 ui32VideoHandlerAddress;
+	void *hKernelHWPerfCBMemInfo;
 
-	IMG_UINT32 ui32EDMTaskReg0;
-	IMG_UINT32 ui32EDMTaskReg1;
+	u32 ui32EDMTaskReg0;
+	u32 ui32EDMTaskReg1;
 
-	IMG_UINT32 ui32ClkGateCtl;
-	IMG_UINT32 ui32ClkGateCtl2;
-	IMG_UINT32 ui32ClkGateStatusMask;
+	u32 ui32ClkGateCtl;
+	u32 ui32ClkGateCtl2;
+	u32 ui32ClkGateStatusMask;
 
-	IMG_UINT32 ui32CacheControl;
+	u32 ui32CacheControl;
 
-	IMG_UINT32 asInitDevData[SGX_MAX_DEV_DATA];
-	IMG_HANDLE asInitMemHandles[SGX_MAX_INIT_MEM_HANDLES];
+	u32 asInitDevData[SGX_MAX_DEV_DATA];
+	void *asInitMemHandles[SGX_MAX_INIT_MEM_HANDLES];
 
-	SGX_INIT_SCRIPTS sScripts;
+	struct SGX_INIT_SCRIPTS sScripts;
 
-} SGX_BRIDGE_INIT_INFO;
+};
 
-typedef struct _PVRSRV_SGX_COMMAND_ {
-	IMG_UINT32 ui32ServiceAddress;
-	IMG_UINT32 ui32Data[7];
-} PVRSRV_SGX_COMMAND;
+struct PVRSRV_SGX_COMMAND {
+	u32 ui32ServiceAddress;
+	u32 ui32Data[7];
+};
 
-typedef struct _PVRSRV_SGX_KERNEL_CCB_ {
-	PVRSRV_SGX_COMMAND asCommands[256];
-} PVRSRV_SGX_KERNEL_CCB;
+struct PVRSRV_SGX_KERNEL_CCB {
+	struct PVRSRV_SGX_COMMAND asCommands[256];
+};
 
-typedef struct _PVRSRV_SGX_CCB_CTL_ {
-	IMG_UINT32 ui32WriteOffset;
-	IMG_UINT32 ui32ReadOffset;
-} PVRSRV_SGX_CCB_CTL;
+struct PVRSRV_SGX_CCB_CTL {
+	u32 ui32WriteOffset;
+	u32 ui32ReadOffset;
+};
 
 #define SGX_AUXCCBFLAGS_SHARED					0x00000001
 
-typedef enum _PVRSRV_SGX_COMMAND_TYPE_ {
+enum PVRSRV_SGX_COMMAND_TYPE {
 	PVRSRV_SGX_COMMAND_EDM_KICK = 0,
 	PVRSRV_SGX_COMMAND_VIDEO_KICK = 1,
 
 	PVRSRV_SGX_COMMAND_FORCE_I32 = 0xFFFFFFFF,
 
-} PVRSRV_SGX_COMMAND_TYPE;
+};
 
 #define PVRSRV_CCBFLAGS_RASTERCMD			0x1
 #define PVRSRV_CCBFLAGS_TRANSFERCMD			0x2
-#define PVRSRV_CCBFLAGS_PROCESS_QUEUESCMD	0x3
+#define PVRSRV_CCBFLAGS_PROCESS_QUEUESCMD		0x3
 
-#define	SGX_BIF_INVALIDATE_PTCACHE	0x1
-#define	SGX_BIF_INVALIDATE_PDCACHE	0x2
+#define	SGX_BIF_INVALIDATE_PTCACHE			0x1
+#define	SGX_BIF_INVALIDATE_PDCACHE			0x2
 
-typedef struct _PVR3DIF4_CCB_KICK_ {
-	PVRSRV_SGX_COMMAND_TYPE eCommand;
-	PVRSRV_SGX_COMMAND sCommand;
-	IMG_HANDLE hCCBKernelMemInfo;
-	IMG_HANDLE hRenderSurfSyncInfo;
+struct PVR3DIF4_CCB_KICK {
+	enum PVRSRV_SGX_COMMAND_TYPE eCommand;
+	struct PVRSRV_SGX_COMMAND sCommand;
+	void *hCCBKernelMemInfo;
+	void *hRenderSurfSyncInfo;
 
-	IMG_UINT32 ui32NumTAStatusVals;
-	IMG_HANDLE ahTAStatusSyncInfo[SGX_MAX_TA_STATUS_VALS];
+	u32 ui32NumTAStatusVals;
+	void *ahTAStatusSyncInfo[SGX_MAX_TA_STATUS_VALS];
 
-	IMG_UINT32 ui32Num3DStatusVals;
-	IMG_HANDLE ah3DStatusSyncInfo[SGX_MAX_3D_STATUS_VALS];
+	u32 ui32Num3DStatusVals;
+	void *ah3DStatusSyncInfo[SGX_MAX_3D_STATUS_VALS];
 
 	IMG_BOOL bFirstKickOrResume;
 #ifdef PDUMP
@@ -116,194 +116,193 @@ typedef struct _PVR3DIF4_CCB_KICK_ {
 #endif
 	IMG_BOOL bKickRender;
 
-	IMG_UINT32 ui32CCBOffset;
+	u32 ui32CCBOffset;
 
-	IMG_UINT32 ui32NumSrcSyncs;
-	IMG_HANDLE ahSrcKernelSyncInfo[SGX_MAX_SRC_SYNCS];
+	u32 ui32NumSrcSyncs;
+	void *ahSrcKernelSyncInfo[SGX_MAX_SRC_SYNCS];
 
 	IMG_BOOL bTADependency;
-	IMG_HANDLE hTA3DSyncInfo;
+	void *hTA3DSyncInfo;
 
-	IMG_HANDLE hTASyncInfo;
-	IMG_HANDLE h3DSyncInfo;
+	void *hTASyncInfo;
+	void *h3DSyncInfo;
 #if defined(PDUMP)
-	IMG_UINT32 ui32CCBDumpWOff;
+	u32 ui32CCBDumpWOff;
 #endif
-} PVR3DIF4_CCB_KICK;
+};
 
 #define SGX_VIDEO_USE_CODE_BASE_INDEX		14
 #define SGX_KERNEL_USE_CODE_BASE_INDEX		15
 
-typedef struct _PVRSRV_SGX_HOST_CTL_ {
+struct PVRSRV_SGX_HOST_CTL {
 
-	volatile IMG_UINT32 ui32PowManFlags;
-	IMG_UINT32 ui32uKernelDetectedLockups;
-	IMG_UINT32 ui32HostDetectedLockups;
-	IMG_UINT32 ui32HWRecoverySampleRate;
-	IMG_UINT32 ui32ActivePowManSampleRate;
-	IMG_UINT32 ui32InterruptFlags;
-	IMG_UINT32 ui32InterruptClearFlags;
+	volatile u32 ui32PowManFlags;
+	u32 ui32uKernelDetectedLockups;
+	u32 ui32HostDetectedLockups;
+	u32 ui32HWRecoverySampleRate;
+	u32 ui32ActivePowManSampleRate;
+	u32 ui32InterruptFlags;
+	u32 ui32InterruptClearFlags;
 
-	IMG_UINT32 ui32ResManFlags;
-	IMG_DEV_VIRTADDR sResManCleanupData;
+	u32 ui32ResManFlags;
+	struct IMG_DEV_VIRTADDR sResManCleanupData;
 
-	IMG_DEV_VIRTADDR sTAHWPBDesc;
-	IMG_DEV_VIRTADDR s3DHWPBDesc;
-	IMG_DEV_VIRTADDR sHostHWPBDesc;
+	struct IMG_DEV_VIRTADDR sTAHWPBDesc;
+	struct IMG_DEV_VIRTADDR s3DHWPBDesc;
+	struct IMG_DEV_VIRTADDR sHostHWPBDesc;
 
-	IMG_UINT32 ui32NumActivePowerEvents;
+	u32 ui32NumActivePowerEvents;
 
-	IMG_UINT32 ui32HWPerfFlags;
+	u32 ui32HWPerfFlags;
 
-	IMG_UINT32 ui32TimeWraps;
-} PVRSRV_SGX_HOST_CTL;
+	u32 ui32TimeWraps;
+};
 
-typedef struct _PVR3DIF4_CLIENT_INFO_ {
-	IMG_UINT32 ui32ProcessID;
-	IMG_VOID *pvProcess;
-	PVRSRV_MISC_INFO sMiscInfo;
+struct PVR3DIF4_CLIENT_INFO {
+	u32 ui32ProcessID;
+	void *pvProcess;
+	struct PVRSRV_MISC_INFO sMiscInfo;
 
-	IMG_UINT32 asDevData[SGX_MAX_DEV_DATA];
+	u32 asDevData[SGX_MAX_DEV_DATA];
 
-} PVR3DIF4_CLIENT_INFO;
+};
 
-typedef struct _PVR3DIF4_INTERNAL_DEVINFO_ {
-	IMG_UINT32 ui32Flags;
-	IMG_HANDLE hCtlKernelMemInfoHandle;
+struct PVR3DIF4_INTERNAL_DEVINFO {
+	u32 ui32Flags;
+	void *hCtlKernelMemInfoHandle;
 	IMG_BOOL bForcePTOff;
-} PVR3DIF4_INTERNAL_DEVINFO;
+};
 
-typedef struct _PVRSRV_SGX_SHARED_CCB_ {
-	PVRSRV_CLIENT_MEM_INFO *psCCBClientMemInfo;
-	PVRSRV_CLIENT_MEM_INFO *psCCBCtlClientMemInfo;
-	IMG_UINT32 *pui32CCBLinAddr;
-	IMG_DEV_VIRTADDR sCCBDevAddr;
-	IMG_UINT32 *pui32WriteOffset;
-	volatile IMG_UINT32 *pui32ReadOffset;
-	IMG_UINT32 ui32Size;
-	IMG_UINT32 ui32AllocGran;
-
-#ifdef PDUMP
-	IMG_UINT32 ui32CCBDumpWOff;
-#endif
-} PVRSRV_SGX_SHARED_CCB;
-
-typedef struct _PVRSRV_SGX_CCB_ {
-	PVRSRV_KERNEL_MEM_INFO *psCCBMemInfo;
-	PVRSRV_KERNEL_MEM_INFO *psCCBCtlMemInfo;
-	IMG_PUINT32 pui32CCBLinAddr;
-	IMG_DEV_VIRTADDR sCCBDevAddr;
-	IMG_UINT32 *pui32WriteOffset;
-	volatile IMG_UINT32 *pui32ReadOffset;
-	IMG_UINT32 ui32Size;
-	IMG_UINT32 ui32AllocGran;
+struct PVRSRV_SGX_SHARED_CCB {
+	struct PVRSRV_CLIENT_MEM_INFO *psCCBClientMemInfo;
+	struct PVRSRV_CLIENT_MEM_INFO *psCCBCtlClientMemInfo;
+	u32 *pui32CCBLinAddr;
+	struct IMG_DEV_VIRTADDR sCCBDevAddr;
+	u32 *pui32WriteOffset;
+	volatile u32 *pui32ReadOffset;
+	u32 ui32Size;
+	u32 ui32AllocGran;
 
 #ifdef PDUMP
-	IMG_UINT32 ui32CCBDumpWOff;
+	u32 ui32CCBDumpWOff;
 #endif
-} PVRSRV_SGX_CCB;
+};
 
-typedef struct _CTL_STATUS_ {
-	IMG_DEV_VIRTADDR sStatusDevAddr;
-	IMG_UINT32 ui32StatusValue;
-} CTL_STATUS, *PCTL_STATUS;
+struct PVRSRV_SGX_CCB {
+	struct PVRSRV_KERNEL_MEM_INFO *psCCBMemInfo;
+	struct PVRSRV_KERNEL_MEM_INFO *psCCBCtlMemInfo;
+	u32 *pui32CCBLinAddr;
+	struct IMG_DEV_VIRTADDR sCCBDevAddr;
+	u32 *pui32WriteOffset;
+	volatile u32 *pui32ReadOffset;
+	u32 ui32Size;
+	u32 ui32AllocGran;
 
-#define SGXTQ_MAX_STATUS						SGX_MAX_TRANSFER_STATUS_VALS + 2
-typedef struct _PVR3DIF4_CMDTA_SHARED_ {
-	IMG_UINT32 ui32NumTAStatusVals;
-	IMG_UINT32 ui32Num3DStatusVals;
+#ifdef PDUMP
+	u32 ui32CCBDumpWOff;
+#endif
+};
 
-	IMG_UINT32 ui32WriteOpsPendingVal;
-	IMG_DEV_VIRTADDR sWriteOpsCompleteDevVAddr;
-	IMG_UINT32 ui32ReadOpsPendingVal;
-	IMG_DEV_VIRTADDR sReadOpsCompleteDevVAddr;
+struct CTL_STATUS {
+	struct IMG_DEV_VIRTADDR sStatusDevAddr;
+	u32 ui32StatusValue;
+};
 
-	IMG_UINT32 ui32TQSyncWriteOpsPendingVal;
-	IMG_DEV_VIRTADDR sTQSyncWriteOpsCompleteDevVAddr;
-	IMG_UINT32 ui32TQSyncReadOpsPendingVal;
-	IMG_DEV_VIRTADDR sTQSyncReadOpsCompleteDevVAddr;
+#define SGXTQ_MAX_STATUS		(SGX_MAX_TRANSFER_STATUS_VALS + 2)
+struct PVR3DIF4_CMDTA_SHARED {
+	u32 ui32NumTAStatusVals;
+	u32 ui32Num3DStatusVals;
 
-	IMG_UINT32 ui323DTQSyncWriteOpsPendingVal;
-	IMG_DEV_VIRTADDR s3DTQSyncWriteOpsCompleteDevVAddr;
-	IMG_UINT32 ui323DTQSyncReadOpsPendingVal;
-	IMG_DEV_VIRTADDR s3DTQSyncReadOpsCompleteDevVAddr;
+	u32 ui32WriteOpsPendingVal;
+	struct IMG_DEV_VIRTADDR sWriteOpsCompleteDevVAddr;
+	u32 ui32ReadOpsPendingVal;
+	struct IMG_DEV_VIRTADDR sReadOpsCompleteDevVAddr;
 
-	IMG_UINT32 ui32NumSrcSyncs;
-	PVRSRV_DEVICE_SYNC_OBJECT asSrcSyncs[SGX_MAX_SRC_SYNCS];
+	u32 ui32TQSyncWriteOpsPendingVal;
+	struct IMG_DEV_VIRTADDR sTQSyncWriteOpsCompleteDevVAddr;
+	u32 ui32TQSyncReadOpsPendingVal;
+	struct IMG_DEV_VIRTADDR sTQSyncReadOpsCompleteDevVAddr;
 
-	CTL_STATUS sCtlTAStatusInfo[SGX_MAX_TA_STATUS_VALS];
-	CTL_STATUS sCtl3DStatusInfo[SGX_MAX_3D_STATUS_VALS];
+	u32 ui323DTQSyncWriteOpsPendingVal;
+	struct IMG_DEV_VIRTADDR s3DTQSyncWriteOpsCompleteDevVAddr;
+	u32 ui323DTQSyncReadOpsPendingVal;
+	struct IMG_DEV_VIRTADDR s3DTQSyncReadOpsCompleteDevVAddr;
 
-	PVRSRV_DEVICE_SYNC_OBJECT sTA3DDependancy;
+	u32 ui32NumSrcSyncs;
+	struct PVRSRV_DEVICE_SYNC_OBJECT asSrcSyncs[SGX_MAX_SRC_SYNCS];
 
-} PVR3DIF4_CMDTA_SHARED;
+	struct CTL_STATUS sCtlTAStatusInfo[SGX_MAX_TA_STATUS_VALS];
+	struct CTL_STATUS sCtl3DStatusInfo[SGX_MAX_3D_STATUS_VALS];
 
-typedef struct _PVR3DIF4_TRANSFERCMD_SHARED_ {
+	struct PVRSRV_DEVICE_SYNC_OBJECT sTA3DDependancy;
 
-	IMG_UINT32 ui32SrcReadOpPendingVal;
-	IMG_DEV_VIRTADDR sSrcReadOpsCompleteDevAddr;
+};
 
-	IMG_UINT32 ui32SrcWriteOpPendingVal;
-	IMG_DEV_VIRTADDR sSrcWriteOpsCompleteDevAddr;
+struct PVR3DIF4_TRANSFERCMD_SHARED {
 
-	IMG_UINT32 ui32DstReadOpPendingVal;
-	IMG_DEV_VIRTADDR sDstReadOpsCompleteDevAddr;
+	u32 ui32SrcReadOpPendingVal;
+	struct IMG_DEV_VIRTADDR sSrcReadOpsCompleteDevAddr;
 
-	IMG_UINT32 ui32DstWriteOpPendingVal;
-	IMG_DEV_VIRTADDR sDstWriteOpsCompleteDevAddr;
+	u32 ui32SrcWriteOpPendingVal;
+	struct IMG_DEV_VIRTADDR sSrcWriteOpsCompleteDevAddr;
 
-	IMG_UINT32 ui32TASyncWriteOpsPendingVal;
-	IMG_DEV_VIRTADDR sTASyncWriteOpsCompleteDevVAddr;
-	IMG_UINT32 ui32TASyncReadOpsPendingVal;
-	IMG_DEV_VIRTADDR sTASyncReadOpsCompleteDevVAddr;
+	u32 ui32DstReadOpPendingVal;
+	struct IMG_DEV_VIRTADDR sDstReadOpsCompleteDevAddr;
 
-	IMG_UINT32 ui323DSyncWriteOpsPendingVal;
-	IMG_DEV_VIRTADDR s3DSyncWriteOpsCompleteDevVAddr;
-	IMG_UINT32 ui323DSyncReadOpsPendingVal;
-	IMG_DEV_VIRTADDR s3DSyncReadOpsCompleteDevVAddr;
+	u32 ui32DstWriteOpPendingVal;
+	struct IMG_DEV_VIRTADDR sDstWriteOpsCompleteDevAddr;
 
-	IMG_UINT32 ui32NumStatusVals;
-	CTL_STATUS sCtlStatusInfo[SGXTQ_MAX_STATUS];
+	u32 ui32TASyncWriteOpsPendingVal;
+	struct IMG_DEV_VIRTADDR sTASyncWriteOpsCompleteDevVAddr;
+	u32 ui32TASyncReadOpsPendingVal;
+	struct IMG_DEV_VIRTADDR sTASyncReadOpsCompleteDevVAddr;
 
-	IMG_UINT32 ui32NumSrcSync;
-	IMG_UINT32 ui32NumDstSync;
+	u32 ui323DSyncWriteOpsPendingVal;
+	struct IMG_DEV_VIRTADDR s3DSyncWriteOpsCompleteDevVAddr;
+	u32 ui323DSyncReadOpsPendingVal;
+	struct IMG_DEV_VIRTADDR s3DSyncReadOpsCompleteDevVAddr;
 
-	IMG_DEV_VIRTADDR sSrcWriteOpsDevVAddr[SGX_MAX_TRANSFER_SYNC_OPS];
-	IMG_DEV_VIRTADDR sSrcReadOpsDevVAddr[SGX_MAX_TRANSFER_SYNC_OPS];
+	u32 ui32NumStatusVals;
+	struct CTL_STATUS sCtlStatusInfo[SGXTQ_MAX_STATUS];
 
-	IMG_DEV_VIRTADDR sDstWriteOpsDevVAddr[SGX_MAX_TRANSFER_SYNC_OPS];
-	IMG_DEV_VIRTADDR sDstReadOpsDevVAddr[SGX_MAX_TRANSFER_SYNC_OPS];
-} PVR3DIF4_TRANSFERCMD_SHARED, *PPVR3DIF4_TRANSFERCMD_SHARED;
+	u32 ui32NumSrcSync;
+	u32 ui32NumDstSync;
 
-typedef struct _PVRSRV_TRANSFER_SGX_KICK_ {
-	IMG_HANDLE hCCBMemInfo;
-	IMG_UINT32 ui32SharedCmdCCBOffset;
+	struct IMG_DEV_VIRTADDR sSrcWriteOpsDevVAddr[SGX_MAX_TRANSFER_SYNC_OPS];
+	struct IMG_DEV_VIRTADDR sSrcReadOpsDevVAddr[SGX_MAX_TRANSFER_SYNC_OPS];
 
-	IMG_DEV_VIRTADDR sHWTransferContextDevVAddr;
+	struct IMG_DEV_VIRTADDR sDstWriteOpsDevVAddr[SGX_MAX_TRANSFER_SYNC_OPS];
+	struct IMG_DEV_VIRTADDR sDstReadOpsDevVAddr[SGX_MAX_TRANSFER_SYNC_OPS];
+};
 
-	IMG_HANDLE hTASyncInfo;
-	IMG_HANDLE h3DSyncInfo;
+struct PVRSRV_TRANSFER_SGX_KICK {
+	void *hCCBMemInfo;
+	u32 ui32SharedCmdCCBOffset;
 
-	IMG_UINT32 ui32NumSrcSync;
-	IMG_HANDLE ahSrcSyncInfo[SGX_MAX_TRANSFER_SYNC_OPS];
+	struct IMG_DEV_VIRTADDR sHWTransferContextDevVAddr;
 
-	IMG_UINT32 ui32NumDstSync;
-	IMG_HANDLE ahDstSyncInfo[SGX_MAX_TRANSFER_SYNC_OPS];
+	void *hTASyncInfo;
+	void *h3DSyncInfo;
 
-	IMG_UINT32 ui32StatusFirstSync;
+	u32 ui32NumSrcSync;
+	void *ahSrcSyncInfo[SGX_MAX_TRANSFER_SYNC_OPS];
+
+	u32 ui32NumDstSync;
+	void *ahDstSyncInfo[SGX_MAX_TRANSFER_SYNC_OPS];
+
+	u32 ui32StatusFirstSync;
 
 #if defined(PDUMP)
-	IMG_UINT32 ui32CCBDumpWOff;
+	u32 ui32CCBDumpWOff;
 #endif
-} PVRSRV_TRANSFER_SGX_KICK, *PPVRSRV_TRANSFER_SGX_KICK;
-
+};
 
 #define PVRSRV_SGX_DIFF_NUM_COUNTERS	9
 
-typedef struct _PVRSRV_SGXDEV_DIFF_INFO_ {
-	IMG_UINT32 aui32Counters[PVRSRV_SGX_DIFF_NUM_COUNTERS];
-	IMG_UINT32 ui32Time[2];
-	IMG_UINT32 ui32Marker[2];
-} PVRSRV_SGXDEV_DIFF_INFO, *PPVRSRV_SGXDEV_DIFF_INFO;
+struct PVRSRV_SGXDEV_DIFF_INFO {
+	u32 aui32Counters[PVRSRV_SGX_DIFF_NUM_COUNTERS];
+	u32 ui32Time[2];
+	u32 ui32Marker[2];
+};
 
 #endif

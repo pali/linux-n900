@@ -1,26 +1,26 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
@@ -28,8 +28,8 @@
 #include <linux/config.h>
 #endif
 
-#include <asm/io.h>
-#include <asm/uaccess.h>
+#include <linux/io.h>
+#include <linux/uaccess.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/tty.h>
@@ -40,24 +40,24 @@
 
 #if defined(DEBUG) || defined(TIMING)
 
-IMG_UINT32 gPVRDebugLevel = DBGPRIV_WARNING;
+u32 gPVRDebugLevel = DBGPRIV_WARNING;
 
 #define PVR_STRING_TERMINATOR		'\0'
-#define PVR_IS_FILE_SEPARATOR(character) ( ((character) == '\\') || ((character) == '/') )
+#define PVR_IS_FILE_SEPARATOR(character) \
+	(((character) == '\\') || ((character) == '/'))
 
-void PVRSRVDebugPrintf(IMG_UINT32 ui32DebugLevel,
-		       const IMG_CHAR * pszFileName,
-		       IMG_UINT32 ui32Line, const IMG_CHAR * pszFormat, ...
+void PVRSRVDebugPrintf(u32 ui32DebugLevel,
+		       const char *pszFileName,
+		       u32 ui32Line, const char *pszFormat, ...
     )
 {
 	IMG_BOOL bTrace, bDebug;
-	IMG_CHAR *pszLeafName;
+	char *pszLeafName;
 
 	pszLeafName = (char *)strrchr(pszFileName, '\\');
 
-	if (pszLeafName) {
+	if (pszLeafName)
 		pszFileName = pszLeafName;
-	}
 
 	bTrace = gPVRDebugLevel & ui32DebugLevel & DBGPRIV_CALLTRACE;
 	bDebug = ((gPVRDebugLevel & DBGPRIV_ALLLEVELS) >= ui32DebugLevel);
@@ -108,10 +108,9 @@ void PVRSRVDebugPrintf(IMG_UINT32 ui32DebugLevel,
 
 		vsprintf(&szBuffer[strlen(szBuffer)], pszFormat, vaArgs);
 
-		if (!bTrace) {
+		if (!bTrace)
 			sprintf(&szBuffer[strlen(szBuffer)], " [%d, %s]",
 				(int)ui32Line, pszFileName);
-		}
 
 		printk(KERN_INFO "%s\n", szBuffer);
 
@@ -119,17 +118,17 @@ void PVRSRVDebugPrintf(IMG_UINT32 ui32DebugLevel,
 	}
 }
 
-void PVRSRVDebugAssertFail(const IMG_CHAR * pszFile, IMG_UINT32 uLine)
+void PVRSRVDebugAssertFail(const char *pszFile, u32 uLine)
 {
 	PVRSRVDebugPrintf(DBGPRIV_FATAL, pszFile, uLine,
 			  "Debug assertion failed!");
 	BUG();
 }
 
-void PVRSRVTrace(const IMG_CHAR * pszFormat, ...)
+void PVRSRVTrace(const char *pszFormat, ...)
 {
-	static IMG_CHAR szMessage[PVR_MAX_DEBUG_MESSAGE_LEN + 1];
-	IMG_CHAR *pszEndOfMessage = IMG_NULL;
+	static char szMessage[PVR_MAX_DEBUG_MESSAGE_LEN + 1];
+	char *pszEndOfMessage = NULL;
 	va_list ArgList;
 
 	strncpy(szMessage, "PVR: ", PVR_MAX_DEBUG_MESSAGE_LEN);
@@ -145,7 +144,7 @@ void PVRSRVTrace(const IMG_CHAR * pszFormat, ...)
 	printk(KERN_INFO "%s", szMessage);
 }
 
-void PVRDebugSetLevel(IMG_UINT32 uDebugLevel)
+void PVRDebugSetLevel(u32 uDebugLevel)
 {
 	printk(KERN_INFO "PVR: Setting Debug Level = 0x%x\n",
 	       (unsigned int)uDebugLevel);
@@ -153,7 +152,7 @@ void PVRDebugSetLevel(IMG_UINT32 uDebugLevel)
 	gPVRDebugLevel = uDebugLevel;
 }
 
-int PVRDebugProcSetLevel(struct file *file, const char *buffer,
+int PVRDebugProcSetLevel(struct file *file, const char __user *buffer,
 			 unsigned long count, void *data)
 {
 #define	_PROC_SET_BUFFER_SZ		2
@@ -168,7 +167,7 @@ int PVRDebugProcSetLevel(struct file *file, const char *buffer,
 			return -EINVAL;
 		PVRDebugSetLevel(data_buffer[0] - '0');
 	}
-	return (count);
+	return count;
 }
 
 int PVRDebugProcGetLevel(char *page, char **start, off_t off, int count,
@@ -176,7 +175,7 @@ int PVRDebugProcGetLevel(char *page, char **start, off_t off, int count,
 {
 	if (off == 0) {
 		*start = (char *)1;
-		return printAppend(page, count, 0, "%lu\n", gPVRDebugLevel);
+		return printAppend(page, count, 0, "%u\n", gPVRDebugLevel);
 	}
 	*eof = 1;
 	return 0;

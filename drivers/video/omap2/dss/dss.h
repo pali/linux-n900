@@ -169,7 +169,7 @@ const char *dss_get_def_disp_name(void);
 int dss_dsi_power_up(void);
 void dss_dsi_power_down(void);
 
-void dss_schedule_reset(void);
+void dss_soft_reset(void);
 
 /* display */
 void dss_init_displays(struct platform_device *pdev);
@@ -266,6 +266,7 @@ void dispc_set_lcd_size(u16 width, u16 height);
 void dispc_set_digit_size(u16 width, u16 height);
 u32 dispc_get_plane_fifo_size(enum omap_plane plane);
 void dispc_setup_plane_fifo(enum omap_plane plane, u32 low, u32 high);
+bool dispc_fifomerge_enabled(void);
 void dispc_enable_fifomerge(bool enable);
 void dispc_set_overlay_optimization(void);
 void dispc_set_burst_size(enum omap_plane plane,
@@ -287,7 +288,9 @@ int dispc_setup_plane(enum omap_plane plane, enum omap_channel channel_out,
 		      u8 rotation, bool mirror,
 		      u8 global_alpha);
 
+enum omap_channel dispc_get_enabled_channel(void);
 void dispc_go(enum omap_channel channel);
+void dispc_wait_for_go(enum omap_channel channel);
 void dispc_enable_lcd_out(bool enable);
 void dispc_enable_digit_out(bool enable);
 void dispc_enable_digit_errors(int enable);

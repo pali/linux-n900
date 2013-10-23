@@ -284,8 +284,10 @@ static int omap2_mcspi_enable_clocks(struct omap2_mcspi *mcspi)
 {
 	if (clk_enable(mcspi->ick))
 		return -ENODEV;
-	if (clk_enable(mcspi->fck))
+	if (clk_enable(mcspi->fck)) {
+		clk_disable(mcspi->ick);
 		return -ENODEV;
+	}
 
 	omap2_mcspi_restore_ctx(mcspi);
 

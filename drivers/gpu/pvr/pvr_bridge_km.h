@@ -1,350 +1,198 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
 #ifndef __PVR_BRIDGE_KM_H_
 #define __PVR_BRIDGE_KM_H_
 
+#include <linux/file.h>
 
+#include "kernelbuffer.h"
 #include "pvr_bridge.h"
 #include "perproc.h"
 
-	PVRSRV_ERROR LinuxBridgeInit(IMG_VOID);
-	IMG_VOID LinuxBridgeDeInit(IMG_VOID);
+enum PVRSRV_ERROR LinuxBridgeInit(void);
+void LinuxBridgeDeInit(void);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVEnumerateDevicesKM(IMG_UINT32 *
-							       pui32NumDevices,
-							       PVRSRV_DEVICE_IDENTIFIER
-							       * psDevIdList);
+enum PVRSRV_ERROR PVRSRVEnumerateDevicesKM(u32 *pui32NumDevices,
+		struct PVRSRV_DEVICE_IDENTIFIER *psDevIdList);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVAcquireDeviceDataKM(IMG_UINT32
-								uiDevIndex,
-								PVRSRV_DEVICE_TYPE
-								eDeviceType,
-								IMG_HANDLE *
-								phDevCookie);
+enum PVRSRV_ERROR PVRSRVAcquireDeviceDataKM(u32 uiDevIndex,
+		enum PVRSRV_DEVICE_TYPE eDeviceType,
+		void **phDevCookie);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVCreateCommandQueueKM(IMG_UINT32
-								 ui32QueueSize,
-								 PVRSRV_QUEUE_INFO
-								 **
-								 ppsQueueInfo);
+enum PVRSRV_ERROR PVRSRVCreateCommandQueueKM(u32 ui32QueueSize,
+		struct PVRSRV_QUEUE_INFO **ppsQueueInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV
-	    PVRSRVDestroyCommandQueueKM(PVRSRV_QUEUE_INFO * psQueueInfo);
+enum PVRSRV_ERROR PVRSRVDestroyCommandQueueKM(
+					struct PVRSRV_QUEUE_INFO *psQueueInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVGetDeviceMemHeapsKM(IMG_HANDLE
-								hDevCookie,
-								PVRSRV_HEAP_INFO
-								* psHeapInfo);
+enum PVRSRV_ERROR PVRSRVGetDeviceMemHeapsKM(void *hDevCookie,
+		struct PVRSRV_HEAP_INFO *psHeapInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVCreateDeviceMemContextKM(IMG_HANDLE
-								     hDevCookie,
-								     PVRSRV_PER_PROCESS_DATA
-								     *
-								     psPerProc,
-								     IMG_HANDLE
-								     *
-								     phDevMemContext,
-								     IMG_UINT32
-								     *
-								     pui32ClientHeapCount,
-								     PVRSRV_HEAP_INFO
-								     *
-								     psHeapInfo,
-								     IMG_BOOL *
-								     pbCreated
-								     ,
-								     IMG_BOOL *
-								     pbShared
-	    );
+enum PVRSRV_ERROR PVRSRVCreateDeviceMemContextKM(void *hDevCookie,
+		struct PVRSRV_PER_PROCESS_DATA *psPerProc,
+		void **phDevMemContext, u32 *pui32ClientHeapCount,
+		struct PVRSRV_HEAP_INFO *psHeapInfo, IMG_BOOL *pbCreated,
+		IMG_BOOL *pbShared);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVDestroyDeviceMemContextKM(IMG_HANDLE
-								      hDevCookie,
-								      IMG_HANDLE
-								      hDevMemContext,
-								      IMG_BOOL *
-								      pbCreated);
+enum PVRSRV_ERROR PVRSRVDestroyDeviceMemContextKM(void *hDevCookie,
+		void *hDevMemContext, IMG_BOOL *pbCreated);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVGetDeviceMemHeapInfoKM(IMG_HANDLE
-								   hDevCookie,
-								   IMG_HANDLE
-								   hDevMemContext,
-								   IMG_UINT32 *
-								   pui32ClientHeapCount,
-								   PVRSRV_HEAP_INFO
-								   * psHeapInfo
-								   ,
-								   IMG_BOOL *
-								   pbShared
-	    );
+enum PVRSRV_ERROR PVRSRVGetDeviceMemHeapInfoKM(void *hDevCookie,
+		void *hDevMemContext, u32 *pui32ClientHeapCount,
+		struct PVRSRV_HEAP_INFO *psHeapInfo, IMG_BOOL *pbShared);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVAllocDeviceMemKM(IMG_HANDLE
-							     hDevCookie,
-							     PVRSRV_PER_PROCESS_DATA
-							     * psPerProc,
-							     IMG_HANDLE
-							     hDevMemHeap,
-							     IMG_UINT32
-							     ui32Flags,
-							     IMG_UINT32
-							     ui32Size,
-							     IMG_UINT32
-							     ui32Alignment,
-							     PVRSRV_KERNEL_MEM_INFO
-							     ** ppsMemInfo);
+enum PVRSRV_ERROR PVRSRVAllocDeviceMemKM(void *hDevCookie,
+		struct PVRSRV_PER_PROCESS_DATA *psPerProc, void *hDevMemHeap,
+		u32 ui32Flags, u32 ui32Size, u32 ui32Alignment,
+		struct PVRSRV_KERNEL_MEM_INFO **ppsMemInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVFreeDeviceMemKM(IMG_HANDLE
-							    hDevCookie,
-							    PVRSRV_KERNEL_MEM_INFO
-							    * psMemInfo);
+enum PVRSRV_ERROR PVRSRVFreeDeviceMemKM(void *hDevCookie,
+		struct PVRSRV_KERNEL_MEM_INFO *psMemInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVDissociateDeviceMemKM(IMG_HANDLE
-								  hDevCookie,
-								  PVRSRV_KERNEL_MEM_INFO
-								  * psMemInfo);
+enum PVRSRV_ERROR PVRSRVDissociateDeviceMemKM(void *hDevCookie,
+		struct PVRSRV_KERNEL_MEM_INFO *psMemInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVReserveDeviceVirtualMemKM(IMG_HANDLE
-								      hDevMemHeap,
-								      IMG_DEV_VIRTADDR
-								      *
-								      psDevVAddr,
-								      IMG_UINT32
-								      ui32Size,
-								      IMG_UINT32
-								      ui32Alignment,
-								      PVRSRV_KERNEL_MEM_INFO
-								      **
-								      ppsMemInfo);
+enum PVRSRV_ERROR PVRSRVReserveDeviceVirtualMemKM(void *hDevMemHeap,
+		struct IMG_DEV_VIRTADDR *psDevVAddr, u32 ui32Size,
+		u32 ui32Alignment, struct PVRSRV_KERNEL_MEM_INFO **ppsMemInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV
-	    PVRSRVFreeDeviceVirtualMemKM(PVRSRV_KERNEL_MEM_INFO * psMemInfo);
+enum PVRSRV_ERROR PVRSRVFreeDeviceVirtualMemKM(
+		struct PVRSRV_KERNEL_MEM_INFO *psMemInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV
-	    PVRSRVMapDeviceMemoryKM(PVRSRV_PER_PROCESS_DATA * psPerProc,
-				    PVRSRV_KERNEL_MEM_INFO * psSrcMemInfo,
-				    IMG_HANDLE hDstDevMemHeap,
-				    PVRSRV_KERNEL_MEM_INFO ** ppsDstMemInfo);
+enum PVRSRV_ERROR PVRSRVMapDeviceMemoryKM(
+		struct PVRSRV_PER_PROCESS_DATA *psPerProc,
+		struct PVRSRV_KERNEL_MEM_INFO *psSrcMemInfo,
+		void *hDstDevMemHeap,
+		struct PVRSRV_KERNEL_MEM_INFO **ppsDstMemInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV
-	    PVRSRVUnmapDeviceMemoryKM(PVRSRV_KERNEL_MEM_INFO * psMemInfo);
+enum PVRSRV_ERROR PVRSRVUnmapDeviceMemoryKM(
+		struct PVRSRV_KERNEL_MEM_INFO *psMemInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVWrapExtMemoryKM(IMG_HANDLE
-							    hDevCookie,
-							    PVRSRV_PER_PROCESS_DATA
-							    * psPerProc,
-							    IMG_UINT32
-							    ui32ByteSize,
-							    IMG_UINT32
-							    ui32PageOffset,
-							    IMG_BOOL
-							    bPhysContig,
-							    IMG_SYS_PHYADDR *
-							    psSysAddr,
-							    IMG_VOID *
-							    pvLinAddr,
-							    PVRSRV_KERNEL_MEM_INFO
-							    ** ppsMemInfo);
+enum PVRSRV_ERROR PVRSRVWrapExtMemoryKM(void *hDevCookie,
+		struct PVRSRV_PER_PROCESS_DATA *psPerProc, u32 ui32ByteSize,
+		u32 ui32PageOffset, IMG_BOOL bPhysContig,
+		struct IMG_SYS_PHYADDR *psSysAddr, void *pvLinAddr,
+		struct PVRSRV_KERNEL_MEM_INFO **ppsMemInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV
-	    PVRSRVIsWrappedExtMemoryKM(IMG_HANDLE hDevCookie,
-						  PVRSRV_PER_PROCESS_DATA *psPerProc,
-						  IMG_UINT32 *pui32ByteSize,
-						  IMG_VOID **pvLinAddr);
+enum PVRSRV_ERROR PVRSRVIsWrappedExtMemoryKM(void *hDevCookie,
+		struct PVRSRV_PER_PROCESS_DATA *psPerProc, u32 *pui32ByteSize,
+		void **pvLinAddr);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV
-	    PVRSRVUnwrapExtMemoryKM(PVRSRV_KERNEL_MEM_INFO * psMemInfo);
+enum PVRSRV_ERROR PVRSRVUnwrapExtMemoryKM(
+		struct PVRSRV_KERNEL_MEM_INFO *psMemInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR PVRSRVEnumerateDCKM(PVRSRV_DEVICE_CLASS DeviceClass,
-					     IMG_UINT32 * pui32DevCount,
-					     IMG_UINT32 * pui32DevID);
+enum PVRSRV_ERROR PVRSRVEnumerateDCKM(enum PVRSRV_DEVICE_CLASS DeviceClass,
+		u32 *pui32DevCount, u32 *pui32DevID);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR PVRSRVOpenDCDeviceKM(PVRSRV_PER_PROCESS_DATA *
-					      psPerProc,
-					      IMG_UINT32 ui32DeviceID,
-					      IMG_HANDLE hDevCookie,
-					      IMG_HANDLE * phDeviceKM);
+enum PVRSRV_ERROR PVRSRVOpenDCDeviceKM(
+		struct PVRSRV_PER_PROCESS_DATA *psPerProc,
+		u32 ui32DeviceID, void *hDevCookie, void **phDeviceKM);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR PVRSRVCloseDCDeviceKM(IMG_HANDLE hDeviceKM,
-					       IMG_BOOL bResManCallback);
+enum PVRSRV_ERROR PVRSRVCloseDCDeviceKM(void *hDeviceKM,
+		IMG_BOOL bResManCallback);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR PVRSRVEnumDCFormatsKM(IMG_HANDLE hDeviceKM,
-					       IMG_UINT32 * pui32Count,
-					       DISPLAY_FORMAT * psFormat);
+enum PVRSRV_ERROR PVRSRVEnumDCFormatsKM(void *hDeviceKM, u32 *pui32Count,
+		struct DISPLAY_FORMAT *psFormat);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR PVRSRVEnumDCDimsKM(IMG_HANDLE hDeviceKM,
-					    DISPLAY_FORMAT * psFormat,
-					    IMG_UINT32 * pui32Count,
-					    DISPLAY_DIMS * psDim);
+enum PVRSRV_ERROR PVRSRVEnumDCDimsKM(void *hDeviceKM,
+		struct DISPLAY_FORMAT *psFormat, u32 *pui32Count,
+		struct DISPLAY_DIMS *psDim);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR PVRSRVGetDCSystemBufferKM(IMG_HANDLE hDeviceKM,
-						   IMG_HANDLE * phBuffer);
+enum PVRSRV_ERROR PVRSRVGetDCSystemBufferKM(void *hDeviceKM, void **phBuffer);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR PVRSRVGetDCInfoKM(IMG_HANDLE hDeviceKM,
-					   DISPLAY_INFO * psDisplayInfo);
-	 IMG_IMPORT
-	    PVRSRV_ERROR PVRSRVCreateDCSwapChainKM(PVRSRV_PER_PROCESS_DATA *
-						   psPerProc,
-						   IMG_HANDLE hDeviceKM,
-						   IMG_UINT32 ui32Flags,
-						   DISPLAY_SURF_ATTRIBUTES *
-						   psDstSurfAttrib,
-						   DISPLAY_SURF_ATTRIBUTES *
-						   psSrcSurfAttrib,
-						   IMG_UINT32 ui32BufferCount,
-						   IMG_UINT32 ui32OEMFlags,
-						   IMG_HANDLE * phSwapChain,
-						   IMG_UINT32 *
-						   pui32SwapChainID);
-	 IMG_IMPORT PVRSRV_ERROR PVRSRVDestroyDCSwapChainKM(IMG_HANDLE
-							    hSwapChain);
-	 IMG_IMPORT PVRSRV_ERROR PVRSRVSetDCDstRectKM(IMG_HANDLE hDeviceKM,
-						      IMG_HANDLE hSwapChain,
-						      IMG_RECT * psRect);
-	 IMG_IMPORT PVRSRV_ERROR PVRSRVSetDCSrcRectKM(IMG_HANDLE hDeviceKM,
-						      IMG_HANDLE hSwapChain,
-						      IMG_RECT * psRect);
-	 IMG_IMPORT PVRSRV_ERROR PVRSRVSetDCDstColourKeyKM(IMG_HANDLE hDeviceKM,
-							   IMG_HANDLE
-							   hSwapChain,
-							   IMG_UINT32
-							   ui32CKColour);
-	 IMG_IMPORT PVRSRV_ERROR PVRSRVSetDCSrcColourKeyKM(IMG_HANDLE hDeviceKM,
-							   IMG_HANDLE
-							   hSwapChain,
-							   IMG_UINT32
-							   ui32CKColour);
-	 IMG_IMPORT PVRSRV_ERROR PVRSRVGetDCBuffersKM(IMG_HANDLE hDeviceKM,
-						      IMG_HANDLE hSwapChain,
-						      IMG_UINT32 *
-						      pui32BufferCount,
-						      IMG_HANDLE * phBuffer);
-	 IMG_IMPORT PVRSRV_ERROR PVRSRVSwapToDCBufferKM(IMG_HANDLE hDeviceKM,
-							IMG_HANDLE hBuffer,
-							IMG_UINT32
-							ui32SwapInterval,
-							IMG_HANDLE hPrivateTag,
-							IMG_UINT32
-							ui32ClipRectCount,
-							IMG_RECT * psClipRect);
-	 IMG_IMPORT PVRSRV_ERROR PVRSRVSwapToDCSystemKM(IMG_HANDLE hDeviceKM,
-							IMG_HANDLE hSwapChain);
+enum PVRSRV_ERROR PVRSRVGetDCInfoKM(void *hDeviceKM,
+		struct DISPLAY_INFO *psDisplayInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR PVRSRVOpenBCDeviceKM(PVRSRV_PER_PROCESS_DATA *
-					      psPerProc,
-					      IMG_UINT32 ui32DeviceID,
-					      IMG_HANDLE hDevCookie,
-					      IMG_HANDLE * phDeviceKM);
-	 IMG_IMPORT PVRSRV_ERROR PVRSRVCloseBCDeviceKM(IMG_HANDLE hDeviceKM,
-						       IMG_BOOL
-						       bResManCallback);
+enum PVRSRV_ERROR PVRSRVCreateDCSwapChainKM(
+		struct PVRSRV_PER_PROCESS_DATA *psPerProc, void *hDeviceKM,
+		u32 ui32Flags, struct DISPLAY_SURF_ATTRIBUTES *psDstSurfAttrib,
+		struct DISPLAY_SURF_ATTRIBUTES *psSrcSurfAttrib,
+		u32 ui32BufferCount, u32 ui32OEMFlags, void **phSwapChain,
+		u32 *pui32SwapChainID);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR PVRSRVGetBCInfoKM(IMG_HANDLE hDeviceKM,
-					   BUFFER_INFO * psBufferInfo);
-	 IMG_IMPORT
-	    PVRSRV_ERROR PVRSRVGetBCBufferKM(IMG_HANDLE hDeviceKM,
-					     IMG_UINT32 ui32BufferIndex,
-					     IMG_HANDLE * phBuffer);
+enum PVRSRV_ERROR PVRSRVDestroyDCSwapChainKM(void *hSwapChain);
+enum PVRSRV_ERROR PVRSRVSetDCDstRectKM(void *hDeviceKM, void *hSwapChain,
+		struct IMG_RECT *psRect);
+enum PVRSRV_ERROR PVRSRVSetDCSrcRectKM(void *hDeviceKM, void *hSwapChain,
+		struct IMG_RECT *psRect);
+enum PVRSRV_ERROR PVRSRVSetDCDstColourKeyKM(void *hDeviceKM, void *hSwapChain,
+		u32 ui32CKColour);
+enum PVRSRV_ERROR PVRSRVSetDCSrcColourKeyKM(void *hDeviceKM, void *hSwapChain,
+		u32 ui32CKColour);
+enum PVRSRV_ERROR PVRSRVGetDCBuffersKM(void *hDeviceKM, void *hSwapChain,
+		u32 *pui32BufferCount, void **phBuffer);
+enum PVRSRV_ERROR PVRSRVSwapToDCBufferKM(void *hDeviceKM, void *hBuffer,
+		u32 ui32SwapInterval, void *hPrivateTag,
+		u32 ui32ClipRectCount, struct IMG_RECT *psClipRect);
+enum PVRSRV_ERROR PVRSRVSwapToDCSystemKM(void *hDeviceKM, void *hSwapChain);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV
-	    PVRSRVMapDeviceClassMemoryKM(PVRSRV_PER_PROCESS_DATA * psPerProc,
-					 IMG_HANDLE hDeviceClassBuffer,
-					 PVRSRV_KERNEL_MEM_INFO ** ppsMemInfo,
-					 IMG_HANDLE * phOSMapInfo);
+enum PVRSRV_ERROR PVRSRVOpenBCDeviceKM(
+		struct PVRSRV_PER_PROCESS_DATA *psPerProc,
+		u32 ui32DeviceID, void *hDevCookie, void **phDeviceKM);
+enum PVRSRV_ERROR PVRSRVCloseBCDeviceKM(void *hDeviceKM,
+		IMG_BOOL bResManCallback);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV
-	    PVRSRVUnmapDeviceClassMemoryKM(PVRSRV_KERNEL_MEM_INFO * psMemInfo);
+enum PVRSRV_ERROR PVRSRVGetBCInfoKM(void *hDeviceKM,
+		struct BUFFER_INFO *psBufferInfo);
+enum PVRSRV_ERROR PVRSRVGetBCBufferKM(void *hDeviceKM, u32 ui32BufferIndex,
+		void **phBuffer);
+extern IMG_BOOL PVRGetBufferClassJTable(
+		struct PVRSRV_BC_BUFFER2SRV_KMJTABLE *psJTable);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVGetFreeDeviceMemKM(IMG_UINT32
-							       ui32Flags,
-							       IMG_UINT32 *
-							       pui32Total,
-							       IMG_UINT32 *
-							       pui32Free,
-							       IMG_UINT32 *
-							       pui32LargestBlock);
-	 IMG_IMPORT PVRSRV_ERROR IMG_CALLCONV PVRSRVAllocSyncInfoKM(IMG_HANDLE
-								    hDevCookie,
-								    IMG_HANDLE
-								    hDevMemContext,
-								    PVRSRV_KERNEL_SYNC_INFO
-								    **
-								    ppsKernelSyncInfo);
-	 IMG_IMPORT PVRSRV_ERROR IMG_CALLCONV
-	    PVRSRVFreeSyncInfoKM(PVRSRV_KERNEL_SYNC_INFO * psKernelSyncInfo);
+enum PVRSRV_ERROR PVRSRVMapDeviceClassMemoryKM(
+		struct PVRSRV_PER_PROCESS_DATA *psPerProc,
+		void *hDeviceClassBuffer,
+		struct PVRSRV_KERNEL_MEM_INFO **ppsMemInfo, void **phOSMapInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVGetMiscInfoKM(PVRSRV_MISC_INFO *
-							  psMiscInfo);
+enum PVRSRV_ERROR PVRSRVUnmapDeviceClassMemoryKM(
+		struct PVRSRV_KERNEL_MEM_INFO *psMemInfo);
 
-	PVRSRV_ERROR PVRSRVGetFBStatsKM(IMG_UINT32 * pui32Total,
-					IMG_UINT32 * pui32Available);
+enum PVRSRV_ERROR PVRSRVGetFreeDeviceMemKM(u32 ui32Flags, u32 *pui32Total,
+		u32 *pui32Free, u32 *pui32LargestBlock);
+enum PVRSRV_ERROR PVRSRVAllocSyncInfoKM(void *hDevCookie, void *hDevMemContext,
+		struct PVRSRV_KERNEL_SYNC_INFO **ppsKernelSyncInfo);
+enum PVRSRV_ERROR PVRSRVFreeSyncInfoKM(
+		struct PVRSRV_KERNEL_SYNC_INFO *psKernelSyncInfo);
 
-	IMG_IMPORT PVRSRV_ERROR
-	    PVRSRVAllocSharedSysMemoryKM(PVRSRV_PER_PROCESS_DATA * psPerProc,
-					 IMG_UINT32 ui32Flags,
-					 IMG_UINT32 ui32Size,
-					 PVRSRV_KERNEL_MEM_INFO **
-					 ppsKernelMemInfo);
+enum PVRSRV_ERROR PVRSRVGetMiscInfoKM(struct PVRSRV_MISC_INFO *psMiscInfo);
 
-	IMG_IMPORT PVRSRV_ERROR
-	    PVRSRVFreeSharedSysMemoryKM(PVRSRV_KERNEL_MEM_INFO *
-					psKernelMemInfo);
+enum PVRSRV_ERROR PVRSRVGetFBStatsKM(u32 *pui32Total, u32 *pui32Available);
 
-	IMG_IMPORT PVRSRV_ERROR
-	    PVRSRVDissociateMemFromResmanKM(PVRSRV_KERNEL_MEM_INFO *
-					    psKernelMemInfo);
+enum PVRSRV_ERROR PVRSRVAllocSharedSysMemoryKM(
+		struct PVRSRV_PER_PROCESS_DATA *psPerProc, u32 ui32Flags,
+		u32 ui32Size, struct PVRSRV_KERNEL_MEM_INFO **ppsKernelMemInfo);
+
+enum PVRSRV_ERROR PVRSRVFreeSharedSysMemoryKM(
+		struct PVRSRV_KERNEL_MEM_INFO *psKernelMemInfo);
+
+enum PVRSRV_ERROR PVRSRVDissociateMemFromResmanKM(
+		struct PVRSRV_KERNEL_MEM_INFO *psKernelMemInfo);
+
+long PVRSRV_BridgeDispatchKM(struct file *file, unsigned int cmd,
+			     unsigned long arg);
 
 #endif

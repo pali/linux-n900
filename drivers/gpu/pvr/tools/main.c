@@ -1,26 +1,26 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
@@ -33,7 +33,7 @@
 #include <linux/list.h>
 #include <linux/init.h>
 #include <linux/vmalloc.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "img_types.h"
 #include "linuxsrv.h"
@@ -49,11 +49,10 @@ MODULE_AUTHOR("Imagination Technologies Ltd. <gpl-support@imgtec.com>");
 MODULE_LICENSE("GPL");
 MODULE_SUPPORTED_DEVICE(DRVNAME);
 
-static int AssignedMajorNumber = 0;
+static int AssignedMajorNumber;
 
-extern DBGKM_SERVICE_TABLE g_sDBGKMServices;
-
-int dbgdrv_ioctl(struct inode *, struct file *, unsigned int, unsigned long);
+static int dbgdrv_ioctl(struct inode *, struct file *, unsigned int,
+			unsigned long);
 
 static int dbgdrv_open(struct inode unref__ * pInode,
 		       struct file unref__ * pFile)
@@ -72,12 +71,12 @@ static int dbgdrv_mmap(struct file *pFile, struct vm_area_struct *ps_vma)
 	return 0;
 }
 
-static struct file_operations dbgdrv_fops = {
-owner:	THIS_MODULE,
-ioctl:	dbgdrv_ioctl,
-open:	dbgdrv_open,
-release:dbgdrv_release,
-mmap:	dbgdrv_mmap,
+const static struct file_operations dbgdrv_fops = {
+	.owner		= THIS_MODULE,
+	.ioctl		= dbgdrv_ioctl,
+	.open		= dbgdrv_open,
+	.release	= dbgdrv_release,
+	.mmap		= dbgdrv_mmap,
 };
 
 void DBGDrvGetServiceTable(void **fn_table)
@@ -85,6 +84,7 @@ void DBGDrvGetServiceTable(void **fn_table)
 	*fn_table = &g_sDBGKMServices;
 
 }
+EXPORT_SYMBOL(DBGDrvGetServiceTable);
 
 int init_module(void)
 {
@@ -92,7 +92,7 @@ int init_module(void)
 	    register_chrdev(AssignedMajorNumber, DRVNAME, &dbgdrv_fops);
 
 	if (AssignedMajorNumber <= 0) {
-		PVR_DPF((PVR_DBG_ERROR, " unable to get major\n"));
+		PVR_DPF(PVR_DBG_ERROR, " unable to get major\n");
 		return -EBUSY;
 	}
 
@@ -105,52 +105,50 @@ void cleanup_module(void)
 	return;
 }
 
-int dbgdrv_ioctl(struct inode *inode, struct file *file,
+static int dbgdrv_ioctl(struct inode *inode, struct file *file,
 		 unsigned int cmd, unsigned long arg)
 {
-	IOCTL_PACKAGE *pIP = (IOCTL_PACKAGE *) arg;
+	struct IOCTL_PACKAGE *pIP = (struct IOCTL_PACKAGE *)arg;
 
 	char *buffer, *in, *out;
 
 	if ((pIP->ui32InBufferSize > (PAGE_SIZE >> 1))
 	    || (pIP->ui32OutBufferSize > (PAGE_SIZE >> 1))) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "Sizes of the buffers are too large, cannot do ioctl\n"));
+		PVR_DPF(PVR_DBG_ERROR,
+			 "Sizes of the buffers are too large, "
+			 "cannot do ioctl\n");
 		return -1;
 	}
 
 	buffer = (char *)HostPageablePageAlloc(1);
 	if (!buffer) {
-		PVR_DPF((PVR_DBG_ERROR,
-			 "Failed to allocate buffer, cannot do ioctl\n"));
+		PVR_DPF(PVR_DBG_ERROR,
+			 "Failed to allocate buffer, cannot do ioctl\n");
 		return -EFAULT;
 	}
 
 	in = buffer;
 	out = buffer + (PAGE_SIZE >> 1);
 
-	if (copy_from_user(in, pIP->pInBuffer, pIP->ui32InBufferSize) != 0) {
+	if (copy_from_user(in, pIP->pInBuffer, pIP->ui32InBufferSize) != 0)
 		goto init_failed;
-	}
 
 	cmd = ((pIP->ui32Cmd >> 2) & 0xFFF) - 0x801;
 
 	if (pIP->ui32Cmd == DEBUG_SERVICE_READ) {
-		IMG_CHAR *ui8Tmp;
-		IMG_UINT32 *pui32BytesCopied = (IMG_UINT32 *) out;
-		DBG_IN_READ *psReadInParams = (DBG_IN_READ *) in;
+		char *ui8Tmp;
+		u32 *pui32BytesCopied = (u32 *) out;
+		struct DBG_IN_READ *psReadInParams = (struct DBG_IN_READ *)in;
 
 		ui8Tmp = vmalloc(psReadInParams->ui32OutBufferSize);
-		if (!ui8Tmp) {
+		if (!ui8Tmp)
 			goto init_failed;
-		}
-		*pui32BytesCopied =
-		    ExtDBGDrivRead((DBG_STREAM *) psReadInParams->pvStream,
+		*pui32BytesCopied = ExtDBGDrivRead((struct DBG_STREAM *)
+				   psReadInParams->pvStream,
 				   psReadInParams->bReadInitBuffer,
 				   psReadInParams->ui32OutBufferSize, ui8Tmp);
-		if (copy_to_user
-		    (psReadInParams->pui8OutBuffer, ui8Tmp,
-		     *pui32BytesCopied) != 0) {
+		if (copy_to_user(psReadInParams->pui8OutBuffer, ui8Tmp,
+				 *pui32BytesCopied) != 0) {
 			vfree(ui8Tmp);
 			goto init_failed;
 		}
@@ -159,15 +157,14 @@ int dbgdrv_ioctl(struct inode *inode, struct file *file,
 		(g_DBGDrivProc[cmd]) (in, out);
 	}
 
-	if (copy_to_user(pIP->pOutBuffer, out, pIP->ui32OutBufferSize) != 0) {
+	if (copy_to_user(pIP->pOutBuffer, out, pIP->ui32OutBufferSize) != 0)
 		goto init_failed;
-	}
 
-	HostPageablePageFree((IMG_VOID *) buffer);
+	HostPageablePageFree((void *) buffer);
 	return 0;
 
 init_failed:
-	HostPageablePageFree((IMG_VOID *) buffer);
+	HostPageablePageFree((void *) buffer);
 	return -EFAULT;
 }
 
@@ -181,4 +178,3 @@ void DefineHotKey(unsigned ScanCode, unsigned ShiftState, void *pInfo)
 
 }
 
-EXPORT_SYMBOL(DBGDrvGetServiceTable);

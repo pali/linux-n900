@@ -5,7 +5,7 @@ omaplfb-objs		:= omaplfb_displayclass.o omaplfb_linux.o
 pvrsrvkm-objs		:= osfunc.o mmap.o module.o pdump.o proc.o	   \
 			   pvr_bridge_k.o pvr_debug.o mm.o mutex.o event.o \
 			   buffer_manager.o devicemem.o deviceclass.o	   \
-			   handle.o hash.o metrics.o pvrsrv.o queue.o ra.o \
+			   handle.o hash.o pvrsrv.o queue.o ra.o	   \
 			   resman.o power.o mem.o bridged_pvr_bridge.o	   \
 			   sgxinit.o sgxreset.o sgxutils.o sgxkick.o	   \
 			   sgxtransfer.o mmu.o pb.o perproc.o sysconfig.o  \

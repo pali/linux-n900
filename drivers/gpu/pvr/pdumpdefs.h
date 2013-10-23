@@ -1,33 +1,33 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
-#if !defined (__PDUMPDEFS_H__)
+#if !defined(__PDUMPDEFS_H__)
 #define __PDUMPDEFS_H__
 
-typedef enum _PDUMP_PIXEL_FORMAT_ {
+enum PDUMP_PIXEL_FORMAT {
 	PVRSRV_PDUMP_PIXEL_FORMAT_RGB8 = 1,
 	PVRSRV_PDUMP_PIXEL_FORMAT_RGB332 = 2,
 	PVRSRV_PDUMP_PIXEL_FORMAT_KRGB555 = 3,
@@ -68,9 +68,9 @@ typedef enum _PDUMP_PIXEL_FORMAT_ {
 	PVRSRV_PDUMP_PIXEL_FORMAT_L32 = 38,
 
 	PVRSRV_PDUMP_PIXEL_FORMAT_FORCE_I32 = 0x7fffffff
-} PDUMP_PIXEL_FORMAT;
+};
 
-typedef enum _PDUMP_MEM_FORMAT_ {
+enum PDUMP_MEM_FORMAT {
 	PVRSRV_PDUMP_MEM_FORMAT_STRIDE = 0,
 	PVRSRV_PDUMP_MEM_FORMAT_RESERVED = 1,
 	PVRSRV_PDUMP_MEM_FORMAT_TILED = 8,
@@ -78,15 +78,15 @@ typedef enum _PDUMP_MEM_FORMAT_ {
 	PVRSRV_PDUMP_MEM_FORMAT_HYBRID = 10,
 
 	PVRSRV_PDUMP_MEM_FORMAT_FORCE_I32 = 0x7fffffff
-} PDUMP_MEM_FORMAT;
+};
 
-typedef enum _PDUMP_POLL_OPERATOR {
+enum PDUMP_POLL_OPERATOR {
 	PDUMP_POLL_OPERATOR_EQUAL = 0,
 	PDUMP_POLL_OPERATOR_LESS = 1,
 	PDUMP_POLL_OPERATOR_LESSEQUAL = 2,
 	PDUMP_POLL_OPERATOR_GREATER = 3,
 	PDUMP_POLL_OPERATOR_GREATEREQUAL = 4,
 	PDUMP_POLL_OPERATOR_NOTEQUAL = 5,
-} PDUMP_POLL_OPERATOR;
+};
 
 #endif

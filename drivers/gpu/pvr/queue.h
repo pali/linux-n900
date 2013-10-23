@@ -1,117 +1,90 @@
 /**********************************************************************
  *
  * Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
- * 
+ *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
  * version 2, as published by the Free Software Foundation.
- * 
- * This program is distributed in the hope it will be useful but, except 
- * as otherwise stated in writing, without any warranty; without even the 
- * implied warranty of merchantability or fitness for a particular purpose. 
+ *
+ * This program is distributed in the hope it will be useful but, except
+ * as otherwise stated in writing, without any warranty; without even the
+ * implied warranty of merchantability or fitness for a particular purpose.
  * See the GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License along with
  * this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
- * 
+ *
  * The full GNU General Public License is included in this distribution in
  * the file called "COPYING".
  *
  * Contact Information:
  * Imagination Technologies Ltd. <gpl-support@imgtec.com>
- * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+ * Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK
  *
  ******************************************************************************/
 
 #ifndef QUEUE_H
 #define QUEUE_H
 
-
-#define UPDATE_QUEUE_ROFF(psQueue, ui32Size)						\
+#define UPDATE_QUEUE_ROFF(psQueue, ui32Size)				\
 	psQueue->ui32ReadOffset = (psQueue->ui32ReadOffset + ui32Size)	\
-	& (psQueue->ui32QueueSize - 1);
+					& (psQueue->ui32QueueSize - 1);
 
-	typedef struct _COMMAND_COMPLETE_DATA_ {
-		IMG_BOOL bInUse;
+struct COMMAND_COMPLETE_DATA {
+	IMG_BOOL bInUse;
 
-		IMG_UINT32 ui32DstSyncCount;
-		IMG_UINT32 ui32SrcSyncCount;
-		PVRSRV_SYNC_OBJECT *psDstSync;
-		PVRSRV_SYNC_OBJECT *psSrcSync;
-		IMG_UINT32 ui32AllocSize;
-	} COMMAND_COMPLETE_DATA, *PCOMMAND_COMPLETE_DATA;
+	u32 ui32DstSyncCount;
+	u32 ui32SrcSyncCount;
+	struct PVRSRV_SYNC_OBJECT *psDstSync;
+	struct PVRSRV_SYNC_OBJECT *psSrcSync;
+	u32 ui32AllocSize;
+};
 
-
-	 IMG_IMPORT
-	    PVRSRV_ERROR PVRSRVProcessQueues(IMG_UINT32 ui32CallerID,
-					     IMG_BOOL bFlush);
+enum PVRSRV_ERROR PVRSRVProcessQueues(u32 ui32CallerID, IMG_BOOL bFlush);
 
 #ifdef __KERNEL__
 #include <linux/types.h>
-	 off_t QueuePrintQueues(char *buffer, size_t size, off_t off);
+/*
+   HACK: The header was included already in img_types.h, but there we keep the
+   original value of __inline__. Without that include we'd  have at this point
+   __inline = __inline __attribute__((always_inline)). Keep it the old way for
+   now to avoid introducing changes related to this.
+ */
+#undef inline
+#define inline inline __attribute__((always_inline))
+
+off_t QueuePrintQueues(char *buffer, size_t size, off_t off);
 #endif
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVCreateCommandQueueKM(IMG_UINT32
-								 ui32QueueSize,
-								 PVRSRV_QUEUE_INFO
-								 **
-								 ppsQueueInfo);
-	 IMG_IMPORT PVRSRV_ERROR IMG_CALLCONV
-	    PVRSRVDestroyCommandQueueKM(PVRSRV_QUEUE_INFO * psQueueInfo);
+enum PVRSRV_ERROR PVRSRVCreateCommandQueueKM(u32 ui32QueueSize,
+		struct PVRSRV_QUEUE_INFO **ppsQueueInfo);
+enum PVRSRV_ERROR PVRSRVDestroyCommandQueueKM(
+		struct PVRSRV_QUEUE_INFO *psQueueInfo);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVInsertCommandKM(PVRSRV_QUEUE_INFO *
-							    psQueue,
-							    PVRSRV_COMMAND **
-							    ppsCommand,
-							    IMG_UINT32
-							    ui32DevIndex,
-							    IMG_UINT16
-							    CommandType,
-							    IMG_UINT32
-							    ui32DstSyncCount,
-							    PVRSRV_KERNEL_SYNC_INFO
-							    * apsDstSync[],
-							    IMG_UINT32
-							    ui32SrcSyncCount,
-							    PVRSRV_KERNEL_SYNC_INFO
-							    * apsSrcSync[],
-							    IMG_UINT32
-							    ui32DataByteSize);
+enum PVRSRV_ERROR PVRSRVInsertCommandKM(struct PVRSRV_QUEUE_INFO *psQueue,
+		struct PVRSRV_COMMAND **ppsCommand, u32 ui32DevIndex,
+		u16 CommandType, u32 ui32DstSyncCount,
+		struct PVRSRV_KERNEL_SYNC_INFO *apsDstSync[],
+		u32 ui32SrcSyncCount,
+		struct PVRSRV_KERNEL_SYNC_INFO *apsSrcSync[],
+		u32 ui32DataByteSize);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVGetQueueSpaceKM(PVRSRV_QUEUE_INFO *
-							    psQueue,
-							    IMG_UINT32
-							    ui32ParamSize,
-							    IMG_VOID **
-							    ppvSpace);
+enum PVRSRV_ERROR PVRSRVGetQueueSpaceKM(struct PVRSRV_QUEUE_INFO *psQueue,
+		u32 ui32ParamSize, void **ppvSpace);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR IMG_CALLCONV PVRSRVSubmitCommandKM(PVRSRV_QUEUE_INFO *
-							    psQueue,
-							    PVRSRV_COMMAND *
-							    psCommand);
+enum PVRSRV_ERROR PVRSRVSubmitCommandKM(struct PVRSRV_QUEUE_INFO *psQueue,
+		struct PVRSRV_COMMAND *psCommand);
 
-	 IMG_IMPORT
-	    IMG_VOID PVRSRVCommandCompleteKM(IMG_HANDLE hCmdCookie,
-					     IMG_BOOL bScheduleMISR);
+void PVRSRVCommandCompleteKM(void *hCmdCookie, IMG_BOOL bScheduleMISR);
 
-	IMG_VOID PVRSRVCommandCompleteCallbacks(IMG_VOID);
+void PVRSRVCommandCompleteCallbacks(void);
 
-	 IMG_IMPORT
-	    PVRSRV_ERROR PVRSRVRegisterCmdProcListKM(IMG_UINT32 ui32DevIndex,
-						     PFN_CMD_PROC *
-						     ppfnCmdProcList,
-						     IMG_UINT32
-						     ui32MaxSyncsPerCmd[][2],
-						     IMG_UINT32 ui32CmdCount);
-	 IMG_IMPORT PVRSRV_ERROR PVRSRVRemoveCmdProcListKM(IMG_UINT32
-							   ui32DevIndex,
-							   IMG_UINT32
-							   ui32CmdCount);
+enum PVRSRV_ERROR PVRSRVRegisterCmdProcListKM(u32 ui32DevIndex,
+		IMG_BOOL (**ppfnCmdProcList)(void *, u32, void *),
+		u32 ui32MaxSyncsPerCmd[][2], u32 ui32CmdCount);
+enum PVRSRV_ERROR PVRSRVRemoveCmdProcListKM(u32 ui32DevIndex,
+		u32 ui32CmdCount);
 
 
 #endif

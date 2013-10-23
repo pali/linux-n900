@@ -287,6 +287,60 @@ int ispresizer_config_datapath(struct isp_res_device *isp_res,
 }
 
 /**
+ * ispresizer_adjust_bandwidth - Reduces read bandwidth when scaling up.
+ * Otherwise there will be SBL overflows.
+ *
+ * The ISP read speed is 256.0 / max(256, 1024 * ISPSBL_SDR_REQ_EXP). This
+ * formula is correct, no matter what the TRM says. Thus, the first
+ * step to use is 0.25 (REQ_EXP=1).
+ *
+ * Ratios:
+ * 0 = 1.0
+ * 1 = 0.25
+ * 2 = 0.125
+ * 3 = 0.083333...
+ * 4 = 0.0625
+ * 5 = 0.05 and so on...
+ *
+ * TRM says that read bandwidth should be no more than 83MB/s, half
+ * of the maximum of 166MB/s.
+ *
+ * HOWEVER, the read speed must be chosen so that the resizer always
+ * has time to process the frame before the next frame comes in.
+ * Failure to do so will result in a pile-up and endless "resizer busy!"
+ * messages.
+ *
+ * Zoom ratio must not exceed 4.0. This is checked in
+ * ispresizer_check_crop_boundaries().
+ **/
+static void ispresizer_adjust_bandwidth(struct isp_res_device *isp_res,
+					struct isp_pipeline *pipe)
+{
+	struct device *dev = to_device(isp_res);
+
+	/* Table for dividers. This allows hand tuning. */
+	static const unsigned char area_to_divider[] = {
+		0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 5, 5
+	     /* 1........2...........3.......................4 Zoom level */
+	};
+	unsigned int input_area = pipe->rsz_crop.width * pipe->rsz_crop.height;
+	unsigned int output_area = pipe->rsz_out_w * pipe->rsz_out_h;
+
+	if (input_area < output_area && input_area > 0) {
+		u32 val = area_to_divider[output_area / input_area - 1];
+		DPRINTK_ISPRESZ("%s: area factor = %i, val = %i\n",
+				__func__, output_area / input_area, val);
+		isp_reg_writel(dev, val << ISPSBL_SDR_REQ_RSZ_EXP_SHIFT,
+			       OMAP3_ISP_IOMEM_SBL, ISPSBL_SDR_REQ_EXP);
+	} else {
+		/* Required input bandwidth greater than output, no limit. */
+		DPRINTK_ISPRESZ("%s: resetting\n", __func__);
+		isp_reg_writel(dev, 0, OMAP3_ISP_IOMEM_SBL,
+			       ISPSBL_SDR_REQ_EXP);
+	}
+}
+
+/**
  * ispresizer_try_size - Validates input and output images size.
  * @input_w: input width for the resizer in number of pixels per line
  * @input_h: input height for the resizer in number of lines
@@ -471,6 +525,9 @@ int ispresizer_s_pipeline(struct isp_res_device *isp_res,
 	rval = ispresizer_config_datapath(isp_res, pipe);
 	if (rval)
 		return rval;
+
+	/* Set read bandwidth */
+	ispresizer_adjust_bandwidth(isp_res, pipe);
 
 	/* Set Resizer input address and offset adderss */
 	ispresizer_config_inlineoffset(isp_res,
