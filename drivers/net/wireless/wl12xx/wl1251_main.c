@@ -1611,6 +1611,7 @@ static int wl1251_hw_scan(struct wl1251 *wl, u8 *ssid, size_t len,
 	}
 
 out:
+	kfree(trigger);
 	kfree(params);
 	return ret;
 

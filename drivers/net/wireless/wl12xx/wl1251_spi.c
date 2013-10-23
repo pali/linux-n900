@@ -92,6 +92,8 @@ void wl1251_spi_reset(struct wl1251 *wl)
 	spi_sync(wl->spi, &m);
 
 	wl1251_dump(DEBUG_SPI, "spi reset -> ", cmd, WSPI_INIT_CMD_LEN);
+
+	kfree(cmd);
 }
 
 void wl1251_spi_init(struct wl1251 *wl)
@@ -146,6 +148,8 @@ void wl1251_spi_init(struct wl1251 *wl)
 	spi_sync(wl->spi, &m);
 
 	wl1251_dump(DEBUG_SPI, "spi init -> ", cmd, WSPI_INIT_CMD_LEN);
+
+	kfree(cmd);
 }
 
 /* Set the SPI partitions to access the chip addresses

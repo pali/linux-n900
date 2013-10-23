@@ -28,6 +28,7 @@
 #include <linux/clk.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/core.h>
+#include <linux/mmc/card.h>
 #include <linux/io.h>
 #include <linux/semaphore.h>
 #include <asm/dma.h>
@@ -96,6 +97,8 @@
 #define SRD			(1 << 26)
 #define SOFTRESET		(1 << 1)
 #define RESETDONE		(1 << 0)
+
+#define SAMSUNG_MANUF_ID	0x15
 
 /*
  * FIXME: Most likely all the data using these _DEVID defines should come
@@ -1283,10 +1286,24 @@ static int omap_hsmmc_enabled_to_disabled(struct omap_hsmmc_host *host)
 	return msecs_to_jiffies(OMAP_MMC_SLEEP_TIMEOUT);
 }
 
+/* JEDEC specification says the nand core voltage can be shut off while the
+   card is sleeping. Some cards are known not to be JEDEC compatible with
+   this respect */
+static int omap_hsmmc_full_sleep(struct mmc_card *card)
+{
+	if (card->cid.manfid == SAMSUNG_MANUF_ID) {
+		unsigned int gbytes = card->ext_csd.sectors >> (30 - 9);
+		if (gbytes > 24 && gbytes < 48)
+			return 0;
+	}
+
+	return 1;
+}
+
 /* Handler for [DISABLED -> REGSLEEP / CARDSLEEP] transition */
 static int omap_hsmmc_disabled_to_sleep(struct omap_hsmmc_host *host)
 {
-	int err, new_state;
+	int err, new_state, sleep;
 
 	if (!mmc_try_claim_host(host->mmc))
 		return 0;
@@ -1304,9 +1321,12 @@ static int omap_hsmmc_disabled_to_sleep(struct omap_hsmmc_host *host)
 	} else {
 		new_state = REGSLEEP;
 	}
+
+	sleep = omap_hsmmc_full_sleep(host->mmc->card) &&
+		(new_state == CARDSLEEP);
 	if (mmc_slot(host).set_sleep)
 		mmc_slot(host).set_sleep(host->dev, host->slot_id, 1, 0,
-					 new_state == CARDSLEEP);
+					sleep);
 	/* FIXME: turn off bus power and perhaps interrupts too */
 	clk_disable(host->fclk);
 	host->dpm_state = new_state;
@@ -1376,14 +1396,18 @@ static int omap_hsmmc_disabled_to_enabled(struct omap_hsmmc_host *host)
 
 static int omap_hsmmc_sleep_to_enabled(struct omap_hsmmc_host *host)
 {
+	int asleep;
+
 	if (!mmc_try_claim_host(host->mmc))
 		return 0;
 
 	clk_enable(host->fclk);
 	omap_hsmmc_context_restore(host);
+	asleep = omap_hsmmc_full_sleep(host->mmc->card) &&
+		(host->dpm_state == CARDSLEEP);
 	if (mmc_slot(host).set_sleep)
 		mmc_slot(host).set_sleep(host->dev, host->slot_id, 0,
-			 host->vdd, host->dpm_state == CARDSLEEP);
+					host->vdd, asleep);
 	if (mmc_card_can_sleep(host->mmc))
 		mmc_card_awake(host->mmc);
 

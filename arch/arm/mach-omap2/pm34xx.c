@@ -45,6 +45,7 @@
 #include <mach/dma.h>
 #include <mach/vrfb.h>
 #include <mach/ssi.h>
+#include <mach/omap-pm.h>
 
 #include <asm/tlbflush.h>
 
@@ -101,6 +102,8 @@
 #define OMAP343X_SSI_PORT1_BASE		0x48058000
 #define CONTROL_PADCONF_MCBSP4_DX	0x158
 #define CONTROL_PADCONF_UART1_TX	0x14c
+
+#define VSEL_1200	0x30
 
 static u16 ssi_rx_rdy;
 static u16 ssi_tx_dat;
@@ -520,6 +523,7 @@ void omap_sram_idle(void)
 	u32 sdrc_pwr = 0;
 	int per_state_modified = 0;
 	int core_saved_state = PWRDM_POWER_ON;
+	static int prev_dpll3_div = 0;
 
 	if (!_omap_sram_idle)
 		return;
@@ -551,7 +555,7 @@ void omap_sram_idle(void)
 	if (pwrdm_read_pwrst(neon_pwrdm) == PWRDM_POWER_ON) {
 		pwrdm_set_next_pwrst(neon_pwrdm, mpu_next_state);
 		neon_next_state = mpu_next_state;
-		if (neon_next_state == PWRDM_POWER_OFF)
+		if (neon_next_state == PWRDM_POWER_OFF) 
 			omap3_save_neon_context();
 	}
 
@@ -561,6 +565,12 @@ void omap_sram_idle(void)
 	iva2_state = pwrdm_read_pwrst(iva2_pwrdm);
 	usb_state = pwrdm_read_pwrst(usb_pwrdm);
 	per_next_state = pwrdm_read_next_pwrst(per_pwrdm);
+
+	if (dss_state == PWRDM_POWER_ON &&
+		core_next_state < PWRDM_POWER_INACTIVE) {
+		core_next_state = PWRDM_POWER_INACTIVE;
+		pwrdm_set_next_pwrst(core_pwrdm, PWRDM_POWER_ON);
+	}
 
 	/* Check if PER domain can enter OFF or not */
 	if (per_next_state == PWRDM_POWER_OFF) {
@@ -679,6 +689,33 @@ void omap_sram_idle(void)
 				  OMAP3_PRM_CLKSETUP_OFFSET);
 	}
 
+	if (core_next_state < PWRDM_POWER_INACTIVE) {
+		u32 clksel1_pll, v;
+
+		clksel1_pll = cm_read_mod_reg(PLL_MOD, OMAP3430_CM_CLKSEL1_PLL);
+		prev_dpll3_div = clksel1_pll >> 28;
+		if (prev_dpll3_div == 1) {
+			/* L3 @ 166Mhz */
+			struct omap_sdrc_params *sdrc_cs0;
+			struct omap_sdrc_params *sdrc_cs1;
+
+			omap2_sdrc_get_params(83*1000*1000, &sdrc_cs0, &sdrc_cs1);
+			/* scale down to 83Mhz, use worst case delay for clock stabilization */
+			omap3_configure_core_dpll(4, 0, 28, 0, sdrc_cs0->rfr_ctrl, sdrc_cs0->mr, 0, 0);
+
+			/* increase voltage to 1.2V */
+			sr_voltagescale_vcbypass(PRCM_VDD2_OPP3, PRCM_VDD2_OPP2, VSEL_1200, l3_opps[3].vsel);
+		} else {
+			/* L3 @ 83Mhz, increase voltage to 1.2V  */
+			sr_voltagescale_vcbypass(PRCM_VDD2_OPP3, PRCM_VDD2_OPP2, VSEL_1200, l3_opps[2].vsel);
+		}
+
+		/* enable DPLL3 autoidle */
+		v = cm_read_mod_reg(PLL_MOD, CM_AUTOIDLE);
+		v |= 1;
+		cm_write_mod_reg(v, PLL_MOD, CM_AUTOIDLE);
+	}	
+
 	memcpy(save_sdrc_counters, _sdrc_counters, sizeof(save_sdrc_counters));
 
 	/*
@@ -700,6 +737,51 @@ void omap_sram_idle(void)
 
 	if (neon_next_state == PWRDM_POWER_OFF)
 		omap3_restore_neon_context();
+
+	if (core_next_state < PWRDM_POWER_INACTIVE) {
+		if (pwrdm_read_prev_pwrst(core_pwrdm) == PWRDM_POWER_OFF) {
+			u32 clksel1_pll;
+
+			/* ROM code restored the scratchpad settings. So DPLL3 autoidle is
+			 * disabled and L3 clock is back to the value before entering this function.
+			 * This means we only have to lower the voltage if L3 runs at 83Mhz
+			 */
+			clksel1_pll = cm_read_mod_reg(PLL_MOD, OMAP3430_CM_CLKSEL1_PLL);
+			if ((clksel1_pll >> 28) == 2) {
+				/* restore VDD2 OPP2 voltage */
+				sr_voltagescale_vcbypass(PRCM_VDD2_OPP2, PRCM_VDD2_OPP3, l3_opps[2].vsel, VSEL_1200);
+			}
+			else {
+				/* restore VDD2 OPP3 voltage */
+				sr_voltagescale_vcbypass(PRCM_VDD2_OPP2, PRCM_VDD2_OPP3, l3_opps[3].vsel, VSEL_1200);
+			}
+		}
+		else {
+			u32 v;
+
+			/* disable DPLL3 autoidle */
+			v = cm_read_mod_reg(PLL_MOD, CM_AUTOIDLE);
+			v &= ~0x7;
+			cm_write_mod_reg(v, PLL_MOD, CM_AUTOIDLE);
+
+			if (prev_dpll3_div == 1) {
+				/* restore L3 to 166Mhz */
+				struct omap_sdrc_params *sdrc_cs0;
+				struct omap_sdrc_params *sdrc_cs1;
+
+				omap2_sdrc_get_params(166*1000*1000, &sdrc_cs0, &sdrc_cs1);
+				/* scale up to 166Mhz, use worst case delay for clock stabilization */
+				omap3_configure_core_dpll(2, 0, 28, 1, sdrc_cs0->rfr_ctrl, sdrc_cs0->mr, 0, 0);
+
+				/* restore VDD2 OPP3 voltage */
+				sr_voltagescale_vcbypass(PRCM_VDD2_OPP2, PRCM_VDD2_OPP3, l3_opps[3].vsel, VSEL_1200);
+			}
+			else {
+				/* restore VDD2 OPP2 voltage */
+				sr_voltagescale_vcbypass(PRCM_VDD2_OPP2, PRCM_VDD2_OPP3, l3_opps[2].vsel, VSEL_1200);
+			}
+		}
+	}
 
 	/* CORE */
 	if (core_next_state < PWRDM_POWER_ON) {
@@ -1136,7 +1218,7 @@ static void __init prcm_setup_regs(void)
 			 MPU_MOD,
 			 CM_AUTOIDLE2);
 	cm_write_mod_reg((1 << OMAP3430_AUTO_PERIPH_DPLL_SHIFT) |
-			 (1 << OMAP3430_AUTO_CORE_DPLL_SHIFT),
+			 (0 << OMAP3430_AUTO_CORE_DPLL_SHIFT),
 			 PLL_MOD,
 			 CM_AUTOIDLE);
 	cm_write_mod_reg(1 << OMAP3430ES2_AUTO_PERIPH2_DPLL_SHIFT,

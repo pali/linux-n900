@@ -378,7 +378,7 @@ static void enable_dpll3_autoidle(void)
 	u32 v;
 
 	v = cm_read_mod_reg(PLL_MOD, CM_AUTOIDLE);
-	v |= 1;
+	v |= 0;
 	cm_write_mod_reg(v, PLL_MOD, CM_AUTOIDLE);
 }
 

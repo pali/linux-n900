@@ -1624,6 +1624,7 @@ static int ieee80211_sta_join_ibss(struct ieee80211_sub_if_data *sdata,
 			memcpy(pos, &bss->supp_rates[8], rates);
 		}
 
+		kfree_skb(ifsta->probe_resp);
 		ifsta->probe_resp = skb;
 
 		ieee80211_if_config(sdata, IEEE80211_IFCC_BEACON);

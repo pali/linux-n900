@@ -1004,6 +1004,11 @@ static ssize_t omap_sr_vdd2_autocomp_store(struct kobject *kobj,
 		return -EINVAL;
 	}
 
+	if (value != 0) {
+		pr_warning("VDD2 smartreflex is broken\n");
+		return -EINVAL;
+	}
+
 	mutex_lock(&dvfs_mutex);
 
 	current_vdd2opp_no = resource_get_level("vdd2_opp");

@@ -561,7 +561,7 @@ static int rx51_adp1653_power_on(struct v4l2_int_device *s)
 	gpio_set_value(ADP1653_GPIO_ENABLE, 1);
 
 	/* Some delay is apparently required. */
-	udelay(20);
+	udelay(400);
 
 	return 0;
 }
