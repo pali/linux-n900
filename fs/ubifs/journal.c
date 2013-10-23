@@ -469,7 +469,10 @@ static void pack_inode(struct ubifs_info *c, struct ubifs_ino_node *ino,
 	ino->flags = cpu_to_le32(ui->flags);
 	ino->size  = cpu_to_le64(ui->ui_size);
 	ino->nlink = cpu_to_le32(inode->i_nlink);
-	ino->compr_type  = cpu_to_le16(ui->compr_type);
+	if (ui->compr_type == UBIFS_COMPR_LZO999)
+		ino->compr_type  = cpu_to_le16(UBIFS_COMPR_LZO);
+	else
+		ino->compr_type  = cpu_to_le16(ui->compr_type);
 	ino->data_len    = cpu_to_le32(ui->data_len);
 	ino->xattr_cnt   = cpu_to_le32(ui->xattr_cnt);
 	ino->xattr_size  = cpu_to_le32(ui->xattr_size);

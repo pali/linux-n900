@@ -37,6 +37,17 @@ static int lzo_init(struct crypto_tfm *tfm)
 	return 0;
 }
 
+static int lzo999_init(struct crypto_tfm *tfm)
+{
+	struct lzo_ctx *ctx = crypto_tfm_ctx(tfm);
+
+	ctx->lzo_comp_mem = vmalloc(LZO1X_999_MEM_COMPRESS);
+	if (!ctx->lzo_comp_mem)
+		return -ENOMEM;
+
+	return 0;
+}
+
 static void lzo_exit(struct crypto_tfm *tfm)
 {
 	struct lzo_ctx *ctx = crypto_tfm_ctx(tfm);
@@ -52,6 +63,24 @@ static int lzo_compress(struct crypto_tfm *tfm, const u8 *src,
 	int err;
 
 	err = lzo1x_1_compress(src, slen, dst, &tmp_len, ctx->lzo_comp_mem);
+
+	if (err != LZO_E_OK)
+		return -EINVAL;
+
+	*dlen = tmp_len;
+	return 0;
+}
+
+static int lzo999_compress(struct crypto_tfm *tfm, const u8 *src,
+			    unsigned int slen, u8 *dst, unsigned int *dlen)
+{
+	struct lzo_ctx *ctx = crypto_tfm_ctx(tfm);
+	size_t tmp_len = *dlen; /* size_t(ulong) <-> uint on 64 bit */
+	int err;
+
+	err = lzo1x_999_compress_level(src, slen, dst, &tmp_len,
+				       ctx->lzo_comp_mem, NULL, 0 ,
+				       (lzo_progress_callback_t) 0, 7);
 
 	if (err != LZO_E_OK)
 		return -EINVAL;
@@ -89,13 +118,37 @@ static struct crypto_alg alg = {
 	.coa_decompress  	= lzo_decompress } }
 };
 
+static struct crypto_alg alg999 = {
+	.cra_name		= "lzo999",
+	.cra_flags		= CRYPTO_ALG_TYPE_COMPRESS,
+	.cra_ctxsize		= sizeof(struct lzo_ctx),
+	.cra_module		= THIS_MODULE,
+	.cra_list		= LIST_HEAD_INIT(alg999.cra_list),
+	.cra_init		= lzo999_init,
+	.cra_exit		= lzo_exit,
+	.cra_u			= { .compress = {
+	.coa_compress 		= lzo999_compress,
+	.coa_decompress  	= lzo_decompress } }
+};
+
 static int __init lzo_mod_init(void)
 {
-	return crypto_register_alg(&alg);
+	int ret;
+
+	ret = crypto_register_alg(&alg);
+	if (ret < 0)
+		return ret;
+
+	ret = crypto_register_alg(&alg999);
+	if (ret < 0)
+		crypto_unregister_alg(&alg);
+
+	return ret;
 }
 
 static void __exit lzo_mod_fini(void)
 {
+	crypto_unregister_alg(&alg999);
 	crypto_unregister_alg(&alg);
 }
 

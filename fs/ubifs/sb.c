@@ -181,9 +181,12 @@ static int create_default_filesystem(struct ubifs_info *c)
 	sup->lsave_cnt     = cpu_to_le32(c->lsave_cnt);
 	sup->fmt_version   = cpu_to_le32(UBIFS_FORMAT_VERSION);
 	sup->time_gran     = cpu_to_le32(DEFAULT_TIME_GRAN);
-	if (c->mount_opts.override_compr)
-		sup->default_compr = cpu_to_le16(c->mount_opts.compr_type);
-	else
+	if (c->mount_opts.override_compr) {
+		if (c->mount_opts.compr_type == UBIFS_COMPR_LZO999)
+			sup->default_compr = cpu_to_le16(UBIFS_COMPR_LZO);
+		else
+			sup->default_compr = cpu_to_le16(c->mount_opts.compr_type);
+	} else
 		sup->default_compr = cpu_to_le16(UBIFS_COMPR_LZO);
 
 	generate_random_uuid(sup->uuid);

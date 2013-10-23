@@ -17,6 +17,8 @@
 #define LZO1X_MEM_COMPRESS	(16384 * sizeof(unsigned char *))
 #define LZO1X_1_MEM_COMPRESS	LZO1X_MEM_COMPRESS
 
+#define LZO1X_999_MEM_COMPRESS  ((unsigned) (14 * 16384L * sizeof(short)))
+
 #define lzo1x_worst_compress(x) ((x) + ((x) / 16) + 64 + 3)
 
 /* This requires 'workmem' of size LZO1X_1_MEM_COMPRESS */
@@ -26,6 +28,27 @@ int lzo1x_1_compress(const unsigned char *src, size_t src_len,
 /* safe decompression with overrun testing */
 int lzo1x_decompress_safe(const unsigned char *src, size_t src_len,
 			unsigned char *dst, size_t *dst_len);
+
+int
+lzo1x_999_compress ( const unsigned char *src, unsigned src_len,
+                                unsigned char *dst, unsigned * dst_len,
+                                void * wrkmem );
+
+int
+lzo1x_999_compress_dict ( const unsigned char *in , unsigned in_len,
+                                    unsigned char *out, unsigned * out_len,
+                                    void * wrkmem,
+                              const unsigned char *dict, unsigned dict_len );
+
+typedef void ( *lzo_progress_callback_t) (unsigned, unsigned);
+
+int
+lzo1x_999_compress_level ( const unsigned char *in , unsigned in_len,
+                                    unsigned char *out, unsigned * out_len,
+                                    void * wrkmem,
+                              const unsigned char *dict, unsigned dict_len,
+                                    lzo_progress_callback_t cb,
+                                    int compression_level );
 
 /*
  * Return values (< 0 = Error)
