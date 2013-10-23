@@ -3,7 +3,7 @@ Aegis Validator kernel module
 -----------------------------
 
 Markku Kylänpää <ext-markku.kylanpaa@nokia.com>
-12.11. 2010
+5.8. 2011
 
 
 Introduction
@@ -90,6 +90,7 @@ also be dumped for debugging purpose. Validator securityfs entries are:
   enabled  - enable validator functionality (write), show value (read)
   enforce  - set validator to enforcing mode (write), show value (read)
   modlist  - authorize kernel modules (write), show value (read)
+  devorig  - developer mode source origin (write), show value (read)
 
 Both enable and enforce allow integrity protection features to be enabled
 and enforced separately. The value is treated as a bit mask with fields
@@ -114,19 +115,35 @@ The following LSM hooks are used to interface with the kernel:
   .dentry_open
   .inode_permission
   .inode_unlink
+  .inode_delete
   .inode_create
   .inode_rename
+  .inode_link
+  .inode_symlink
   .bprm_check_security
   .inode_free_security
+  .sb_mount
   .sb_free_security
+
+New LSM hook to allow verification of kernel modules has been added
+
+  .load_module
+
+Validator also hooks few additional LSM hooks, which are used by
+credp built-in kernel module (part of Aegis Runtime Policy Framework).
+
+  .task_setgroups
+  .task_setgid
+  .ptrace_access_check
+  .ptrace_traceme
 
 Reference hashlist values are loaded into kernel by invoking userspace
 helper application from kernel. The helper application is reading, verifying
 and parsing the reference hashlist file and creates the list of records to
 be sent into kernel via securityfs. The list consist of records having SHA1
-hash, inode number, mount volume identifier and source origin identifier of
-the component. Software installer is also using securityfs interface to add
-new reference hashes into kernel.
+hash, inode number, file attributes, mount volume identifier and source
+origin identifier of the component. Software installer is also using
+securityfs interface to add new reference hashes into kernel.
 
 There is also netlink-based validation error notification mechanism to
 userspace. If Validator blocks loading then this error with some context
@@ -161,16 +178,17 @@ Data file checking
 Enable/Enforce: BIT(2) DATA_CHECK_BIT
 
 There is also limited support to protect data files. Certain directories
-can be specified in the reference hash list to be protected directories
+can be specified in the reference hash list to be immutable directories
 and files in those directories should have matching reference hash. The
 hash value is checked in file open operation. If the hash does not match
-opening of the file is prevented. It is also possible to declare some
-files in the protected to be dynamic, which means that those files are
-not verified.
+opening of the file is prevented. There is also another concept called
+protected directory, which can contain both protected and unprotected
+files. Files that have reference hash and directories that are configured
+to be immutable or protected cannot be removed or renamed without extra
+authorization.
 
 Use cases for data file protection are:
   * Protection of upstart configuration files in /etc/init
-  * Protection of kernel modules in /lib/modules/*
   * Protection of Perl libraries
 
 File attribute checking
@@ -193,7 +211,9 @@ Enable: BIT(5) LISTED_ONLY_BIT
 It is also possible to limit reference hash checking to only those files
 that are listed in the reference hashlist. If source origin checking is
 configured then unlisted executables are treated to come from unknown
-source origin.
+source origin. If source origin checking is enabled (BIT(1)) then source
+origin for executables without reference hash is set to the value that
+can be specified in 'devorig' entry of Validator securityfs.
 
 Use "tcb" resource token to protect hash loading
 Enable: BIT(6) SECFS_BIT
@@ -258,7 +278,7 @@ to the directory. If those values are zero writing is not controlled.
 5. Protected directory entry (p)
 
 This message type specifies directories that should be protected against
-unauthorized renaming, removal and the use as a mount poinyt. Also this
+unauthorized renaming, removal and the use as a mount point. Also this
 message does not contain reference hash value. There are two additional
 fields that specify resource token and capability mask requirements for
 writing to the directory. If those values are zero writing is not

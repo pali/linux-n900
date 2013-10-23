@@ -43,6 +43,7 @@ enum credp_policy_type {
 
 	CREDP_TYPE_INHERITABLE = 1 << 3,
 	CREDP_TYPE_SETUID = 1 << 4,
+	CREDP_TYPE_TRUST_ZONE = 1 << 5,
 };
 
 long credp_kload(int flags, const char *path,
@@ -60,6 +61,10 @@ int credp_task_setgroups(struct group_info *group_info);
 int credp_task_setgid(gid_t id0, gid_t id1, gid_t id2, int flags);
 int credp_ptrace_access_check(struct task_struct *child, unsigned int mode);
 int credp_ptrace_traceme(struct task_struct *parent);
+int credp_cred_prepare(struct cred *new, const struct cred *old, gfp_t gfp);
+int credp_cred_alloc_blank(struct cred *cred, gfp_t gfp);
+void credp_cred_free(struct cred *cred);
+void credp_cred_transfer(struct cred *new, const struct cred *old);
 #endif
 
 #endif

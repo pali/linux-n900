@@ -21,7 +21,7 @@
  *
  */
 
-#define DEBUG
+/* #define DEBUG */
 /* #define VERBOSE_DEBUG */
 
 #include <linux/init.h>
@@ -235,6 +235,7 @@ struct twl5031_aci_data {
 						bool plugged);
 };
 
+static int button = ACI_BT_UP;
 static struct twl5031_aci_data *the_aci;
 
 static int twl5031_aci_read(u8 reg);
@@ -430,8 +431,7 @@ static int twl5031_aci_read(u8 reg)
 
 	ret = twl4030_i2c_read_u8(TWL5031_MODULE_ACCESSORY, &val, reg);
 	if (ret) {
-		dev_err(the_aci->dev, "unable to read register 0x%X: %d\n",
-				reg, __LINE__);
+		pr_err("unable to read register 0x%X: %d\n", reg, __LINE__);
 		return ret;
 	}
 
@@ -444,8 +444,7 @@ static void twl5031_aci_write(u8 reg, u8 val)
 
 	ret = twl4030_i2c_write_u8(TWL5031_MODULE_ACCESSORY, val, reg);
 	if (ret)
-		dev_err(the_aci->dev, "unable to write register 0x%X: %d\n",
-				reg, __LINE__);
+		pr_err("unable to write register 0x%X: %d\n", reg, __LINE__);
 }
 
 static void twl5031_aci_enable_irqs(u16 mask)
@@ -782,16 +781,18 @@ static void twl5031_buttons_buf_clear(struct twl5031_aci_data *aci)
  */
 static void twl5031_get_av_button(struct twl5031_aci_data *aci)
 {
-	static int button = ACI_BT_UP;
 	u16 val;
 
 	/* do not modify buffer if plug is already removed */
 	if (!aci->plugged)
 		return;
 
+	twl5031_aci_write(TWL5031_ACI_AV_CTRL, AV_COMP1_EN);
+	usleep_range(ACI_WAIT_COMPARATOR_SETTLING_LO,
+		ACI_WAIT_COMPARATOR_SETTLING_HI);
 	val = twl5031_aci_read(TWL5031_ACI_AV_CTRL);
 
-	if (val & STATUS_A2_COMP)
+	if (val & STATUS_A1_COMP)
 		aci->button = ACI_BT_DOWN;
 	else
 		aci->button = ACI_BT_UP;
@@ -1120,7 +1121,7 @@ static irqreturn_t twl5031_aci_irq_thread(int irq, void *_aci)
 
 /*
  * AvPlugDet irq
- * ie. jack_gpio 1 off, 0 on
+ * ie. jack_gpio, polarity stated in avplugdet_plugged
  */
 static irqreturn_t twl5031_plugdet_irq_handler(int irq, void *_aci)
 {
@@ -1275,7 +1276,7 @@ static int twl5031_av_detection(struct twl5031_aci_data *aci)
 	/* basic headset */
 	ret = twl5031_v_hs_mic_out(aci);
 	/* sane settings _after_ measuring voltage */
-	val = AV_COMP2_EN | HOOK_DET_EN | HOOK_DET_EN_SLEEP_MODE;
+	val = AV_COMP1_EN | HOOK_DET_EN;
 	twl5031_aci_write(TWL5031_ACI_AV_CTRL, val);
 	twl5031_aci_write(TWL5031_ECI_DBI_CTRL,
 			ACI_ENABLE | ACI_ACCESSORY_MODE);
@@ -1318,6 +1319,8 @@ static void twl5031_av_plug_on_off(struct twl5031_aci_data *aci)
 		twl5031_aci_disable_irqs(ACI_ACCINT);
 		/* force basic headset button up event */
 		aci->aci_callback->button_event(0, aci->aci_callback->priv);
+
+		button = ACI_BT_UP;
 
 		/* pm settings */
 		if (aci->hw_plug_set_state)
@@ -1896,6 +1899,11 @@ static int __init twl5031_aci_probe(struct platform_device *pdev)
 		goto err_jack_irq;
 	}
 
+	/*
+	 * It seems to be necessary to wait here about a millisecond,
+	 * otherwise an interrupt gets lost. The reason is unknown.
+	 */
+	usleep_range(1000, 1100);
 	/*
 	 * if plug was already inserted, this should trigger interrupt,
 	 * as line was set high earlier

@@ -1097,8 +1097,8 @@ static struct lis3lv02d_platform_data rm696_lis302dl_data = {
 	.axis_z = LIS3_INV_DEV_Z,
 	.setup_resources = lis302_setup,
 	.release_resources = lis302_release,
-	.st_min_limits = {-32, 3, 3},
-	.st_max_limits = {-3, 32, 32},
+	.st_min_limits = {-46, 3, 3},
+	.st_max_limits = {-3, 46, 46},
 	.irq2 = OMAP_GPIO_IRQ(LIS302_IRQ2_GPIO),
 };
 

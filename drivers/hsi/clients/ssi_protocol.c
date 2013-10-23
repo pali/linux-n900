@@ -652,6 +652,7 @@ static void ssip_rx_bootinforeq(struct hsi_client *cl, u32 cmd)
 		ssip_error(cl);
 		/* Fall through */
 	case INIT:
+	case HANDSHAKE:
 		spin_lock(&ssi->lock);
 		ssi->main_state = HANDSHAKE;
 		if (!ssi->waketest) {
@@ -668,9 +669,6 @@ static void ssip_rx_bootinforeq(struct hsi_client *cl, u32 cmd)
 		ssip_set_cmd(msg, SSIP_BOOTINFO_RESP_CMD(SSIP_LOCAL_VERID));
 		msg->complete = ssip_release_cmd;
 		hsi_async_write(cl, msg);
-		break;
-	case HANDSHAKE:
-		/* Ignore */
 		break;
 	default:
 		dev_dbg(&cl->device, "Wrong state M(%d)\n", ssi->main_state);

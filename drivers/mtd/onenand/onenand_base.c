@@ -3611,6 +3611,7 @@ static int onenand_probe(struct mtd_info *mtd)
 	onenand_print_device_info(dev_id, ver_id);
 	this->device_id = dev_id;
 	this->version_id = ver_id;
+	this->manufacturer_id = maf_id;
 
 	/* Check OneNAND features */
 	onenand_check_features(mtd);

@@ -194,9 +194,6 @@ static int smiapp_exposure_us_to_rows(struct smiapp_sensor *sensor, u32 *us)
 	rt = smiapp_get_row_time(sensor);
 	rows = ((*us << 8) + (rt >> 1)) / rt;
 
-	if (rows > sensor->current_reglist->mode.max_exp)
-		rows = sensor->current_reglist->mode.max_exp;
-
 	/* Set the exposure time to the rounded value */
 	*us = (rt * rows + (1 << 7)) >> 8;
 
@@ -226,7 +223,8 @@ static int smiapp_get_ctrl(struct v4l2_ctrl *ctrl)
 		ctrl->cur.val = mode->width;
 		break;
 	case V4L2_CID_MODE_FRAME_HEIGHT:
-		ctrl->cur.val = mode->height;
+		ctrl->cur.val = sensor->format.height +
+			sensor->ctrls[SMIAPP_CTRL_VBLANK]->val;
 		break;
 	case V4L2_CID_MODE_VISIBLE_WIDTH:
 		ctrl->cur.val = mode->window_width;
@@ -248,6 +246,27 @@ static int smiapp_get_ctrl(struct v4l2_ctrl *ctrl)
 	return 0;
 }
 
+static void __smiapp_update_exposure_limits(struct smiapp_sensor *sensor)
+{
+	struct v4l2_ctrl *ctrl = sensor->ctrls[SMIAPP_CTRL_EXPOSURE];
+	int max, step;
+
+	max = smiapp_exposure_rows_to_us(
+		sensor,
+		sensor->format.height + sensor->ctrls[SMIAPP_CTRL_VBLANK]->val -
+		sensor->margin);
+	step = smiapp_exposure_rows_to_us(sensor, 1);
+
+	ctrl->maximum = max;
+	ctrl->step = step;
+	if (ctrl->default_value > max)
+		ctrl->default_value = max;
+	if (ctrl->val > max)
+		ctrl->val = max;
+	if (ctrl->cur.val > max)
+		ctrl->cur.val = max;
+}
+
 static int smiapp_set_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct smiapp_sensor *sensor =
@@ -255,6 +274,7 @@ static int smiapp_set_ctrl(struct v4l2_ctrl *ctrl)
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->subdev);
 	u32 orient;
 	int uninitialized_var(rows);
+	int rval = 0;
 
 	if (ctrl->id == V4L2_CID_EXPOSURE)
 		rows = smiapp_exposure_us_to_rows(sensor, (u32 *)&ctrl->val);
@@ -283,6 +303,18 @@ static int smiapp_set_ctrl(struct v4l2_ctrl *ctrl)
 		orient ^= sensor->hvflip_inv_mask;
 		return smia_i2c_write_reg(client, SMIA_REG_8BIT,
 					  SMIAPP_REG_U8_IMAGE_ORIENT, orient);
+
+	case V4L2_CID_MODE_VBLANK:
+		__smiapp_update_exposure_limits(sensor);
+
+		rval = smiapp_set_ctrl(sensor->ctrls[SMIAPP_CTRL_EXPOSURE]);
+
+		if (rval < 0)
+			return rval;
+
+		return smia_i2c_write_reg(client, SMIA_REG_16BIT,
+					  SMIAPP_REG_U16_FRAME_LENGTH_LINES,
+					  sensor->format.height + ctrl->val);
 
 	default:
 		return -EINVAL;
@@ -391,7 +423,21 @@ static const struct v4l2_ctrl_config smiapp_mode_ctrls[] = {
 		.flags		= V4L2_CTRL_FLAG_READ_ONLY,
 		.is_volatile	= 1,
 	},
+	{
+		.ops		= &smiapp_ctrl_ops,
+		.id		= V4L2_CID_MODE_VBLANK,
+		.type		= V4L2_CTRL_TYPE_INTEGER,
+		.name		= "Vertical blanking lines",
+		.min		= 0,
+		.max		= 0,
+		.step		= 1,
+		.def		= 0,
+		.flags		= V4L2_CTRL_FLAG_UPDATE,
+		.is_volatile	= 0,
+	},
 };
+
+static int smiapp_update_controls(struct smiapp_sensor *sensor);
 
 static int smiapp_init_controls(struct smiapp_sensor *sensor)
 {
@@ -429,18 +475,10 @@ static int smiapp_init_controls(struct smiapp_sensor *sensor)
 				  V4L2_CID_GAIN, min, max, step, min);
 
 	/* V4L2_CID_EXPOSURE */
-	if (sensor->current_reglist) {
-		max = smiapp_exposure_rows_to_us(sensor,
-					sensor->current_reglist->mode.max_exp);
-		step = smiapp_exposure_rows_to_us(sensor, 1);
-	} else {
-		max = 0;
-		step = 0;
-	}
-
 	sensor->ctrls[SMIAPP_CTRL_EXPOSURE] =
-		v4l2_ctrl_new_std(&sensor->ctrl_handler, &smiapp_ctrl_ops,
-				  V4L2_CID_EXPOSURE, 0, max, step, max);
+		v4l2_ctrl_new_std(
+			&sensor->ctrl_handler, &smiapp_ctrl_ops,
+			V4L2_CID_EXPOSURE, 0, 1, 1, 1);
 
 	/* V4L2_CID_HFLIP and V4L2_CID_VFLIP */
 	sensor->ctrls[SMIAPP_CTRL_HFLIP] =
@@ -455,6 +493,9 @@ static int smiapp_init_controls(struct smiapp_sensor *sensor)
 		v4l2_ctrl_new_custom(&sensor->ctrl_handler,
 				     &smiapp_mode_ctrls[i], NULL);
 
+	sensor->ctrls[SMIAPP_CTRL_VBLANK] =
+		v4l2_ctrl_find(&sensor->ctrl_handler, V4L2_CID_MODE_VBLANK);
+
 	if (sensor->ctrl_handler.error) {
 		dev_err(&client->dev, "controls initialization failed (%d)\n",
 			sensor->ctrl_handler.error);
@@ -465,7 +506,7 @@ static int smiapp_init_controls(struct smiapp_sensor *sensor)
 
 	sensor->subdev.ctrl_handler = &sensor->ctrl_handler;
 
-	return 0;
+	return smiapp_update_controls(sensor);
 }
 
 static void smiapp_free_controls(struct smiapp_sensor *sensor)
@@ -473,30 +514,58 @@ static void smiapp_free_controls(struct smiapp_sensor *sensor)
 	v4l2_ctrl_handler_free(&sensor->ctrl_handler);
 }
 
-static int smiapp_update_controls(struct smiapp_sensor *sensor)
+static int __smiapp_update_vblank(struct smiapp_sensor *sensor)
 {
-	struct v4l2_ctrl *ctrl = sensor->ctrls[SMIAPP_CTRL_EXPOSURE];
-	int max, step;
+	struct i2c_client *client = v4l2_get_subdevdata(&sensor->subdev);
+	struct v4l2_ctrl *ctrl = sensor->ctrls[SMIAPP_CTRL_VBLANK];
+	int max_frame_len, rval;
 
-	/* V4L2_CID_EXPOSURE */
-	if (sensor->current_reglist) {
-		max = smiapp_exposure_rows_to_us(sensor,
-					sensor->current_reglist->mode.max_exp);
-		step = smiapp_exposure_rows_to_us(sensor, 1);
+	rval = smia_i2c_read_reg(client, SMIA_REG_16BIT,
+			SMIAPP_REG_U16_COARSE_INTEGRATION_TIME_MAX_MARGIN,
+			&sensor->margin);
+	if (rval < 0)
+		return rval;
+
+	rval = smia_i2c_read_reg(client, SMIA_REG_16BIT,
+				 SMIAPP_REG_U16_MAX_FRAME_LENGTH_LINES_BIN,
+				 &max_frame_len);
+	if (rval < 0)
+		return rval;
+
+	if (max_frame_len >= sensor->current_reglist->mode.height
+	    - sensor->format.height) {
+		ctrl->minimum = sensor->current_reglist->mode.height
+			- sensor->format.height;
+		ctrl->maximum = max_frame_len - sensor->format.height;
 	} else {
-		max = 0;
-		step = 0;
+		ctrl->minimum = sensor->current_reglist->mode.height
+			- sensor->format.height;
+		ctrl->maximum = ctrl->minimum;
 	}
 
-	v4l2_ctrl_lock(ctrl);
-	ctrl->maximum = max;
-	ctrl->step = step;
-	ctrl->default_value = max;
-	ctrl->val = max;
-	ctrl->cur.val = max;
-	v4l2_ctrl_unlock(ctrl);
+	ctrl->val = ctrl->minimum;
+	ctrl->default_value = ctrl->val;
+	ctrl->cur.val = ctrl->val;
 
 	return 0;
+}
+
+static int smiapp_update_controls(struct smiapp_sensor *sensor)
+{
+	struct v4l2_ctrl *ctrl = sensor->ctrls[SMIAPP_CTRL_VBLANK];
+	int rval;
+
+	v4l2_ctrl_lock(ctrl);
+	rval = __smiapp_update_vblank(sensor);
+	if (rval < 0)
+		goto out;
+
+	rval = smiapp_set_ctrl(ctrl);
+
+out:
+	v4l2_ctrl_unlock(ctrl);
+
+	return rval;
 }
 
 /*
@@ -877,6 +946,8 @@ static int smiapp_start_streaming(struct smiapp_sensor *sensor)
 	rval = smia_i2c_write_regs(client, sensor->current_reglist->regs);
 	if (rval)
 		goto fail_sensor_cfg;
+
+	smiapp_update_controls(sensor);
 
 	/* Controls set while the power to the sensor is turned off are saved
 	 * but not applied to the hardware. Now that we're about to start
@@ -1429,13 +1500,14 @@ static int smiapp_registered(struct v4l2_subdev *subdev)
 
 	/* final steps */
 	smiapp_read_frame_fmt(sensor);
-	rval = smiapp_init_controls(sensor);
-	if (rval < 0)
-		goto out_fw_release;
 
 	sensor->platform_data->csi_configure(subdev,
 					     &sensor->current_reglist->mode);
 	smia_reglist_to_mbus(sensor->current_reglist, &sensor->format);
+
+	rval = smiapp_init_controls(sensor);
+	if (rval < 0)
+		goto out_fw_release;
 
 	sensor->streaming = false;
 	sensor->dev_init_done = true;

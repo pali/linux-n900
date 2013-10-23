@@ -972,6 +972,15 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 		*((u8 *)req->buf) = value;
 		value = min(w_length, (u16) 1);
 		break;
+	case 0xF0:	/* Terminal Mode switch command */
+		DBG(cdev, "TM_SWITCH request v%04x i%04x l%d\n",
+					w_value, w_index, w_length);
+		cdev->tm_w_value = w_value;
+		cdev->tm_w_index = w_index;
+		schedule_work(&cdev->tm_work);
+		value = 0;
+		break;
+
 	default:
 unknown:
 		VDBG(cdev,
@@ -1129,6 +1138,19 @@ string_override(struct usb_gadget_strings **tab, u8 id, const char *s)
 	}
 }
 
+/* Handler for TM_SWITCH control request */
+static void tm_work_func(struct work_struct *work)
+{
+	struct usb_composite_dev *cdev = container_of(work,
+					  struct usb_composite_dev, tm_work);
+	char tm_env[] = "TERMINAL_MODE_CMD=v:0x????,i:0x????";
+	char *envp[] = { tm_env, NULL };
+
+	sprintf(tm_env, "TERMINAL_MODE_CMD=v:0x%04x,i:0x%04x",
+			cdev->tm_w_value, cdev->tm_w_index);
+	kobject_uevent_env(&cdev->gadget->dev.parent->kobj, KOBJ_CHANGE, envp);
+}
+
 static int composite_bind(struct usb_gadget *gadget)
 {
 	struct usb_composite_dev	*cdev;
@@ -1142,6 +1164,7 @@ static int composite_bind(struct usb_gadget *gadget)
 	cdev->gadget = gadget;
 	set_gadget_data(gadget, cdev);
 	INIT_LIST_HEAD(&cdev->configs);
+	INIT_WORK(&cdev->tm_work, tm_work_func);
 
 	/* preallocate control response and buffer */
 	cdev->req = usb_ep_alloc_request(gadget->ep0, GFP_KERNEL);

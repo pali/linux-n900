@@ -35,10 +35,14 @@
 #define PN544_CHAR_BASE		'P'
 #define PN544_IOR(num, dtype)	_IOR(PN544_CHAR_BASE, num, dtype)
 #define PN544_IOW(num, dtype)	_IOW(PN544_CHAR_BASE, num, dtype)
-#define PN544_GET_FW_MODE	PN544_IOW(1, unsigned int)
+#define PN544_GET_FW_MODE	PN544_IOR(1, unsigned int)
 #define PN544_SET_FW_MODE	PN544_IOW(2, unsigned int)
-#define PN544_GET_DEBUG		PN544_IOW(3, unsigned int)
+#define PN544_GET_DEBUG		PN544_IOR(3, unsigned int)
 #define PN544_SET_DEBUG		PN544_IOW(4, unsigned int)
+#define PN544_GET_IODELAY	PN544_IOR(5, unsigned int)
+#define PN544_SET_IODELAY	PN544_IOW(6, unsigned int)
+#define PN544_GET_RESETDELAY	PN544_IOR(7, unsigned int)
+#define PN544_SET_RESETDELAY	PN544_IOW(8, unsigned int)
 
 /* Normal (HCI) mode */
 #define PN544_LLC_HCI_OVERHEAD	3 /* header + crc (to length) */

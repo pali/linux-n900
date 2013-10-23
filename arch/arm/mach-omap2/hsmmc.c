@@ -275,7 +275,7 @@ static int hsmmc_clk_notifier(struct notifier_block *nb, unsigned long event,
 			/* Timeout is 1 sec */
 			if (!wait_event_timeout(hsmmc_max_freq_wq,
 						hsmmc_max_freq_ok(),
-						msecs_to_jiffies(1000)))
+						msecs_to_jiffies(2000)))
 				pr_err("MMC violates maximum frequency "
 				       "constraint\n");
 		}

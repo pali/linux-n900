@@ -96,6 +96,9 @@
 /* Status */
 #define LP5521_EXT_CLK_USED		0x08
 
+/* default R channel current register value */
+#define LP5521_REG_R_CURR_DEFAULT 0xAF
+
 /* Times are microseconds */
 #define LP5521_MODE_CHANGE_TIME_MIN	1000
 #define LP5521_MODE_CHANGE_TIME_MAX	2000
@@ -254,9 +257,9 @@ static int lp5521_configure(struct i2c_client *client)
 	/* Set all PWMs to direct control mode */
 	ret = lp5521_write(client, LP5521_REG_OP_MODE, 0x3F);
 
-	/* Enable auto-powersave, set charge pump to auto, red to battery */
+	/* Enable auto-powersave, set charge pump to off, red to battery */
 	ret |= lp5521_write(client, LP5521_REG_CONFIG,
-		LP5521_PWRSAVE_EN | LP5521_CP_MODE_AUTO | LP5521_R_TO_BATT);
+		LP5521_PWRSAVE_EN | LP5521_CP_MODE_OFF | LP5521_R_TO_BATT);
 
 	/* Initialize all channels PWM to zero -> leds off */
 	ret |= lp5521_write(client, LP5521_REG_R_PWM, 0);
@@ -648,6 +651,7 @@ static int lp5521_probe(struct i2c_client *client,
 	struct lp5521_chip		*chip;
 	struct lp5521_platform_data	*pdata;
 	int ret, i, led;
+	u8 buf;
 
 	chip = kzalloc(sizeof(*chip), GFP_KERNEL);
 	if (!chip)
@@ -682,6 +686,20 @@ static int lp5521_probe(struct i2c_client *client,
 	}
 
 	lp5521_write(client, LP5521_REG_RESET, 0xff);
+	usleep_range(LP5521_RESET_TIME_MIN, LP5521_RESET_TIME_MAX);
+
+	/*
+	 * Make sure that the chip is reset by reading back
+	 * r channel current reg. This is a dummy read, otherwise
+	 * in some platforms, access to R G B channel program
+	 * execution mode to 'Run' in LP5521_REG_ENABLE register
+	 * will not have any affect - strange!
+	 */
+	ret = lp5521_read(client, LP5521_REG_R_CURRENT, &buf);
+	if (ret || buf != LP5521_REG_R_CURR_DEFAULT) {
+		dev_err(&client->dev, "error in reseting chip\n");
+		goto fail2;
+	}
 	usleep_range(LP5521_RESET_TIME_MIN, LP5521_RESET_TIME_MAX);
 
 	ret = lp5521_detect(client);

@@ -802,6 +802,7 @@ static int as3645a_get_ctrl(struct v4l2_ctrl *ctrl)
 		if (fault < 0)
 			return fault;
 
+		ctrl->cur.val = 0;
 		if (fault & AS_FAULT_INFO_SHORT_CIRCUIT)
 			ctrl->cur.val |= V4L2_FLASH_FAULT_SHORT_CIRCUIT;
 		if (fault & AS_FAULT_INFO_OVER_TEMPERATURE)

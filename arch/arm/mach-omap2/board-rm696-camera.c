@@ -362,6 +362,34 @@ static struct smiapp_platform_data rm696_main_camera_platform_data = {
  *
  */
 
+static int rm696_lens_use_iclk(void)
+{
+	/*
+	 * Lada Toshiba camera modules (smiapp-004), which have an AD5817 lens
+	 * actuator driver should use the internal 19.2 MHz clock generator for
+	 * PWM drive mode.
+	 */
+	if (rm696_main_camera.manu_id == 0xc &&
+	    rm696_main_camera.model_id == 0x560f)
+		return 1;
+
+	return 0;
+}
+
+static int rm696_lens_use_protection(void)
+{
+	/*
+	 * Lada Toshiba camera modules (smiapp-004), which have an AD5817 lens
+	 * actuator driver should enable over-current, low-battery and
+	 * over-temperature protection.
+	 */
+	if (rm696_main_camera.manu_id == 0xc &&
+	    rm696_main_camera.model_id == 0x560f)
+		return 1;
+
+	return 0;
+}
+
 static int rm696_lens_set_xclk(struct v4l2_subdev *sd, u32 hz)
 {
 	return rm696_update_xclk(sd, hz, RM696_PRI_LENS, MAIN_CAMERA_XCLK);
@@ -370,7 +398,9 @@ static int rm696_lens_set_xclk(struct v4l2_subdev *sd, u32 hz)
 /* When no activity on EXTCLK, the AD5836 enters power-down mode */
 static struct ad58xx_platform_data rm696_ad5836_platform_data = {
 	.ext_clk		= (9.6 * 1000 * 1000),
-	.set_xclk		= rm696_lens_set_xclk
+	.set_xclk		= rm696_lens_set_xclk,
+	.use_iclk 		= rm696_lens_use_iclk,
+	.use_protection		= rm696_lens_use_protection
 };
 
 /*

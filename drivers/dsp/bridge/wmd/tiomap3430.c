@@ -262,7 +262,7 @@ static struct bridge_drv_interface drv_interface_fxns = {
 
 static inline void tlb_flush_all(const void __iomem *base)
 {
-	__raw_writeb(__raw_readb(base + MMU_GFLUSH) | 1, base + MMU_GFLUSH);
+	__raw_writel(1, base + MMU_GFLUSH);
 }
 
 static inline void flush_all(struct wmd_dev_context *dev_context)
@@ -404,6 +404,42 @@ static dsp_status bridge_brd_set_state(struct wmd_dev_context *hDevContext,
 	struct wmd_dev_context *dev_context = hDevContext;
 
 	dev_context->dw_brd_state = ulBrdState;
+	return status;
+}
+
+/**
+ * set_warmboot_addr - set address for IVA to resume after OFF transitions.
+ * @dev_ctxt:	context structure for the device
+ *
+ * The address set by this function is specified by the baseimage.
+ */
+static dsp_status set_warmboot_addr(struct wmd_dev_context *dev_ctx)
+{
+	struct cfg_hostres res;
+	struct cfg_devnode *devext;
+	dsp_status status;
+	u32 dynextbase, extend, extbase;	/* firmware sections */
+	u32 wbphys;				/* Warmboot physical address */
+	u32 wbbase;				/* Warmboot base address (da) */
+	u32 offset;
+
+	devext = (struct cfg_devnode *)drv_get_first_dev_extension();
+	status = cfg_get_host_resources(devext, &res);
+	if (DSP_FAILED(status))
+		return status;
+
+	dev_get_symbol(dev_ctx->hdev_obj, PWRM_RESTORE, &wbbase);
+	dev_get_symbol(dev_ctx->hdev_obj, DYNEXTBASE, &dynextbase);
+	dev_get_symbol(dev_ctx->hdev_obj, EXTBASE, &extbase);
+	dev_get_symbol(dev_ctx->hdev_obj, EXTEND, &extend);
+	if (wbbase < extbase || wbbase > extend)
+		return DSP_EFAIL;
+
+	offset = wbbase - dynextbase;
+	wbphys = res.dw_mem_phys[1] + offset;	/* dynextbase (pa) + offset */
+	status = hw_dspss_boot_mode_set(res.dw_sys_ctrl_base,
+					HW_DSPSYSC_DIRECTBOOT, wbphys);
+
 	return status;
 }
 
@@ -737,9 +773,12 @@ static dsp_status bridge_brd_start(struct wmd_dev_context *hDevContext,
 			 */
 			*((volatile u32 *)dw_sync_addr) = 0XCAFECAFE;
 
-			/* update board state */
-			dev_context->dw_brd_state = BRD_RUNNING;
-			/* (void)chnlsm_enable_interrupt(dev_context); */
+			status = set_warmboot_addr(dev_context);
+
+			if (DSP_SUCCEEDED(status)) {
+				/* update board state */
+				dev_context->dw_brd_state = BRD_RUNNING;
+			}
 		} else {
 			dev_context->dw_brd_state = BRD_UNKNOWN;
 		}

@@ -353,9 +353,13 @@ try_again:
 	buflen = min_t(loff_t, i_size, buffer_size[active]);
 	retval = kernel_read(file, 0, buffer[active], buflen);
 	if (retval != buflen) {
-		pr_err("Aegis: read error during measurement (%d %s)\n",
-			retval, current->comm);
-		goto out5;
+		if (retval <= 0) {
+			pr_err("Aegis: read error during measurement "
+			       "(1 %d %d %s)\n", retval, buflen, current->comm);
+			goto out5;
+		} else {
+			buflen = min_t(loff_t, buflen, retval);
+		}
 	}
 
 	for (i = 0; i < i_size; ) {
@@ -376,9 +380,15 @@ try_again:
 				       buffer_size[!active]);
 			retval = kernel_read(file, i, buffer[!active], buflen);
 			if (retval != buflen) {
-				pr_err("Aegis: read error during measurement " \
-					"(%d %s)\n", retval, current->comm);
-				break;
+				if (retval <= 0) {
+					pr_err("Aegis: read error during "
+					       "measurement (2 %d %d %s)\n",
+					       retval, buflen, current->comm);
+					ahash_wait(ret, req->base.data);
+					break;
+				} else {
+					buflen = retval;
+				}
 			}
 		}
 
@@ -394,15 +404,20 @@ try_again:
 			buflen = min_t(loff_t, i_size - i, buffer_size[0]);
 			retval = kernel_read(file, i, buffer[0], buflen);
 			if (retval != buflen) {
-				pr_err("Aegis: read error during measurement "
-					"(%d %s)\n", retval, current->comm);
-				retval = -EFAULT;
-				break;
+				if (retval <= 0) {
+					pr_err("Aegis: read error during "
+					       "measurement (3 %d %d %s)\n",
+					       retval, buflen, current->comm);
+					retval = -EFAULT;
+					break;
+				} else {
+					buflen = retval;
+				}
 			}
-		} else
+		} else {
 			/* Double buffering in use, swap buffers. */
 			active = !active;
-
+		}
 	}
 out5:
 	if (!retval)

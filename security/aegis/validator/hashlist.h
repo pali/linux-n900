@@ -51,10 +51,10 @@ enum hashlist_node_type {
 };
 
 /* Hashlist operations */
-int validator_hashlist_entry(struct inode *node);
+int validator_hashlist_entry_type(struct inode *node);
 struct vprotection *validator_hashlist_get_wcreds(struct inode *node);
 int validator_hashlist_get_data(struct inode *node, struct vmetadata *data);
-void *validator_hashlist_new(void);
+void *validator_hashlist_new(unsigned int device_id);
 void validator_hashlist_delete(void *ptr);
 int validator_hashlist_delete_item(struct inode *inode);
 

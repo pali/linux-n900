@@ -38,7 +38,6 @@
 #include <linux/hsi/hsi.h>
 #include <linux/hsi/omap_ssi_hack.h>
 #include <linux/debugfs.h>
-#include <linux/delay.h>
 #include <plat/omap-pm.h>
 #include <plat/clock.h>
 #include <plat/ssi.h>
@@ -995,6 +994,7 @@ static void ssi_break_complete(struct hsi_port *port)
 	struct omap_ssi_port *omap_port = hsi_port_drvdata(port);
 	struct hsi_controller *ssi = to_hsi_controller(port->device.parent);
 	struct omap_ssi_controller *omap_ssi = hsi_controller_drvdata(ssi);
+	LIST_HEAD(bq);
 	struct hsi_msg *msg;
 	struct hsi_msg *tmp;
 	u32 val;
@@ -1008,16 +1008,14 @@ static void ssi_break_complete(struct hsi_port *port)
 	__raw_writel(0, omap_port->ssr_base + SSI_SSR_BREAK_REG);
 	__raw_writel(SSI_BREAKDETECTED,
 			omap_ssi->sys + SSI_MPU_STATUS_REG(port->num, 0));
+	list_splice_init(&omap_port->brkqueue, &bq);
 	spin_unlock(&omap_port->lock);
 
-	list_for_each_entry_safe(msg, tmp, &omap_port->brkqueue, link) {
+	list_for_each_entry_safe(msg, tmp, &bq, link) {
 		msg->status = HSI_STATUS_COMPLETED;
-		spin_lock(&omap_port->lock);
 		list_del(&msg->link);
-		spin_unlock(&omap_port->lock);
 		msg->complete(msg);
 	}
-
 }
 
 static int ssi_async_break(struct hsi_msg *msg)

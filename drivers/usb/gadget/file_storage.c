@@ -484,6 +484,11 @@ struct fsg_dev {
 	struct completion	thread_notifier;
 	struct task_struct	*thread_task;
 
+	/* Terminal mode TM_SWITCH handling */
+	struct work_struct	tm_work;
+	u16			tm_w_value;
+	u16			tm_w_index;
+
 	int			cmnd_size;
 	u8			cmnd[MAX_COMMAND_SIZE];
 	enum data_direction	data_dir;
@@ -1076,6 +1081,15 @@ get_config:
 		value = 1;
 		break;
 
+	case 0xF0:	/* Terminal Mode switch command */
+		DBG(fsg, "TM_SWITCH request v%04x i%04x l%u\n",
+			w_value, w_index, le16_to_cpu(ctrl->wLength));
+		fsg->tm_w_value = w_value;
+		fsg->tm_w_index = w_index;
+		schedule_work(&fsg->tm_work);
+		value = 0;
+		break;
+
 	default:
 		VDBG(fsg,
 			"unknown control req %02x.%02x v%04x i%04x l%u\n",
@@ -1178,6 +1192,17 @@ static int sleep_thread(struct fsg_dev *fsg)
 	return rc;
 }
 
+/* Handler for TM_SWITCH control request */
+static void tm_work_func(struct work_struct *work)
+{
+	struct fsg_dev *fsg = container_of(work, struct fsg_dev, tm_work);
+	char tm_env[] = "TERMINAL_MODE_CMD=v:0x????,i:0x????";
+	char *envp[] = { tm_env, NULL };
+
+	sprintf(tm_env, "TERMINAL_MODE_CMD=v:0x%04x,i:0x%04x",
+			fsg->tm_w_value, fsg->tm_w_index);
+	kobject_uevent_env(&fsg->gadget->dev.parent->kobj, KOBJ_CHANGE, envp);
+}
 
 /*-------------------------------------------------------------------------*/
 
@@ -3591,6 +3616,15 @@ static void /* __init_or_exit */ fsg_unbind(struct usb_gadget *gadget)
 	DBG(fsg, "unbind\n");
 	clear_bit(REGISTERED, &fsg->atomic_bitflags);
 
+	/* If the thread isn't already dead, tell it to exit now */
+	if (fsg->state != FSG_STATE_TERMINATED) {
+		raise_exception(fsg, FSG_STATE_EXIT);
+		wait_for_completion(&fsg->thread_notifier);
+
+		/* The cleanup routine waits for this completion also */
+		complete(&fsg->thread_notifier);
+	}
+
 	/* Unregister the sysfs attribute files and the LUNs */
 	for (i = 0; i < fsg->nluns; ++i) {
 		curlun = &fsg->luns[i];
@@ -3602,15 +3636,6 @@ static void /* __init_or_exit */ fsg_unbind(struct usb_gadget *gadget)
 			device_unregister(&curlun->dev);
 			curlun->registered = 0;
 		}
-	}
-
-	/* If the thread isn't already dead, tell it to exit now */
-	if (fsg->state != FSG_STATE_TERMINATED) {
-		raise_exception(fsg, FSG_STATE_EXIT);
-		wait_for_completion(&fsg->thread_notifier);
-
-		/* The cleanup routine waits for this completion also */
-		complete(&fsg->thread_notifier);
 	}
 
 	/* Free the data buffers */
@@ -3993,6 +4018,8 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 		rc = PTR_ERR(fsg->thread_task);
 		goto out;
 	}
+
+	INIT_WORK(&fsg->tm_work, tm_work_func);
 
 	INFO(fsg, DRIVER_DESC ", version: " DRIVER_VERSION "\n");
 	INFO(fsg, "Number of LUNs=%d Number of buffers=%d\n",

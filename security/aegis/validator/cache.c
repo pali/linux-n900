@@ -203,7 +203,8 @@ static int cache_show(struct seq_file *m, void *v)
 		seq = read_seqbegin(&l->sequence);
 		for (i = 0; i < ENTRIES_PER_BUCKET; i++)
 			if (entry_is_used(&l->entry[i]))
-				seq_printf(m, "%ld ", l->entry[i].i_ino);
+				seq_printf(m, "%08x:%ld ", l->entry[i].s_dev,
+					   l->entry[i].i_ino);
 	} while (read_seqretry(&l->sequence, seq));
 	seq_printf(m, "\n");
 	return 0;

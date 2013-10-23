@@ -51,6 +51,8 @@ struct ad58xx_module_ident {
 struct ad58xx_platform_data {
 	unsigned int ext_clk;
 	int (*set_xclk)(struct v4l2_subdev *sd, u32 hz);
+	int (*use_iclk)(void);
+	int (*use_protection)(void);
 };
 
 #endif /* __AD58XX_H_ */

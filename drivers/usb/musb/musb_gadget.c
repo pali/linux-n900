@@ -1741,7 +1741,9 @@ int usb_gadget_register_driver(struct usb_gadget_driver *driver)
 		 * HACK!!! very dirty, enable the HW workaround for
 		 * the certain gadget only
 		 */
-		if (strcmp(musb->gadget_driver->driver.name, "g_nokia") == 0)
+		if ((strcmp(musb->gadget_driver->driver.name, "g_nokia") == 0)
+		    || (strcmp(musb->gadget_driver->driver.name, "g_ether") == 0)
+		    || (strcmp(musb->gadget_driver->driver.name, "g_ncm") == 0))
 			musb->autoclear_wa = true;
 		  
 		retval = driver->bind(&musb->g);

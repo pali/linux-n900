@@ -103,16 +103,21 @@ struct hashlist_line {
  * struct volume_list - List of volumes having reference hashlist
  * @vlist:   Volume list
  * @vhashes: Bucket list
+ * @devid:   Volume device identifier
  *
  * Each volume can have its own hashlist
  */
 struct volume_list {
 	struct list_head vlist;
 	struct hashlist_line *vhashes;
+	unsigned int devid;
 };
 
 /* List of volumes. Each can have own reference hashlist. */
 static LIST_HEAD(volumes);
+
+/* Lock for a volume list */
+static DEFINE_RWLOCK(volume_lock);
 
 /**
  * parse_wcreds() - parse optional writer credentials list from the message
@@ -223,7 +228,7 @@ static int hashlist_add(unsigned int device_id, struct hashlist_entry *entry)
 		return -EFAULT;
 	}
 	if (sb->s_security == NULL)
-		sb->s_security = validator_hashlist_new();
+		sb->s_security = validator_hashlist_new(device_id);
 	hashlist = sb->s_security;
 	drop_super(sb);
 	if (!hashlist) {
@@ -494,53 +499,53 @@ static void hashlist_fstop(struct seq_file *m, void *v)
 
 static int hashlist_fshow(struct seq_file *m, void *v)
 {
-	struct list_head *q;
 	struct volume_list *vol = NULL;
 	struct hashlist_line *l;
 	loff_t *spos = v;
 	struct hashlist_entry *my;
 	struct hlist_node *pos;
 
-	/* FIXME: This only works with one volume now. */
-	list_for_each(q, &volumes) {
-		vol = list_entry(q, struct volume_list, vlist);
-	}
-	if (!vol)
-		return 0;
-	l = vol->vhashes;
 	seq_printf(m, "Line: %03Ld\n", *spos);
-	read_lock(&l[*spos].bucket_lock);
-	hlist_for_each_entry(my, pos, &l[*spos].entries, list) {
-		int i;
-		char c;
-		switch (my->nodetype) {
-		case EXECUTABLE_FILE:
-			c = 'S';
-			break;
-		case STATIC_DATA_FILE:
-			c = 'T';
-			break;
-		case DYNAMIC_DATA_FILE:
-			c = 'X';
-			break;
-		case IMMUTABLE_DIRECTORY:
-			c = 'D';
-			break;
-		case PROTECTED_DIRECTORY:
-			c = 'P';
-			break;
-		default:
-			c = '?';
-			break;
+	read_lock(&volume_lock);
+	list_for_each_entry(vol, &volumes, vlist) {
+		l = vol->vhashes;
+
+		read_lock(&l[*spos].bucket_lock);
+		hlist_for_each_entry(my, pos, &l[*spos].entries, list) {
+			int i;
+			char c;
+			switch (my->nodetype) {
+			case EXECUTABLE_FILE:
+				c = 'S';
+				break;
+			case STATIC_DATA_FILE:
+				c = 'T';
+				break;
+			case DYNAMIC_DATA_FILE:
+				c = 'X';
+				break;
+			case IMMUTABLE_DIRECTORY:
+				c = 'D';
+				break;
+			case PROTECTED_DIRECTORY:
+				c = 'P';
+				break;
+			default:
+				c = '?';
+				break;
+			}
+			seq_printf(m, "%ld\t%08x:%ld\t", my->sid, vol->devid,
+				   my->ino);
+			seq_printf(m, "(%d,%d,%d)%c %s\t", my->uid, my->gid,
+				   my->mode, c, my->wcreds ? "creds " :
+				   "no    ");
+			for (i = 0; i < SHA1_HASH_LENGTH; i++)
+				seq_printf(m, "%02x", my->hash[i]);
+			seq_printf(m, "\n");
 		}
-		seq_printf(m, "%ld\t%8ld\t", my->sid, my->ino);
-		seq_printf(m, "(%d,%d,%d)%c %s\t", my->uid, my->gid,
-			   my->mode, c, my->wcreds ? "creds " : "no    ");
-		for (i = 0; i < SHA1_HASH_LENGTH; i++)
-			seq_printf(m, "%02x", my->hash[i]);
-		seq_printf(m, "\n");
+		read_unlock(&l[*spos].bucket_lock);
 	}
-	read_unlock(&l[*spos].bucket_lock);
+	read_unlock(&volume_lock);
 	return 0;
 }
 
@@ -568,21 +573,24 @@ static const struct file_operations hashlist_fops = {
 };
 
 /**
- * validator_hashlist_entry() - Check an item from the hashlist.
+ * validator_hashlist_entry_type() - Check an item from the hashlist.
  * @inode: inode
  *
- * Test whether given inode is in a hashlist
+ * Test whether given inode is in a hashlist and return type of
+ * the entry if it exists.
  *
- * Return 0 if found and -ENOENT otherwise.
+ * Return enum hashlist_node_type value if found and -ENOENT otherwise.
  */
-int validator_hashlist_entry(struct inode *node)
+int validator_hashlist_entry_type(struct inode *node)
 {
 	int i;
-	unsigned char *bufptr = NULL;
+	int found = -ENOENT;
 	struct hashlist_entry *tmp;
 	struct hashlist_line *hashlist;
 	struct hlist_node *pos;
 
+	if (node == NULL)
+		return -ENOENT;
 	if (node->i_sb->s_security == NULL)
 		return -ENOENT;
 	i = hash_long(node->i_ino, HASHTABLE_BITS);
@@ -590,12 +598,12 @@ int validator_hashlist_entry(struct inode *node)
 	read_lock(&hashlist[i].bucket_lock);
 	hlist_for_each_entry(tmp, pos, &hashlist[i].entries, list) {
 		if (tmp->ino == node->i_ino) {
-			bufptr = tmp->hash;
+			found = tmp->nodetype;
 			break;
 		}
 	}
 	read_unlock(&hashlist[i].bucket_lock);
-	return bufptr ? 0 : -ENOENT;
+	return found;
 }
 
 /**
@@ -612,6 +620,8 @@ struct vprotection *validator_hashlist_get_wcreds(struct inode *node)
 	struct vprotection *vprot = NULL;
 	struct hlist_node *pos;
 
+	if (node == NULL)
+		return NULL;
 	if (node->i_sb->s_security == NULL)
 		return NULL;
 	i = hash_long(node->i_ino, HASHTABLE_BITS);
@@ -695,6 +705,7 @@ void validator_hashlist_fscleanup(struct dentry *f)
 
 /**
  * validator_hashlist_new() - Create new reference hashlist structure.
+ * @device_id: Volume device identifier
  *
  * This function creates internal data structure for a list of reference
  * hashes. The pointer that is returned should be deallocated using
@@ -705,7 +716,7 @@ void validator_hashlist_fscleanup(struct dentry *f)
  *
  * Return pointer to an internal reference hashlist structure or NULL.
  */
-void *validator_hashlist_new(void)
+void *validator_hashlist_new(unsigned int device_id)
 {
 	int i;
 	struct hashlist_line *newlist;
@@ -723,12 +734,15 @@ void *validator_hashlist_new(void)
 		return NULL;
 	}
 	myvolume->vhashes = newlist;
+	myvolume->devid = new_decode_dev(device_id);
 	pr_info("Aegis: Creating new mount point hashlist %p\n", newlist);
 	for (i = 0; i < HASHTABLE_SIZE; i++) {
 		INIT_HLIST_HEAD(&newlist[i].entries);
 		rwlock_init(&newlist[i].bucket_lock);
 	}
+	write_lock(&volume_lock);
 	list_add_tail(&myvolume->vlist, &volumes);
+	write_unlock(&volume_lock);
 	return newlist;
 }
 
@@ -744,17 +758,18 @@ void validator_hashlist_delete(void *ptr)
 {
 	struct hashlist_line *rlist = ptr;
 	struct volume_list *p;
-	struct list_head *h = NULL;
 	int i;
 
 	if (!ptr)
 		return;
+	write_lock(&volume_lock);
 	list_for_each_entry(p, &volumes, vlist) {
-		if (p->vhashes == ptr)
-			h = &p->vlist;
+		if (p->vhashes == ptr) {
+			list_del(&p->vlist);
+			break;
+		}
 	}
-	if (h)
-		list_del(h);
+	write_unlock(&volume_lock);
 	for (i = 0; i < HASHTABLE_SIZE; i++) {
 		struct hashlist_entry *tmp;
 		struct hlist_node *pos;

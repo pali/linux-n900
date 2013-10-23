@@ -92,6 +92,22 @@ static const char *reason_message[] = {
 	"interrupted syscall",
 };
 
+/**
+ * Operations that can call permission check function
+ * @OP_CREATE: inode creation
+ * @OP_RENAME: rename function
+ * @OP_UNLINK: unlinking function
+ * @OP_WRITE:  open file for writing
+ * @OP_LINK:   create hardlink or symlink to immutable directory
+ */
+enum permission_op_type {
+	OP_CREATE = 1,
+	OP_RENAME = 2,
+	OP_UNLINK = 3,
+	OP_WRITE = 4,
+	OP_LINK = 5,
+};
+
 static inline unsigned long get_inode_security(struct inode *ino)
 {
 	return (unsigned long)(ino->i_security);
@@ -560,16 +576,19 @@ static inline int ipp_cache_add(struct file *file, struct vmetadata *data)
 }
 
 /**
- * ipp_immutable() - check whether the file open needs extra checks
+ * ipp_guarded() - check whether the file open needs extra checks
  * @file: file to be measured
  * @data: measurement context
  *
- * If the file is in immutable directory we need to process file opening.
+ * If the file is in immutable or protected directory we need to process file
+ * opening.
  *
- * Return 0 if we should not process this file open. Otherwise negative value.
+ * Return 0 if we should process this file open. Otherwise negative value.
  */
-static inline int ipp_immutable(struct file *file, struct vmetadata *data)
+static inline int ipp_guarded(struct file *file, struct vmetadata *data)
 {
+	int r;
+
 	/*
 	 * Directory listing should be allowed for directories.
 	 */
@@ -583,30 +602,74 @@ static inline int ipp_immutable(struct file *file, struct vmetadata *data)
 	 *
 	 * FIXME: We probably should have a different list of special dirs
 	 */
-	return validator_hashlist_entry(file->f_dentry->d_parent->d_inode);
+	r = validator_hashlist_entry_type(file->f_dentry->d_parent->d_inode);
+	switch (r) {
+	case IMMUTABLE_DIRECTORY:
+		return 0;
+	case PROTECTED_DIRECTORY:
+		r = validator_hashlist_entry_type(file->f_dentry->d_inode);
+		return (r >= 0) ? 0 : -EINVAL;
+	default:
+		return -EINVAL;
+	}
 }
 
 /**
- * ipp_check_write_perm() - check file modification permission
- * @inode: inode value
+ * ipp_check_wcreds() - check if the process has required credentials
+ * @v: credential structure
+ *
+ * The struct parameter can have a list of credentials. If the current
+ * process owns any of these listed credentials then access is granted.
+ *
+ * Return zero if the process has required credentials. Otherwise negative
+ * value.
+ */
+static int ipp_check_wcreds(struct vprotection *v)
+{
+	int i;
+	for (i = 0; i < v->num; i++)
+		if (creds_khave_p(v->credtype[i], v->credvalue[i]) == 1)
+			return 0;
+	return -EACCES;
+}
+
+/**
+ * ipp_check_permission() - check if the file can be removed or renamed
+ * @dir:  directory inode
+ * @file: file inode
+ * @op:   operation
  *
  * Check whether there is special constraints for file modification. These
  * can be specified in the reference hashlist.
  *
- * Return 0 if write is allowed and negative value for an error.
+ * Return 0 if modification is allowed and negative value for an error.
  */
-static inline int ipp_check_write_perm(struct inode *inode)
+static int ipp_check_permission(struct inode *dir, struct inode *file, int op)
 {
-	int i;
 	struct vprotection *v;
+	int dtype;
+	int ftype;
 
-	v = validator_hashlist_get_wcreds(inode);
+	dtype = validator_hashlist_entry_type(dir);
+	ftype = validator_hashlist_entry_type(file);
+	if ((dtype < 0) && (ftype < 0))
+		return 0;
+	v = validator_hashlist_get_wcreds(dir);
 	if (!v)
 		return 0;
-	for (i = 0; i < v->num; i++)
-		if (creds_khave_p(v->credtype[i], v->credvalue[i]) == 1)
+	switch (dtype) {
+	case PROTECTED_DIRECTORY:
+		if (ftype < 0)
 			return 0;
-	return -EPERM;
+		return ipp_check_wcreds(v);
+		break;
+	case IMMUTABLE_DIRECTORY:
+		return ipp_check_wcreds(v);
+		break;
+	default:
+		return 0;
+		break;
+	}
 }
 
 /**
@@ -716,7 +779,7 @@ static int data_validation(struct file *file, int *reason)
 	int r;
 
 	*reason = R_OK;
-	r = ipp_immutable(file, &data);
+	r = ipp_guarded(file, &data);
 	if (r) {
 		r = 0;
 		goto out;
@@ -959,14 +1022,11 @@ static int validator_inode_permission(struct inode *inode, int mask)
 static int validator_inode_create(struct inode *dir, struct dentry *dentry,
 				  int fmode)
 {
-	int r;
-
 	if (!valinfo.g_init)
 		return 0;
 	if (!valinfo.r_init)
 		return 0;
-	r = ipp_check_write_perm(dir);
-	return r ? -EACCES : 0;
+	return ipp_check_permission(dir, dentry->d_inode, OP_CREATE);
 }
 
 /**
@@ -992,10 +1052,10 @@ static int validator_inode_rename(struct inode *old_dir,
 		return 0;
 	if (!valinfo.r_init)
 		return 0;
-	r = ipp_check_write_perm(old_dir);
+	r = ipp_check_permission(old_dir, old_dentry->d_inode, OP_RENAME);
 	if (r)
 		return -EACCES;
-	r = ipp_check_write_perm(new_dir);
+	r = ipp_check_permission(new_dir, new_dentry->d_inode, OP_RENAME);
 	if (r)
 		return -EACCES;
 	delete_from_verification_cache(old_dentry->d_inode);
@@ -1018,17 +1078,15 @@ static int validator_inode_unlink(struct inode *dir, struct dentry *dentry)
 
 	if (!valinfo.g_init)
 		return 0;
-	r = validator_hashlist_entry(dentry->d_inode);
+	if (!valinfo.r_init)
+		goto clear;
+	r = ipp_check_permission(dir, dentry->d_inode, OP_UNLINK);
 	if (r)
+		return -EACCES;
+clear:
+	r = validator_hashlist_entry_type(dentry->d_inode);
+	if (r < 0)
 		return 0;
-	if (valinfo.r_init) {
-		r = ipp_check_write_perm(dir);
-		if (r)
-			return -EACCES;
-		r = ipp_check_write_perm(dentry->d_inode);
-		if (r)
-			return -EACCES;
-	}
 	delete_from_verification_cache(dentry->d_inode);
 	if (dentry->d_inode->i_nlink == 1)
 		if (validator_hashlist_delete_item(dentry->d_inode))
@@ -1051,7 +1109,7 @@ static void validator_inode_delete(struct inode *inode)
 	if (!valinfo.g_init)
 		return;
 	delete_from_verification_cache(inode);
-	if (validator_hashlist_entry(inode) == 0)
+	if (validator_hashlist_entry_type(inode) >= 0)
 		validator_hashlist_delete_item(inode);
 }
 
@@ -1145,14 +1203,9 @@ static int validator_dentry_open(struct file *file, const struct cred *cred)
 	default:
 		break;
 	}
-	r = validator_hashlist_entry(file->f_dentry->d_parent->d_inode);
-	if (r)
-		return 0;
 	if (file->f_mode & FMODE_WRITE) {
-		r = ipp_check_write_perm(file->f_dentry->d_parent->d_inode);
-		if (r)
-			return -EACCES;
-		r = ipp_check_write_perm(file->f_dentry->d_inode);
+		r = ipp_check_permission(file->f_dentry->d_parent->d_inode,
+					 file->f_dentry->d_inode, OP_WRITE);
 		if (r)
 			return -EACCES;
 	}
@@ -1196,6 +1249,81 @@ static void validator_sb_free_security(struct super_block *sb)
 	}
 }
 
+/**
+ * validator_inode_link() - LSM hook for hard link creation
+ * @old_dentry: link target
+ * @dir:        directory where link will be created
+ * @new_dentry: link name
+ *
+ * Prevent unauthorized hard link creation for immutable directory
+ *
+ * Return zero for success and negative value for an error
+ */
+static int validator_inode_link(struct dentry *old_dentry, struct inode *dir,
+				struct dentry *new_dentry)
+{
+	if (!valinfo.g_init)
+		return 0;
+	if (!valinfo.r_init)
+		return 0;
+	return ipp_check_permission(dir, new_dentry->d_inode, OP_LINK);
+}
+
+/**
+ * validator_inode_symlink() - LSM hook for symbolic link creation
+ * @dir:      directory where link will be created
+ * @dentry:   link name
+ * @old_name: link target
+ *
+ * Prevent unauthorized symbolic link creation for immutable directory
+ *
+ * Return zero for success and negative value for an error
+ */
+static int validator_inode_symlink(struct inode *dir, struct dentry *dentry,
+				   const char *old_name)
+{
+	if (!valinfo.g_init)
+		return 0;
+	if (!valinfo.r_init)
+		return 0;
+	return ipp_check_permission(dir, dentry->d_inode, OP_LINK);
+}
+
+/**
+ * validator_sb_mount() - LSM hook for mount operation
+ * @dev_name: contains the name for object being mounted
+ * @path:     contains the path for mount point object
+ * @type:     contains the filesystem type
+ * @flags:    contains the mount flags
+ * @data:     contains the filesystem-specific data
+ *
+ * Check an attempt to mount on top of protected or immutable directory.
+ *
+ * Return zero if permission is granted.
+ */
+static int validator_sb_mount(char *dev_name, struct path *path, char *type,
+			      unsigned long flags, void *data)
+{
+	struct vprotection *v;
+	int dtype;
+
+	dtype = validator_hashlist_entry_type(path->dentry->d_inode);
+	if (dtype < 0)
+		return 0;
+	v = validator_hashlist_get_wcreds(path->dentry->d_inode);
+	if (!v)
+		return 0;
+	switch (dtype) {
+	case PROTECTED_DIRECTORY:
+	case IMMUTABLE_DIRECTORY:
+		return ipp_check_wcreds(v);
+		break;
+	default:
+		return 0;
+		break;
+	}
+}
+
 /* LSM hooks */
 static struct security_operations validator_security_ops = {
 	.name                = "aegis",
@@ -1208,6 +1336,8 @@ static struct security_operations validator_security_ops = {
 	.inode_delete        = validator_inode_delete,
 	.inode_create        = validator_inode_create,
 	.inode_rename        = validator_inode_rename,
+	.inode_link          = validator_inode_link,
+	.inode_symlink       = validator_inode_symlink,
 	.load_module         = validator_kmod_check,
 	.bprm_check_security = validator_bprm_check_security,
 	.inode_free_security = validator_inode_free_security,
@@ -1216,8 +1346,13 @@ static struct security_operations validator_security_ops = {
 	.task_setgid         = credp_task_setgid,
 	.ptrace_access_check = credp_ptrace_access_check,
 	.ptrace_traceme      = credp_ptrace_traceme,
+	.cred_prepare        = credp_cred_prepare,
+	.cred_alloc_blank    = credp_cred_alloc_blank,
+	.cred_transfer       = credp_cred_transfer,
+	.cred_free           = credp_cred_free,
 #endif
-	.sb_free_security    = validator_sb_free_security
+	.sb_mount            = validator_sb_mount,
+	.sb_free_security    = validator_sb_free_security,
 };
 
 

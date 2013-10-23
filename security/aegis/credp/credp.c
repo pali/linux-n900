@@ -30,6 +30,7 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/sched.h>
+#include <linux/kref.h>
 #include <linux/mutex.h>
 #include <linux/capability.h>
 #include <linux/security.h>
@@ -126,6 +127,16 @@ struct policy_creds {
 };
 
 /**
+ * struct zone_creds - The information used in trust-zone check
+ * @kref: The reference count
+ * @pcreds: The credentials required on zone
+ */
+struct zone_creds  {
+	struct kref kref;
+	struct policy_creds pcreds;
+};
+
+/**
  * struct policy - Mapping of credentials to an executable or identifier
  * @list: Linked either by name_hash or byid_hash
  * @pcreds: Actual credentials set by this policy
@@ -184,6 +195,124 @@ static int authorized_p(void)
 #else
 	return capable(CAP_MAC_ADMIN);
 #endif
+}
+
+/**
+ * policy_creds_clear - Release allocations from policy_creds
+ * @pcreds: The structure to clear (must be non-NULL)
+ */
+static void policy_creds_clear(struct policy_creds *pcreds)
+{
+	if (pcreds->groups)
+		put_group_info(pcreds->groups);
+	*pcreds = policy_creds_init;
+}
+
+/*
+ * Trust-zone and helper functions:
+ *
+ * By default, the trust-zone includes only the current credentials,
+ * which changes on each execve. However, a policy can specify that
+ * the current credentials must be included into trust-zone when
+ * execve happens. When a code is about to be executed or loaded into
+ * address space, it must come from an origin that can grant all
+ * credentials in the trust-zone.
+ *
+ * The extended trust-zone is for security aware programs, which use
+ * other helper applications. The trust-zone guarantees that all used
+ * helpers also come from sufficiently trusted origin.
+ *
+ * The trust-zone can be only cleared by credentials confine or
+ * set calls.
+ *
+ * The implementation only needs a pointer to a 'struct zone_creds'
+ * object and a flag, which tells whether current credentials should
+ * be added to the trust-zone, when execve happens.
+ *
+ * The 'trust_zone_*' helper functions below assume that there is at
+ * least one bit of free space in a "struct zone_creds" pointer. This
+ * way no extra allocations are required, and the struct cred security
+ * field is sufficient.
+ */
+
+/*
+ * release_zone_creds - kref release callback
+ * @kref: The kref within trust-zone object
+ */
+static void release_zone_creds(struct kref *kref)
+{
+	struct zone_creds *zone = container_of(kref, struct zone_creds, kref);
+	policy_creds_clear(&zone->pcreds);
+	kfree(zone);
+}
+
+/*
+ * trust_zone_init - Initialize cred security
+ * @new: The cred to be initialize
+ * @zone: The initial value (NULL allowed)
+ */
+static int trust_zone_init(struct cred *new, struct zone_creds *zone)
+{
+	if (zone)
+		kref_get(&zone->kref);
+	new->security = (void *)zone;
+	return 0;
+}
+
+/*
+ * trust_zone - Return trust zone from cred
+ * @cred: The cred
+ */
+static struct zone_creds *trust_zone(const struct cred *cred)
+{
+	return (struct zone_creds *)((unsigned long)cred->security & ~1);
+}
+
+/*
+ * trust_zone_marked - Test if cred should be included in trust-zone
+ * @cred: The credential
+ *
+ * Return 1, if the 'cred' should be included.
+ */
+static int trust_zone_marked(const struct cred *cred)
+{
+	return ((unsigned long)cred->security & 1) != 0;
+}
+
+/*
+ * trust_zone_mark - Mark cred to be included into trust-zone
+ * @cred: The cred
+ */
+static void trust_zone_mark(struct cred *new)
+{
+	new->security = (void *)((unsigned long)new->security | 1);
+}
+
+/*
+ * trust_zone_exit - Exit trust zone
+ * @cred: The cred
+ *
+ * Detach the cred from the trust zone and clear the flag.
+ */
+static void trust_zone_exit(struct cred *new)
+{
+	struct zone_creds *zone = trust_zone(new);
+	if (zone)
+		kref_put(&zone->kref, release_zone_creds);
+	new->security = NULL;
+}
+
+/*
+ * trust_zone_copy - Copy the content of the trust-zone
+ * @new: The cred to receive the copy
+ * @old: The cred from which to copy from
+ */
+static void trust_zone_copy(struct cred *new, const struct cred *old)
+{
+	struct zone_creds *zone = trust_zone(old);
+	new->security = old->security;
+	if (zone)
+		kref_get(&zone->kref);
 }
 
 /**
@@ -255,6 +384,7 @@ int credp_task_setgid(gid_t id0, gid_t id1, gid_t id2, int flags)
 static int is_subset(const struct cred *subset, const struct cred *set)
 {
 	int i, j;
+	const struct zone_creds *zone = trust_zone(subset);
 
 	/*
 	 * The egid is not always included in the supplementary
@@ -284,6 +414,30 @@ static int is_subset(const struct cred *subset, const struct cred *set)
 			if (g == grp)
 				break;
 		}
+	}
+	if (!zone)
+		return 0;
+	/*
+	 * The "trust-zone" credentials, when present, must all be
+	 * also included in the set.
+	 */
+	if (!cap_issubset(zone->pcreds.caps, set->cap_permitted))
+		return -EPERM;
+
+	/* All groups in zone must also be present in the set. */
+	if (zone->pcreds.gid != set->egid &&
+	    !groups_search(set->group_info, zone->pcreds.gid))
+		return -EPERM;
+	if (!zone->pcreds.groups)
+		return 0;
+	/*
+	 * FIXME: Because zone groups is not necessarily sorted,
+	 * somewhat heavier loop is needed.
+	 */
+	for (i = 0; i < zone->pcreds.groups->ngroups; ++i) {
+		const gid_t g = GROUP_AT(zone->pcreds.groups, i);
+		if (!groups_search(set->group_info, g))
+			return -EPERM;
 	}
 	return 0;
 }
@@ -324,17 +478,6 @@ int credp_ptrace_traceme(struct task_struct *parent)
 	rc = is_subset(current_cred(), __task_cred(parent));
 	rcu_read_unlock();
 	return rc;
-}
-
-/**
- * policy_creds_clear - Release allocations from policy_creds
- * @pcreds: The structure to clear (must be non-NULL)
- */
-static void policy_creds_clear(struct policy_creds *pcreds)
-{
-	if (pcreds->groups)
-		put_group_info(pcreds->groups);
-	*pcreds = policy_creds_init;
 }
 
 /**
@@ -480,6 +623,8 @@ static int credp_seq_show(struct seq_file *m, void *v)
 			seq_puts(m, " not-inheritable");
 		if ((policy->flags & CREDP_TYPE_SETUID) == 0)
 			seq_puts(m, " setxid");
+		if ((policy->flags & CREDP_TYPE_TRUST_ZONE) != 0)
+			seq_puts(m, " trust-zone");
 	}
 	seq_puts(m, "]\n");
 
@@ -619,48 +764,51 @@ static struct group_info *groups_intersect(struct group_info *groups)
 }
 
 /**
- * groups_combine - Combine groups information with current
- * @groups: The groups to combine with current groups
+ * groups_combine - Return union of groups
+ * @now: The set of groups to combine (assumed sorted, non-NULL)
+ * @groups: The other set of groups to combine (maybe unsorted, or NULL)
  *
  * Returns NULL only if a groups could not be allocated.  Otherwise,
  * returns non-NULL group_info, which must be released by a call to
  * put_group_info.
  */
-static struct group_info *groups_combine(struct group_info *groups)
+static struct group_info *groups_combine(
+	struct group_info *now, struct group_info *groups)
 {
-	struct group_info *now = current_cred()->group_info;
 	struct group_info *new;
 	int missed = 0;
 	int i;
 
-	/* If the to be combine set is empty, then the current set is
-	 * not changed */
-	if (!groups || groups->ngroups == 0)
+	/*
+	 * If they are same, or if the 'groups' is empty, then
+	 * combined set is 'now'
+	 */
+	if (now == groups || !groups || groups->ngroups == 0)
 		return get_group_info(now);
-	/* If the current groups is empty, then the combined set is
-	 * the to be combined set */
+
+	/* If now set is empty, then the combined set is 'groups' */
 	if (now->ngroups == 0)
 		return get_group_info(groups);
 
-	/* The now->groups is sorted, but groups in policy is not.  A
-	 * somewhat brute force approach below... */
+	/*
+	 * The 'now' set is sorted, but groups can be unsorted. A
+	 * somewhat brute force approach below.
+	 */
 	for (i = 0; i < groups->ngroups; ++i)
 		if (!groups_search(now, GROUP_AT(groups, i)))
-			++missed;/* The group does not exist in current */
+			++missed;/* The group does not exist in 'now' */
 
-	/* If all groups are present in current groups, just use the
-	 * current as is */
+	/* If all groups are present in 'now', just use it as is */
 	if (missed == 0)
 		return get_group_info(now);
 
-	missed += now->ngroups;
-	new = groups_alloc(missed);
+	new = groups_alloc(now->ngroups + missed);
 	if (!new)
 		return NULL;
-	/* First, just copy the current groups */
+	/* First, just copy the content of 'now' */
 	for (i = 0; i < now->ngroups; ++i)
 		GROUP_AT(new, i) = GROUP_AT(now, i);
-	/* Now add the missing groups */
+	/* Add the missing ones from groups */
 	for (missed = 0; missed < groups->ngroups; ++missed) {
 		const gid_t g = GROUP_AT(groups, missed);
 		if (!groups_search(now, g)) {
@@ -669,6 +817,70 @@ static struct group_info *groups_combine(struct group_info *groups)
 		}
 	}
 	return new;
+}
+
+/**
+ * credp_cred_prepare - Implement cred_prepare LSM hook
+ */
+int credp_cred_prepare(struct cred *new, const struct cred *old, gfp_t gfp)
+{
+	struct zone_creds *zone = trust_zone(old);
+	struct zone_creds *new_zone;
+	int ret = -ENOMEM;
+
+	if (!trust_zone_marked(old))
+		return trust_zone_init(new, zone);
+
+	/* Mergeo old credentials need to be merged into the trust-zone */
+	new_zone = kmalloc(sizeof(*zone), gfp);
+	if (!new_zone)
+		return ret;
+
+	kref_init(&new_zone->kref);
+	new_zone->pcreds.uid = old->euid;
+	new_zone->pcreds.gid = old->egid;
+	if (zone) {
+		new_zone->pcreds.caps =
+			cap_combine(old->cap_permitted, zone->pcreds.caps);
+		new_zone->pcreds.groups =
+			groups_combine(old->group_info, zone->pcreds.groups);
+		if (!new_zone->pcreds.groups)
+			goto out;
+	} else {
+		new_zone->pcreds.caps = old->cap_permitted;
+		new_zone->pcreds.groups = get_group_info(old->group_info);
+	}
+	ret = trust_zone_init(new, new_zone);
+out:
+	kref_put(&new_zone->kref, release_zone_creds);
+	return ret;
+}
+
+/**
+ * credp_cred_free - Implement cred_free LSM hook
+ */
+void credp_cred_free(struct cred *cred)
+{
+	trust_zone_exit(cred);
+}
+
+/**
+ * credp_cred_alloc_blank - Implement cred_alloc_blank LSM hook
+ *
+ * This function is only used to separately initialize the
+ * security pointer for the cred_transfer, which cannot fail
+ * due lack of memory.
+ */
+int credp_cred_alloc_blank(struct cred *cred, gfp_t gfp)
+{
+	return trust_zone_init(cred, NULL);
+}
+/**
+ * credp_cred_transfer - Implement cred_transfer LSM hook
+ */
+void credp_cred_transfer(struct cred *new, const struct cred *old)
+{
+	trust_zone_copy(new, old);
 }
 
 #define APPLY_PCREDS_ID_CHANGED 1
@@ -819,7 +1031,8 @@ static int apply_pcreds(int flags, const struct policy_creds *pcreds,
 				old->cap_effective, new->cap_permitted);
 		}
 		if (tcb) {
-			groups = groups_combine(pcreds->groups);
+			groups = groups_combine(current_cred()->group_info,
+						pcreds->groups);
 		} else if (capable(CAP_SETGID)) {
 			groups = purge_tokens(pcreds->groups, 1);
 			if (!groups)
@@ -935,6 +1148,10 @@ int credp_apply(struct linux_binprm *bprm, bool *effective)
 		ret = 0;
 	}
 	*effective = !cap_isclear(new->cap_permitted);
+
+	/* Add to the origin checked set of credentials, if requested */
+	if (policy->flags & CREDP_TYPE_TRUST_ZONE)
+		trust_zone_mark(new);
 	goto out;
 
 no_policy:
@@ -1237,6 +1454,11 @@ static int set_current_from_pcreds(int flags, const struct policy_creds *pcreds)
 			goto out;
 	}
 	new->cap_effective = new->cap_permitted;
+
+	/* Exit trust zone, unless flags says to keep it */
+	if ((flags & CREDP_TYPE_TRUST_ZONE) == 0)
+		trust_zone_exit(new);
+
 	commit_creds(new);
 	return 0;
 out:
@@ -1394,43 +1616,6 @@ static void audit_message(int type, int id, long srcid)
 }
 
 /**
- * audit_group: Test a group against current task and source groups
- * @g: The group to test
- * @groups: The groups allowed by the source
- * @srcid: The source identifier
- * @cred: The credentials to check
- *
- * If a group 'g' is in current task context, it must be also in
- * the allowed groups of the source.
- *
- * Return 1, if access denied (log message generated), and 0
- * otherwise.
- */
-static int audit_group_p(gid_t g, const struct group_info *groups, long srcid,
-	const struct cred *cred)
-{
-	/* Check if group g is in credentials */
-	if (cred->gid == g || cred->egid == g || cred->sgid == g ||
-	    cred->fsgid == g || groups_search(cred->group_info, g)) {
-		/*
-		 * The group g is included in credentials, now need to
-		 * check whether it is included in the allowed groups
-		 * by the source.
-		 */
-		if (group_in_p(g, groups))
-			return 0;
-		/*
-		 * The group is in credentials, but not allowed for
-		 * the source
-		 */
-		audit_message(CREDS_GRP, g, srcid);
-		return 1;
-	}
-	/* The g is not included in credentials */
-	return 0;
-}
-
-/**
  * credp_check: Verify that task does not have too many credentials
  * @srcid: The source identifier
  * @cred: The credentials to check against (if NULL, uses current_cred())
@@ -1444,6 +1629,8 @@ int credp_check(long srcid, const struct cred *cred)
 	int ret = 0;
 	struct policy *byid;
 	const struct policy_creds *pcreds = &policy_creds_init;
+	const struct zone_creds *zone;
+
 	unsigned int i;
 
 	mutex_lock(&mutex);
@@ -1460,19 +1647,23 @@ int credp_check(long srcid, const struct cred *cred)
 			goto out;
 		cred = current_cred();
 	}
-
 	byid = find_policy_byid(srcid, &i);
 	if (byid)
 		pcreds = &byid->pcreds;
+	zone = trust_zone(cred);
 	/* All capabilities in current context must be allowed by the
 	 * source policy. */
 	CAP_FOR_EACH_U32(i) {
 		const u32 check = enforce_origin_checking->caps.cap[i];
 		const u32 mask = ~pcreds->caps.cap[i] & check;
-		const unsigned long denied =
-			(mask & (cred->cap_effective.cap[i] |
-				 cred->cap_permitted.cap[i]));
 		unsigned j;
+		unsigned long denied;
+
+		denied = cred->cap_effective.cap[i] |
+			cred->cap_permitted.cap[i];
+		if (zone)
+			denied |= zone->pcreds.caps.cap[i];
+		denied &= mask;
 		for_each_bit(j, &denied, 32) {
 			/* Current task has more than allowed capabilies.
 			 * Generate audit_message from each conflict */
@@ -1482,10 +1673,28 @@ int credp_check(long srcid, const struct cred *cred)
 	}
 	if (!enforce_origin_checking->groups)
 		goto out;
-	for (i = 0; i < enforce_origin_checking->groups->ngroups; ++i)
-		if (audit_group_p(GROUP_AT(enforce_origin_checking->groups, i),
-				  pcreds->groups, srcid, cred))
+	for (i = 0; i < enforce_origin_checking->groups->ngroups; ++i) {
+		const gid_t g = GROUP_AT(enforce_origin_checking->groups, i);
+		/* Check if group g is in context */
+		if (cred->gid == g || cred->egid == g || cred->sgid == g ||
+		    cred->fsgid == g || groups_search(cred->group_info, g) ||
+		    (zone && (zone->pcreds.gid == g ||
+			      group_in_p(g, zone->pcreds.groups)))) {
+			/*
+			 * The group g is included in context, now
+			 * need to check whether it is included in the
+			 * allowed groups by the source.
+			 */
+			if (group_in_p(g, pcreds->groups))
+				continue;
+			/*
+			 * The group is in credentials, but not
+			 * allowed for the source
+			 */
+			audit_message(CREDS_GRP, g, srcid);
 			ret = -EACCES;
+		}
+	}
 out:
 	mutex_unlock(&mutex);
 	return ret;

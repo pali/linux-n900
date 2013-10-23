@@ -122,6 +122,9 @@
 				 WL1273_IS2_TRI_OPT | \
 				 WL1273_IS2_RATE_48K)
 
+#define WL1273_MODE_CHANGE_LOW	100
+#define WL1273_MODE_CHANGE_HIGH	200
+
 static const struct region_info regions[] = {
 	/* Japan */
 	{
@@ -396,6 +399,9 @@ int wl1273_fm_set_audio(struct wl1273_core *core, unsigned int new_mode)
 					WL1273_PCM_DEF_MODE);
 		if (r)
 			goto out;
+
+		/* Sleeping here makes audio mode changes more reliable. */
+		usleep_range(WL1273_MODE_CHANGE_LOW, WL1273_MODE_CHANGE_HIGH);
 
 		r = wl1273_fm_write_cmd(core, WL1273_I2S_MODE_CONFIG_SET,
 					core->i2s_mode);

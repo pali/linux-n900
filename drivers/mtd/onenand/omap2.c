@@ -110,6 +110,34 @@ static void wait_warn(char *msg, int state, unsigned int ctrl,
 	       "intr 0x%04x\n", msg, state, ctrl, intr);
 }
 
+/*
+ * For flex- or 4k page onenand scan four ecc status registers and
+ * return the most serious of the errors, or 0 if no error.
+ * If any error is uncorrectable, we can return immediately.
+ * Others onenand memories are handled in one ecc status register way.
+ */
+static inline int onenand_read_ecc(struct omap2_onenand *c)
+{
+	int ecc, i, result = 0;
+	struct onenand_chip *this = &c->onenand;
+
+	if (!FLEXONENAND(this) && !ONENAND_IS_4KB_PAGE(this))
+		return read_reg(c, ONENAND_REG_ECC_STATUS);
+
+	for (i = 0; i < 4; i++) {
+		ecc = read_reg(c, ONENAND_REG_ECC_STATUS + i * 2);
+		if (likely(!ecc))
+			continue;
+		if (ecc & FLEXONENAND_UNCORRECTABLE_ERROR)
+			return ONENAND_ECC_2BIT_ALL;
+		else
+			result = ONENAND_ECC_1BIT_ALL;
+	}
+
+	return result;
+}
+
+
 static int omap2_onenand_wait(struct mtd_info *mtd, int state)
 {
 	struct omap2_onenand *c = container_of(mtd, struct omap2_onenand, mtd);
@@ -239,7 +267,7 @@ retry:
 	ctrl = read_reg(c, ONENAND_REG_CTRL_STATUS);
 
 	if (intr & ONENAND_INT_READ) {
-		int ecc = read_reg(c, ONENAND_REG_ECC_STATUS);
+		int ecc = onenand_read_ecc(c);
 
 		if (ecc) {
 			unsigned int addr1, addr8;
@@ -247,13 +275,13 @@ retry:
 			addr1 = read_reg(c, ONENAND_REG_START_ADDRESS1);
 			addr8 = read_reg(c, ONENAND_REG_START_ADDRESS8);
 			if (ecc & ONENAND_ECC_2BIT_ALL) {
-				printk(KERN_ERR "onenand_wait: ECC error = "
-				       "0x%04x, addr1 %#x, addr8 %#x\n",
-				       ecc, addr1, addr8);
+				printk(KERN_ERR "onenand_wait: non-correctable "
+				       "ECC error = 0x%04x, addr1 %#x, "
+				       "addr8 %#x\n", ecc, addr1, addr8);
 				mtd->ecc_stats.failed++;
 				return -EBADMSG;
 			} else if (ecc & ONENAND_ECC_1BIT_ALL) {
-				printk(KERN_NOTICE "onenand_wait: correctable "
+				printk(KERN_DEBUG "onenand_wait: correctable "
 				       "ECC error = 0x%04x, addr1 %#x, "
 				       "addr8 %#x\n", ecc, addr1, addr8);
 				mtd->ecc_stats.corrected++;
@@ -640,6 +668,18 @@ static int omap2_onenand_get_block_status(struct mtd_info *mtd,
 	return this->read_word(this->base + ONENAND_REG_WP_STATUS);
 }
 
+static ssize_t omap2_onenand_show_manfid(struct device *dev,
+					 struct device_attribute *attr,
+					 char *buf)
+{
+	struct platform_device *pdev =
+		container_of(dev, struct platform_device, dev);
+	struct omap2_onenand *c = platform_get_drvdata(pdev);
+	return sprintf(buf, "0x%08x\n", c->onenand.manufacturer_id);
+}
+
+static DEVICE_ATTR(manfid, S_IRUGO, omap2_onenand_show_manfid, NULL);
+
 static int __devinit omap2_onenand_probe(struct platform_device *pdev)
 {
 	struct omap_onenand_platform_data *pdata;
@@ -793,6 +833,10 @@ static int __devinit omap2_onenand_probe(struct platform_device *pdev)
 	if (r)
 		goto err_release_onenand;
 
+	r = device_create_file(&pdev->dev, &dev_attr_manfid);
+	if (r)
+		goto err_release_onenand;
+
 	platform_set_drvdata(pdev, c);
 
 	return 0;
@@ -826,6 +870,7 @@ static int __devexit omap2_onenand_remove(struct platform_device *pdev)
 {
 	struct omap2_onenand *c = dev_get_drvdata(&pdev->dev);
 
+	device_remove_file(&pdev->dev, &dev_attr_manfid);
 	onenand_release(&c->mtd);
 	regulator_put(c->regulator);
 	if (c->dma_channel != -1)

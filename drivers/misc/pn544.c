@@ -54,6 +54,10 @@
 #define PN544_WAKEUP_GUARD_US	(PN544_WAKEUP_GUARD * 1000)
 #define PN544_INTERFRAME_DELAY	200 /* us */
 #define PN544_BAUDRATE_CHANGE	150 /* us */
+#define PN544_IO_DELAY		300 /* us */
+#define PN544_RESET_DELAY	102000 /* us */
+#define PN544_RESET_BYTE	0xf9
+#define PN544_RESET_MSG_LEN	5
 
 /* Debug bits */
 #define PN544_DEBUG_BUF		0x01
@@ -64,6 +68,8 @@
 #define PN544_DEBUG_MODE	0x20
 
 static int debug;
+static unsigned int io_delay    = PN544_IO_DELAY;
+static unsigned int reset_delay = PN544_RESET_DELAY;
 
 static struct i2c_device_id pn544_id_table[] = {
 	{ PN544_DRIVER_NAME, 0 },
@@ -97,6 +103,10 @@ struct pn544_info {
 	struct mutex read_mutex; /* read_irq */
 	u8 *buf;
 	unsigned int buflen;
+
+	unsigned int io_delay; /* minimum time between transactions */
+	unsigned int reset_delay; /* minimum idle time before reset */
+	unsigned long lastio; /* timestamp for the last I2C transaction */
 };
 
 static const char reg_vdd_io[]	= "Vdd_IO";
@@ -113,6 +123,28 @@ static void pn544_print_buf(char *msg, u8 *buf, int len)
 
 	pr_info("\n");
 #endif
+}
+
+/* current time in microseconds */
+static inline unsigned long pn544_now(void)
+{
+	return (unsigned long)ktime_to_us(ktime_get());
+}
+
+static void pn544_io_delay(struct pn544_info *info, int delay)
+{
+	if (info->lastio) {
+		const unsigned long now = pn544_now();
+		const unsigned long nextio = info->lastio + delay;
+		if (nextio > now) {
+			const unsigned long wait_min = nextio - now;
+			const unsigned long wait_max = wait_min + 200;
+
+			dev_dbg(&info->i2c_dev->dev, "waiting %lu us\n",
+				wait_min);
+			usleep_range(wait_min, wait_max);
+		}
+	}
 }
 
 /* sysfs interface */
@@ -199,14 +231,22 @@ static int check_crc(u8 *buf, int buflen)
 	return 0;
 }
 
-static int pn544_i2c_write(struct i2c_client *client, u8 *buf, int len)
+static int pn544_i2c_write(struct pn544_info *info, u8 *buf, int len)
 {
+	struct i2c_client *client = info->i2c_dev;
 	int r;
 
 	if (len < 4 || len != (buf[0] + 1) || check_crc(buf, len))
 		return -EBADMSG;
 
-	usleep_range(PN544_I2C_IO_TIME, PN544_I2C_IO_MAX);
+	if (len >= PN544_RESET_MSG_LEN && buf[1] == PN544_RESET_BYTE) {
+		/* Longer delay before the reset */
+		dev_dbg(&info->i2c_dev->dev, "reset detected\n");
+		pn544_io_delay(info, info->reset_delay);
+	} else {
+		/* Normal case */
+		pn544_io_delay(info, info->io_delay);
+	}
 
 	r = i2c_master_send(client, buf, len);
 	dev_dbg(&client->dev, "send: %d\n", r);
@@ -220,11 +260,13 @@ static int pn544_i2c_write(struct i2c_client *client, u8 *buf, int len)
 	if (r != len)
 		return -EREMOTEIO;
 
+	info->lastio = pn544_now();
 	return r;
 }
 
-static int pn544_i2c_read(struct i2c_client *client, u8 *buf, int buflen)
+static int pn544_i2c_read(struct pn544_info *info, u8 *buf, int buflen)
 {
+	struct i2c_client *client = info->i2c_dev;
 	int r;
 	u8 len;
 
@@ -251,12 +293,14 @@ static int pn544_i2c_read(struct i2c_client *client, u8 *buf, int buflen)
 	r = i2c_master_recv(client, buf + 1, len);
 	dev_dbg(&client->dev, "recv2: %d\n", r);
 
-	if (r != len)
-		return -EREMOTEIO;
+	if (r == len) {
+		r += 1;
+		info->lastio = pn544_now();
+	} else {
+		r = -EREMOTEIO;
+	}
 
-	usleep_range(PN544_I2C_IO_TIME, PN544_I2C_IO_MAX);
-
-	return r + 1;
+	return r;
 }
 
 static int pn544_fw_write(struct i2c_client *client, u8 *buf, int len)
@@ -399,7 +443,7 @@ static ssize_t pn544_read(struct file *file, char __user *buf,
 	len = min(count, info->buflen);
 
 	mutex_lock(&info->read_mutex);
-	r = pn544_i2c_read(info->i2c_dev, info->buf, len);
+	r = pn544_i2c_read(info, info->buf, len);
 	info->read_irq = PN544_NONE;
 	mutex_unlock(&info->read_mutex);
 
@@ -483,7 +527,7 @@ static ssize_t pn544_write(struct file *file, const char __user *buf,
 	if (len > (info->buf[0] + 1)) /* 1 msg at a time */
 		len  = info->buf[0] + 1;
 
-	return pn544_i2c_write(info->i2c_dev, info->buf, len);
+	return pn544_i2c_write(info, info->buf, len);
 }
 
 static int pn544_ioctl(struct inode *inode, struct file *file,
@@ -549,6 +593,34 @@ static int pn544_ioctl(struct inode *inode, struct file *file,
 		if (copy_from_user(&val, (void __user *)arg, sizeof(val)))
 			return -EFAULT;
 		debug = val;
+		break;
+
+	case PN544_GET_IODELAY:
+		dev_dbg(&client->dev, "%s:  PN544_GET_IODELAY\n", __func__);
+		val = info->io_delay;
+		if (copy_to_user((void __user *)arg, &val, sizeof(val)))
+			return -EFAULT;
+		break;
+
+	case PN544_SET_IODELAY:
+		dev_dbg(&client->dev, "%s:  PN544_SET_IODELAY\n", __func__);
+		if (copy_from_user(&val, (void __user *)arg, sizeof(val)))
+			return -EFAULT;
+		info->io_delay = val;
+		break;
+
+	case PN544_GET_RESETDELAY:
+		dev_dbg(&client->dev, "%s:  PN544_GET_RESETDELAY\n", __func__);
+		val = info->reset_delay;
+		if (copy_to_user((void __user *)arg, &val, sizeof(val)))
+			return -EFAULT;
+		break;
+
+	case PN544_SET_RESETDELAY:
+		dev_dbg(&client->dev, "%s:  PN544_SET_RESETDELAY\n", __func__);
+		if (copy_from_user(&val, (void __user *)arg, sizeof(val)))
+			return -EFAULT;
+		info->reset_delay = val;
 		break;
 
 	case TCGETS:
@@ -634,7 +706,7 @@ static int pn544_rset_test(struct pn544_info *info)
 		return r;
 
 	pn544_print_buf("rset write", (u8 *)&rset, rset.length + 1);
-	r = pn544_i2c_write(client, (u8 *)&rset, rset.length + 1);
+	r = pn544_i2c_write(info, (u8 *)&rset, rset.length + 1);
 	if (r < 0) {
 		dev_err(&client->dev, "Write error to rset: %d\n", r);
 		goto out;
@@ -649,7 +721,7 @@ static int pn544_rset_test(struct pn544_info *info)
 	}
 
 	mutex_lock(&info->read_mutex);
-	r = pn544_i2c_read(client, read_buf, sizeof(read_buf));
+	r = pn544_i2c_read(info, read_buf, sizeof(read_buf));
 	info->read_irq = PN544_NONE;
 	mutex_unlock(&info->read_mutex);
 
@@ -778,6 +850,9 @@ static int __devinit pn544_probe(struct i2c_client *client,
 	info->i2c_dev = client;
 	info->state = PN544_ST_COLD;
 	info->read_irq = PN544_NONE;
+	info->reset_delay = reset_delay;
+	info->io_delay = io_delay;
+	info->lastio = pn544_now();
 	mutex_init(&info->read_mutex);
 	init_waitqueue_head(&info->read_wait);
 	i2c_set_clientdata(client, info);
@@ -924,3 +999,13 @@ module_exit(pn544_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION(DRIVER_DESC);
+
+module_param(io_delay, uint, S_IRUSR | S_IRGRP | S_IROTH);
+MODULE_PARM_DESC(io_delay,
+		 "Minimum time between I2C transactions in ms, default: "
+		 __stringify(PN544_IO_DELAY));
+
+module_param(reset_delay, uint, S_IRUSR | S_IRGRP | S_IROTH);
+MODULE_PARM_DESC(reset_delay,
+		 "Minimum idle time before pn544 reset in ms, default:  "
+		 __stringify(PN544_RESET_DELAY));

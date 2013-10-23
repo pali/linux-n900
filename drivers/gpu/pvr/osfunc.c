@@ -1128,7 +1128,11 @@ void get_proc_name(int pid, char *buf, size_t buf_size)
 
 	rcu_read_lock();
 	tsk = pid_task(find_vpid(pid), PIDTYPE_PID);
-	strlcpy(buf, tsk->comm, buf_size);
+	if (tsk) {
+		task_lock(tsk);
+		strlcpy(buf, tsk->comm, buf_size);
+		task_unlock(tsk);
+	}
 	rcu_read_unlock();
 }
 

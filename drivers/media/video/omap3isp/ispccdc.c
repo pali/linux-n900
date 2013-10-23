@@ -1423,8 +1423,11 @@ static void ccdc_lsc_isr(struct isp_ccdc_device *ccdc, u32 events)
 	unsigned long flags;
 
 	if (events & IRQ0STATUS_CCDC_LSC_PREF_ERR_IRQ) {
+		struct isp_pipeline *pipe =
+			to_isp_pipeline(&ccdc->subdev.entity);
+
 		ccdc_lsc_error_handler(ccdc);
-		ccdc->error = 1;
+		pipe->error = true;
 		dev_dbg(to_device(ccdc), "lsc prefetch error\n");
 	}
 
@@ -1499,7 +1502,7 @@ static int ccdc_isr_buffer(struct isp_ccdc_device *ccdc)
 		goto done;
 	}
 
-	buffer = omap3isp_video_buffer_next(&ccdc->video_out, ccdc->error);
+	buffer = omap3isp_video_buffer_next(&ccdc->video_out);
 	if (buffer != NULL) {
 		ccdc_set_outaddr(ccdc, buffer->isp_addr);
 		restart = 1;
@@ -1513,7 +1516,6 @@ static int ccdc_isr_buffer(struct isp_ccdc_device *ccdc)
 					ISP_PIPELINE_STREAM_SINGLESHOT);
 
 done:
-	ccdc->error = 0;
 	return restart;
 }
 
@@ -1735,7 +1737,6 @@ static int ccdc_set_stream(struct v4l2_subdev *sd, int enable)
 		 */
 		ccdc_config_vp(ccdc);
 		ccdc_enable_vp(ccdc, 1);
-		ccdc->error = 0;
 		ccdc_print_status(ccdc);
 	}
 

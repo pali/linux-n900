@@ -239,6 +239,9 @@ rx_submit(struct eth_dev *dev, struct usb_request *req, gfp_t gfp_flags)
 	size += out->maxpacket - 1;
 	size -= size % out->maxpacket;
 
+	if (dev->port_usb->is_fixed)
+		size = max(size, dev->port_usb->fixed_out_len);
+
 	skb = alloc_skb(size + NET_IP_ALIGN, gfp_flags);
 	if (skb == NULL) {
 		DBG(dev, "no rx skb\n");
@@ -317,9 +320,10 @@ static void rx_complete(struct usb_ep *ep, struct usb_request *req)
 
 		skb2 = skb_dequeue(&dev->rx_frames);
 		while (skb2) {
+			int max_len = dev->net->mtu + ETH_HLEN + align;
 			if (status < 0
 					|| ETH_HLEN > skb2->len
-					|| skb2->len > ETH_FRAME_LEN + align) {
+					|| skb2->len > max_len) {
 				dev->net->stats.rx_errors++;
 				dev->net->stats.rx_length_errors++;
 				DBG(dev, "rx length %d\n", skb2->len);
@@ -609,12 +613,19 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	req->context = skb;
 	req->complete = tx_complete;
 
+	/* NCM requires no zlp if transfer is dwNtbInMaxSize */
+	if (dev->port_usb->is_fixed &&
+	    length == dev->port_usb->fixed_in_len &&
+	    (length % in->maxpacket) == 0)
+		req->zero = 0;
+	else
+		req->zero = 1;
+
 	/* use zlp framing on tx for strict CDC-Ether conformance,
 	 * though any robust network rx path ignores extra padding.
 	 * and some hardware doesn't like to write zlps.
 	 */
-	req->zero = 1;
-	if (!dev->zlp && (length % in->maxpacket) == 0)
+	if (req->zero && !dev->zlp && (length % in->maxpacket) == 0)
 		length++;
 
 	req->length = length;
@@ -930,6 +941,10 @@ struct net_device *gether_connect(struct gether *link)
 		spin_lock(&dev->lock);
 		dev->port_usb = link;
 		link->ioport = dev;
+
+		if (link->mtu > ETH_HLEN)
+			dev->net->mtu = link->mtu;
+
 		if (netif_running(dev->net)) {
 			if (link->open)
 				link->open(link);
@@ -1025,4 +1040,36 @@ void gether_disconnect(struct gether *link)
 	dev->port_usb = NULL;
 	link->ioport = NULL;
 	spin_unlock(&dev->lock);
+}
+
+/**
+ * gether_is_connected - report status of usb link
+ * @link: the USB link
+ *
+ * This is called to check of the link is connected.
+ * Usually it's true if host set altsetting 1 for
+ * CDC function.
+ */
+int gether_is_connected(struct gether *link)
+{
+	return link->ioport != NULL;
+}
+
+/**
+ * gether_update_mtu - sync mtu change from usb to network layer
+ * @link: the USB link, on which gether_connect() was called
+ *
+ * This is called to change network interface's mtu value
+ * if it's amended from usb side.
+ *
+ * This shouldn't be done if interface is running already,
+ * but the check should be done on the function driver side,
+ * because it can report STALL for the control request then.
+ */
+void gether_update_mtu(struct gether *link)
+{
+	struct eth_dev		*dev = the_dev;
+
+	/* all the checks are done in the upper layer */
+	dev->net->mtu = link->mtu;
 }

@@ -94,6 +94,12 @@
 #define SMIAPP_FLASH_STROBE_WIDTH_LOW_RS_CTRL	0x0c28
 #define SMIAPP_FLASH_STROBE_COUNT_RS_CTRL	0x0c2a
 
+#define SMIAPP_REG_U16_COARSE_INTEGRATION_TIME_MAX_MARGIN	0x1006
+#define SMIAPP_REG_U16_MIN_FRAME_BLANKING_LINES			0x114a
+#define SMIAPP_REG_U16_MAX_FRAME_LENGTH_LINES_BIN		0x1702
+#define SMIAPP_REG_U16_MIN_FRAME_LENGTH_LINES_BIN		0x1700
+#define SMIAPP_REG_U16_FRAME_LENGTH_LINES			0x0340
+
 /* Timer capability */
 #define SMIAPP_FLASH_MODE_CAPABILITY		0x1a02
 #define SMIAPP_FLASH_CAP_SINGLE_STROBE		(1 << 0)
@@ -117,7 +123,8 @@
 #define SMIAPP_CTRL_EXPOSURE		1
 #define SMIAPP_CTRL_HFLIP		2
 #define SMIAPP_CTRL_VFLIP		3
-#define SMIAPP_NCTRLS			4
+#define SMIAPP_CTRL_VBLANK		4
+#define SMIAPP_NCTRLS			5
 
 /*
  * struct smiapp_sensor - Main device structure
@@ -158,6 +165,7 @@ struct smiapp_sensor {
 
 	unsigned int sysfs_mode:1;
 	unsigned int sysfs_ident:1;
+	int margin;
 };
 #define to_smiapp_sensor(sd)	container_of(sd, struct smiapp_sensor, subdev)
 

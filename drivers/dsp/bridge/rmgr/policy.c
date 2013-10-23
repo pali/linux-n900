@@ -177,7 +177,7 @@ static int wait_for_releasing(struct dsp_handler_t *handler)
 		status = -EINTR;
 
 	/* policy rules might have been changed while we're blocked */
-	if (is_restricted()) {
+	if (is_handler_restricted(handler)) {
 		if (!status)
 			status = -EBUSY;
 		policy.pending_count--;
@@ -583,11 +583,18 @@ int policy_open_hook(struct inode *ip, struct file *filp)
 int policy_ioctl_pre_hook(struct file *filp, unsigned int code,
 			  unsigned long args)
 {
+	struct process_context *context = filp->private_data;
+	struct dsp_handler_t   *handler;
 	int status = 0;
+
+	if (!context || !context->policy)
+		return -EIO;
+
+	handler = context->policy;
 
 	mutex_lock(&policy.lock);
 
-	if (is_restricted()) {
+	if (is_handler_restricted(handler)) {
 		if (is_wait_for_events(code)) {
 			/*
 			 * It is wanted to filter out wait_for_bridge_events to
@@ -636,10 +643,17 @@ int policy_ioctl_post_hook(struct file *filp, unsigned int code,
 
 int policy_mmap_hook(struct file *filp)
 {
+	struct process_context *context = filp->private_data;
+	struct dsp_handler_t   *handler;
 	int status = 0;
 
+	if (!context || !context->policy)
+		return -EIO;
+
+	handler = context->policy;
+
 	mutex_lock(&policy.lock);
-	if (is_restricted())
+	if (is_handler_restricted(handler))
 		status = -EACCES;
 	mutex_unlock(&policy.lock);
 

@@ -137,6 +137,13 @@
 #define AD5836_VCMMODE_CLK_MASK		(0x01 << AD5836_VCMMODE_CLK_SHIFT)
 
 /*
+ * AD5836_REG_PROTECT_MODE Register bits definitions
+ */
+#define AD5836_PROTECT_OVER_TEMP	(1 << 0)
+#define AD5836_PROTECT_LOW_VBAT		(1 << 1)
+#define AD5836_PROTECT_OVER_CUR		(1 << 2) /* Available in AD5817 only */
+
+/*
  * AD5817_REG_DRV_MODE Register bits definitions
  */
 #define AD5817_DRMODE_LIN_MODE_SHIFT	0
@@ -145,6 +152,11 @@
 #define AD5817_DRMODE_CLK_DIV_MASK	(0x07 << AD5817_DRMODE_CLK_DIV_SHIFT)
 #define AD5817_DRMODE_FORCE_DISK_SHIFT	5
 #define AD5817_DRMODE_FORCE_DISK_MASK	(0x01 << AD5817_DRMODE_FORCE_DISK_SHIFT)
+#define AD5817_DRMODE_EMI_SHIFT		6
+#define AD5817_DRMODE_EMI_MASK		(0x03 << AD5817_DRMODE_EMI_SHIFT)
+#define AD5817_DRMODE_EMI_NONE		0
+#define AD5817_DRMODE_EMI_1		1
+#define AD5817_DRMODE_EMI_2		2
 
 /*
  * AD5817_REG_SETTINGS Register bits definitions
@@ -226,6 +238,7 @@ struct ad58xx_device {
 	u8 bu8051gwz_pwm_mode;	/* bu8051gwz PWM mode */
 
 	const struct ad58xx_module_ident *ident; /* Specific module info */
+	u8 version;
 
 	struct mutex power_lock;
 	int power_count;
@@ -1180,8 +1193,45 @@ static int ad58xx_set_power(struct v4l2_subdev *subdev, int on)
 	 * but not applied to the hardware. Now that we're about to start
 	 * streaming apply all the current values to the hardware.
 	 */
-	if (on)
+	if (on) {
 		v4l2_ctrl_handler_setup(&coil->ctrls);
+		if (coil->ident->id == AD5817_ID && coil->version > 0x2) {
+			ad58xx_set_reg_bits(coil, AD5817_REG_DRV_MODE,
+					    AD5817_DRMODE_EMI_MASK,
+					    AD5817_DRMODE_EMI_SHIFT,
+					    &(coil->drive_mode),
+					    AD5817_DRMODE_EMI_2);
+
+			/* Check for hardware quirks */
+
+			/* Lens protection is camera module depended */
+			if (coil->platform_data->use_protection &&
+			    coil->platform_data->use_protection())
+				ad58xx_write(coil, AD5836_REG_PROTECT_MODE,
+					     AD5836_PROTECT_OVER_CUR |
+					     AD5836_PROTECT_LOW_VBAT |
+					     AD5836_PROTECT_OVER_TEMP);
+
+			/*
+			 * For this version of the lens actuator driver and
+			 * smiapp-004 sensor we should use the internal 19.2 MHz
+			 * clock generator for PWM drive mode.
+			 */
+			if (coil->platform_data->use_iclk &&
+			    coil->platform_data->use_iclk()) {
+				ad58xx_set_reg_bits(coil, AD5817_REG_SETTINGS,
+						    AD5817_S_SET_CLK_MASK,
+						    AD5817_S_SET_CLK_SHIFT,
+						    &(coil->settings),
+						    AD5817_SET_CLK_INT_CLK);
+				/* Activate high frequency mode */
+				ad58xx_set_reg_bits(coil, AD5836_REG_VCM_MODE,
+						    AD5836_VCMMODE_CLK_MASK,
+						    AD5836_VCMMODE_CLK_SHIFT,
+						    &(coil->vcm_mode), 1);
+			}
+		}
+	}
 
 done:
 	mutex_unlock(&coil->power_lock);
@@ -1192,28 +1242,36 @@ static int ad58xx_identify_module(struct v4l2_subdev *subdev)
 {
 	struct ad58xx_device *coil = to_ad58xx_device(subdev);
 	struct i2c_client *client = v4l2_get_subdevdata(subdev);
-	int i;
+	int version;
 	int id;
+	int i;
 
-	id = ad58xx_read(coil, AD58XX_REG_INFO) &
-		   (AD58XX_INFO_MAN_ID_MASK | AD58XX_INFO_DEV_ID_MASK);
+	id = ad58xx_read(coil, AD58XX_REG_INFO);
+	version = ad58xx_read(coil, AD58XX_REG_VERSION);
 
-	if (id < 0) {
+	if (id < 0 || version < 0) {
 		dev_err(&client->dev, "sensor detection failed\n");
 		return -ENODEV;
 	}
+
+	id &= AD58XX_INFO_MAN_ID_MASK | AD58XX_INFO_DEV_ID_MASK;
+	version &= AD58XX_VERSION_MASK;
 
 	for (i = 0; i < ARRAY_SIZE(ad58xx_module_idents); i++) {
 		if (ad58xx_module_idents[i].id != id)
 			continue;
 
 		coil->ident = &ad58xx_module_idents[i];
+		coil->version = version;
 		strlcpy(subdev->name, coil->ident->name, sizeof(subdev->name));
 
+		dev_info(&client->dev, "%s (%x-%x) version %u found.\n",
+			 subdev->name, MODULE_ID_MANUFACTURER(id),
+			 MODULE_ID_DEV(id), coil->version);
 		return 0;
 	}
 
-	dev_err(&client->dev, "unknown module: %01x-%01x\n",
+	dev_err(&client->dev, "unknown module: %x-%x\n",
 		MODULE_ID_MANUFACTURER(id), MODULE_ID_DEV(id));
 
 	return -ENODEV;

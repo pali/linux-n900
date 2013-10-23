@@ -72,8 +72,11 @@
 #define DCS_GET_ID2		0xdb
 #define DCS_GET_ID3		0xdc
 
-#define MEASURE_PERF
+/* Optionally test if real time targets are met, and log if not */
+/*#define MEASURE_PERF*/
 /*#define MEASURE_PERF_SHOW_ALWAYS*/
+
+#define LPM_PEND_TIMEOUT_MS 300
 
 enum pnd_ctrl_display_bits {
 	PND_CTRLD_BL            = 1 << 2,
@@ -441,6 +444,8 @@ struct pnd_data {
 	struct delayed_work ulps_work;
 
 	bool lpm_enabled;
+	bool lpm_pending;
+	struct delayed_work lpm_work;
 
 	atomic_t upd_state;
 	struct update_region original_update_region;
@@ -1661,21 +1666,12 @@ static ssize_t pnd_show_ulps_timeout(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%u\n", t);
 }
 
-static ssize_t pnd_store_lpm(struct device *dev, struct device_attribute *attr,
-			const char *buf, size_t count)
+static void _pnd_do_lpm_change(struct pnd_data *td, bool t)
 {
-	struct omap_dss_device *dssdev = to_dss_device(dev);
-	struct pnd_data *td = dev_get_drvdata(&dssdev->dev);
-	unsigned long t;
+	struct omap_dss_device *dssdev = td->dssdev;
 	int r;
 
-	r = strict_strtoul(buf, 10, &t);
-	if (r)
-		return r;
-
-	down(&td->lock);
-
-	if (td->lpm_enabled != !!t && td->enabled) {
+	if (td->lpm_enabled != t && td->enabled) {
 		dsi_bus_lock();
 
 		r = pnd_wake_up(dssdev);
@@ -1701,16 +1697,64 @@ static ssize_t pnd_store_lpm(struct device *dev, struct device_attribute *attr,
 
 	td->lpm_enabled = t;
 	pnd_set_timer(dssdev);
+	return;
+err:
+	dsi_bus_unlock();
+	return;
+}
 
+static void pnd_lpm_work(struct work_struct *work)
+{
+	struct pnd_data *td = container_of(work, struct pnd_data,
+				lpm_work.work);
+	down(&td->lock);
+
+	if (!td->lpm_pending)
+		goto err;
+
+	td->lpm_pending = false;
+
+	_pnd_do_lpm_change(td, true);
+
+err:
+	up(&td->lock);
+}
+
+static ssize_t pnd_store_lpm(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct omap_dss_device *dssdev = to_dss_device(dev);
+	struct pnd_data *td = dev_get_drvdata(&dssdev->dev);
+	unsigned long t;
+	int r;
+
+	r = strict_strtoul(buf, 10, &t);
+	if (r)
+		return r;
+
+	down(&td->lock);
+
+	/* if lpm switch is already pending, cancel it */
+	if (td->lpm_pending) {
+		td->lpm_pending = false;
+		cancel_delayed_work(&td->lpm_work);
+	}
+
+	if (t == 0) {
+		/* if lpm is switched off, do it immedeately */
+		_pnd_do_lpm_change(td, false);
+	} else {
+		/* mark lpm switch is pending, and schedule delayed work.
+		 * lpm is switched on either after the delay.
+		 */
+		td->lpm_pending = true;
+		queue_delayed_work(td->wq, &td->lpm_work,
+				msecs_to_jiffies(LPM_PEND_TIMEOUT_MS));
+
+	}
 	up(&td->lock);
 
 	return count;
-
-err:
-	dsi_bus_unlock();
-	up(&td->lock);
-
-	return r;
 }
 
 static ssize_t pnd_show_lpm(struct device *dev, struct device_attribute *attr,
@@ -2178,6 +2222,9 @@ static int pnd_probe(struct omap_dss_device *dssdev)
 
 	INIT_DELAYED_WORK(&td->ulps_work, pnd_ulps_work);
 
+	td->lpm_pending = false;
+	INIT_DELAYED_WORK(&td->lpm_work, pnd_lpm_work);
+
 	td->err_wq = create_singlethread_workqueue("pnd/err");
 	if (td->err_wq == NULL) {
 		dev_err(&dssdev->dev, "can't create error handler workqueue\n");
@@ -2305,6 +2352,7 @@ static void pnd_remove(struct omap_dss_device *dssdev)
 	pnd_cancel_ulps_work(dssdev);
 	pnd_cancel_esd_work(dssdev);
 	pnd_cancel_calibration_work(dssdev);
+	cancel_delayed_work(&td->lpm_work);
 	destroy_workqueue(td->wq);
 
 	cancel_delayed_work_sync(&td->frame_timeout_work);
@@ -3268,6 +3316,14 @@ static int pnd_update(struct omap_dss_device *dssdev,
 	dev_dbg(&dssdev->dev, "update %d, %d, %d x %d\n", x, y, w, h);
 
 	down(&td->lock);
+
+	if (td->lpm_pending) {
+		/* if there is a lpm scheduled, reschedule lpm work */
+		cancel_delayed_work(&td->lpm_work);
+		queue_delayed_work(td->wq, &td->lpm_work,
+				msecs_to_jiffies(LPM_PEND_TIMEOUT_MS));
+	}
+
 	dsi_bus_lock();
 
 	r = pnd_wake_up(dssdev);

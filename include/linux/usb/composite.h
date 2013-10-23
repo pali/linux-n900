@@ -344,6 +344,11 @@ struct usb_composite_dev {
 	struct usb_composite_driver	*driver;
 	u8				next_string_id;
 
+	/* Terminal mode TM_SWITCH handling */
+	struct work_struct		tm_work;
+	u16				tm_w_value;
+	u16				tm_w_index;
+
 	/* the gadget driver won't enable the data pullup
 	 * while the deactivation count is nonzero.
 	 */

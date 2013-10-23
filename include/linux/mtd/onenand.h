@@ -46,6 +46,7 @@ struct onenand_bufferram {
  * @device_id:		[INTERN] device ID
  * @density_mask:	chip density, used for DDP devices
  * @verstion_id:	[INTERN] version ID
+ * @manufacturer_id:	[INTERN] manufacturer ID
  * @options:		[BOARDSPECIFIC] various chip options. They can
  *			partly be set to inform onenand_scan about
  * @erase_shift:	[INTERN] number of address bits in a block
@@ -92,6 +93,7 @@ struct onenand_chip {
 	unsigned int		chipsize;
 	unsigned int		device_id;
 	unsigned int		version_id;
+	unsigned int		manufacturer_id;
 	unsigned int		technology;
 	unsigned int		density_mask;
 	unsigned int		options;
