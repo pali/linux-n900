@@ -1,0 +1,28 @@
+menu "OMAP2/3 Display Device Drivers"
+        depends on OMAP2_DSS
+
+config PANEL_NEVADA
+        tristate "Nevada Panel"
+        help
+          Nevada LCD
+
+config CTRL_ZONDA
+        tristate "Zonda ctrl"
+        depends on OMAP2_DSS_DSI
+        help
+          Zonda Ctrl
+
+config PANEL_TAAL
+	tristate "Taal Panel"
+	depends on OMAP2_DSS_DSI
+	help
+	  Taal panel with integrated controller
+
+config PANEL_ACX565AKM
+        tristate "ACX565AKM LCD Panel"
+        depends on OMAP2_DSS_SDI
+	select BACKLIGHT_CLASS_DEVICE
+        help
+          LCD Panel used in Rover
+
+endmenu

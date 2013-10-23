@@ -35,6 +35,8 @@
 #define AIC3X_ASD_INTF_CTRLA		8
 /* Audio serial data interface control register B */
 #define AIC3X_ASD_INTF_CTRLB		9
+/* Audio serial data interface control register C */
+#define AIC3X_ASD_INTF_CTRLC		10
 /* Audio overflow status and PLL R value programming register */
 #define AIC3X_OVRF_STATUS_AND_PLLR_REG	11
 /* Audio codec digital filter control register */
@@ -49,6 +51,7 @@
 /* Line1 Input control registers */
 #define LINE1L_2_LADC_CTRL		19
 #define LINE1R_2_RADC_CTRL		22
+#define LINE1L_2_RADC_CTRL		24
 /* Line2 Input control registers */
 #define LINE2L_2_LADC_CTRL		20
 #define LINE2R_2_RADC_CTRL		23

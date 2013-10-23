@@ -32,6 +32,7 @@ extern void n800_mmc_slot1_cover_handler(void *arg, int state);
 
 #define BT_CHIP_CSR		1
 #define BT_CHIP_TI		2
+#define BT_CHIP_BCM		3
 
 #define BT_SYSCLK_12		1
 #define BT_SYSCLK_38_4		2

@@ -34,6 +34,8 @@
 #include <linux/delay.h>
 #include <linux/usb/otg.h>
 #include <linux/i2c/twl4030.h>
+#include <linux/regulator/consumer.h>
+#include <linux/err.h>
 
 
 /* Register defines */
@@ -246,6 +248,11 @@ struct twl4030_usb {
 	struct otg_transceiver	otg;
 	struct device		*dev;
 
+	/* TWL4030 internal USB regulator supplies */
+	struct regulator	*usb1v5;
+	struct regulator	*usb1v8;
+	struct regulator	*usb3v1;
+
 	/* for vbus reporting with irqs disabled */
 	spinlock_t		lock;
 
@@ -428,12 +435,31 @@ static void twl4030_i2c_access(struct twl4030_usb *twl, int on)
 	}
 }
 
+/* REVISIT regulator framework should provide a sleep() call */
+static void twl4030_usb3v1_sleep(int sleep)
+{
+	/*
+	 * We don't disable usb3v1 regulator as it would break some MADC
+	 * readings. Instead of disabling it, we keep it on and put it
+	 * on sleep mode when cable is detached.
+	 */
+	if (sleep)
+		twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER,
+				(1 << 3), VUSB_DEDICATED2);
+	else
+		twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0,
+				VUSB_DEDICATED2);
+}
+
 static void twl4030_phy_power(struct twl4030_usb *twl, int on)
 {
 	u8 pwr;
 
 	pwr = twl4030_usb_read(twl, PHY_PWR_CTRL);
 	if (on) {
+		twl4030_usb3v1_sleep(false);
+		regulator_enable(twl->usb1v8);
+		regulator_enable(twl->usb1v5);
 		pwr &= ~PHY_PWR_PHYPWD;
 		WARN_ON(twl4030_usb_write_verify(twl, PHY_PWR_CTRL, pwr) < 0);
 		twl4030_usb_write(twl, PHY_CLK_CTRL,
@@ -443,6 +469,9 @@ static void twl4030_phy_power(struct twl4030_usb *twl, int on)
 	} else  {
 		pwr |= PHY_PWR_PHYPWD;
 		WARN_ON(twl4030_usb_write_verify(twl, PHY_PWR_CTRL, pwr) < 0);
+		regulator_disable(twl->usb1v5);
+		regulator_disable(twl->usb1v8);
+		twl4030_usb3v1_sleep(true);
 	}
 }
 
@@ -468,7 +497,7 @@ static void twl4030_phy_resume(struct twl4030_usb *twl)
 	twl->asleep = 0;
 }
 
-static void twl4030_usb_ldo_init(struct twl4030_usb *twl)
+static int twl4030_usb_ldo_init(struct twl4030_usb *twl)
 {
 	/* Enable writing to power configuration registers */
 	twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, 0xC0, PROTECT_KEY);
@@ -480,20 +509,48 @@ static void twl4030_usb_ldo_init(struct twl4030_usb *twl)
 	/* input to VUSB3V1 LDO is from VBAT, not VBUS */
 	twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0x14, VUSB_DEDICATED1);
 
-	/* turn on 3.1V regulator */
-	twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0x20, VUSB3V1_DEV_GRP);
+	/* Initialize 3.1V regulator */
+	twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0, VUSB3V1_DEV_GRP);
+
+	twl->usb3v1 = regulator_get(twl->dev, "usb3v1");
+	if (IS_ERR(twl->usb3v1))
+		return -ENODEV;
+
+	/* enable early and only put it on sleep instead of disabling it */
+	regulator_enable(twl->usb3v1);
+
 	twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0, VUSB3V1_TYPE);
 
-	/* turn on 1.5V regulator */
-	twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0x20, VUSB1V5_DEV_GRP);
+	/* Initialize 1.5V regulator */
+	twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0, VUSB1V5_DEV_GRP);
+
+	twl->usb1v5 = regulator_get(twl->dev, "usb1v5");
+	if (IS_ERR(twl->usb1v5))
+		goto fail1;
+
 	twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0, VUSB1V5_TYPE);
 
-	/* turn on 1.8V regulator */
-	twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0x20, VUSB1V8_DEV_GRP);
+	/* Initialize 1.8V regulator */
+	twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0, VUSB1V8_DEV_GRP);
+
+	twl->usb1v8 = regulator_get(twl->dev, "usb1v8");
+	if (IS_ERR(twl->usb1v8))
+		goto fail2;
+
 	twl4030_i2c_write_u8(TWL4030_MODULE_PM_RECEIVER, 0, VUSB1V8_TYPE);
 
 	/* disable access to power configuration registers */
 	twl4030_i2c_write_u8(TWL4030_MODULE_PM_MASTER, 0, PROTECT_KEY);
+
+	return 0;
+
+fail2:
+	regulator_put(twl->usb1v5);
+	twl->usb1v5 = NULL;
+fail1:
+	regulator_put(twl->usb3v1);
+	twl->usb3v1 = NULL;
+	return -ENODEV;
 }
 
 static ssize_t twl4030_usb_vbus_show(struct device *dev,
@@ -504,8 +561,8 @@ static ssize_t twl4030_usb_vbus_show(struct device *dev,
 	int ret = -EINVAL;
 
 	spin_lock_irqsave(&twl->lock, flags);
-	ret = sprintf(buf, "%s\n",
-			(twl->linkstat == USB_LINK_VBUS) ? "on" : "off");
+	ret = sprintf(buf, "%d\n",
+			(twl->linkstat == USB_LINK_VBUS) ? 1 : 0);
 	spin_unlock_irqrestore(&twl->lock, flags);
 
 	return ret;
@@ -598,7 +655,7 @@ static int __init twl4030_usb_probe(struct platform_device *pdev)
 {
 	struct twl4030_usb_data *pdata = pdev->dev.platform_data;
 	struct twl4030_usb	*twl;
-	int			status;
+	int			status, err;
 
 	if (!pdata) {
 		dev_dbg(&pdev->dev, "platform_data not available\n");
@@ -622,7 +679,12 @@ static int __init twl4030_usb_probe(struct platform_device *pdev)
 	/* init spinlock for workqueue */
 	spin_lock_init(&twl->lock);
 
-	twl4030_usb_ldo_init(twl);
+	err = twl4030_usb_ldo_init(twl);
+	if (err) {
+		dev_err(&pdev->dev, "ldo init failed\n");
+		kfree(twl);
+		return err;
+	}
 	otg_set_transceiver(&twl->otg);
 
 	platform_set_drvdata(pdev, twl);
@@ -688,6 +750,9 @@ static int __exit twl4030_usb_remove(struct platform_device *pdev)
 	twl4030_usb_clear_bits(twl, POWER_CTRL, POWER_CTRL_OTG_ENAB);
 
 	twl4030_phy_power(twl, 0);
+	regulator_put(twl->usb1v5);
+	regulator_put(twl->usb1v8);
+	regulator_put(twl->usb3v1);
 
 	kfree(twl);
 

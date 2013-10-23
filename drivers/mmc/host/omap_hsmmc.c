@@ -75,6 +75,7 @@
 #define MSBS			(1 << 5)
 #define BCE			(1 << 1)
 #define FOUR_BIT		(1 << 1)
+#define DW8			(1 << 5)
 #define CC			0x1
 #define TC			0x02
 #define OD			0x1
@@ -98,9 +99,6 @@
 #define OMAP_MMC1_DEVID		0
 #define OMAP_MMC2_DEVID		1
 
-#define OMAP_MMC_DATADIR_NONE	0
-#define OMAP_MMC_DATADIR_READ	1
-#define OMAP_MMC_DATADIR_WRITE	2
 #define MMC_TIMEOUT_MS		20
 #define OMAP_MMC_MASTER_CLOCK	96000000
 #define DRIVER_NAME		"mmci-omap-hs"
@@ -139,18 +137,17 @@ struct mmc_omap_host {
 	resource_size_t		mapbase;
 	unsigned int		id;
 	unsigned int		dma_len;
-	unsigned int		dma_dir;
+	unsigned int		dma_sg_idx;
 	unsigned char		bus_mode;
-	unsigned char		datadir;
 	u32			*buffer;
 	u32			bytesleft;
 	int			suspended;
 	int			irq;
 	int			carddetect;
 	int			use_dma, dma_ch;
-	int			initstr;
 	int			slot_id;
 	int			dbclk_enabled;
+	int			response_busy;
 
 	struct timer_list       idle_timer;
 	spinlock_t		clk_lock;     /* for changing enabled state */
@@ -263,7 +260,7 @@ mmc_omap_show_slot_name(struct device *dev, struct device_attribute *attr,
 	struct mmc_omap_host *host = mmc_priv(mmc);
 	struct omap_mmc_slot_data slot = host->pdata->slots[host->slot_id];
 
-	return sprintf(buf, "slot:%s\n", slot.name);
+	return sprintf(buf, "%s\n", slot.name);
 }
 
 static DEVICE_ATTR(slot_name, S_IRUGO, mmc_omap_show_slot_name, NULL);
@@ -288,10 +285,14 @@ mmc_omap_start_command(struct mmc_omap_host *host, struct mmc_command *cmd,
 	OMAP_HSMMC_WRITE(host->base, ISE, INT_EN_MASK);
 	OMAP_HSMMC_WRITE(host->base, IE, INT_EN_MASK);
 
+	host->response_busy = 0;
 	if (cmd->flags & MMC_RSP_PRESENT) {
 		if (cmd->flags & MMC_RSP_136)
 			resptype = 1;
-		else
+		else if (cmd->flags & MMC_RSP_BUSY) {
+			resptype = 3;
+			host->response_busy = 1;
+		} else
 			resptype = 2;
 	}
 
@@ -320,19 +321,35 @@ mmc_omap_start_command(struct mmc_omap_host *host, struct mmc_command *cmd,
 	OMAP_HSMMC_WRITE(host->base, CMD, cmdreg);
 }
 
+static int
+mmc_omap_get_dma_dir(struct mmc_omap_host *host, struct mmc_data *data)
+{
+	if (data->flags & MMC_DATA_WRITE)
+		return DMA_TO_DEVICE;
+	else
+		return DMA_FROM_DEVICE;
+}
+
 /*
  * Notify the transfer complete to MMC core
  */
 static void
 mmc_omap_xfer_done(struct mmc_omap_host *host, struct mmc_data *data)
 {
+	if (!data) {
+		struct mmc_request *mrq = host->mrq;
+
+		host->mrq = NULL;
+		mmc_omap_fclk_lazy_disable(host);
+		mmc_request_done(host->mmc, mrq);
+		return;
+	}
+
 	host->data = NULL;
 
 	if (host->use_dma && host->dma_ch != -1)
 		dma_unmap_sg(mmc_dev(host->mmc), data->sg, host->dma_len,
-			host->dma_dir);
-
-	host->datadir = OMAP_MMC_DATADIR_NONE;
+			mmc_omap_get_dma_dir(host, data));
 
 	if (!data->error)
 		data->bytes_xfered += data->blocks * (data->blksz);
@@ -368,7 +385,7 @@ mmc_omap_cmd_done(struct mmc_omap_host *host, struct mmc_command *cmd)
 			cmd->resp[0] = OMAP_HSMMC_READ(host->base, RSP10);
 		}
 	}
-	if (host->data == NULL || cmd->error) {
+	if ((host->data == NULL && !host->response_busy) || cmd->error) {
 		host->mrq = NULL;
 		mmc_omap_fclk_lazy_disable(host);
 		mmc_request_done(host->mmc, cmd->mrq);
@@ -378,19 +395,18 @@ mmc_omap_cmd_done(struct mmc_omap_host *host, struct mmc_command *cmd)
 /*
  * DMA clean up for command errors
  */
-static void mmc_dma_cleanup(struct mmc_omap_host *host)
+static void mmc_dma_cleanup(struct mmc_omap_host *host, int errno)
 {
-	host->data->error = -ETIMEDOUT;
+	host->data->error = errno;
 
 	if (host->use_dma && host->dma_ch != -1) {
 		dma_unmap_sg(mmc_dev(host->mmc), host->data->sg, host->dma_len,
-			host->dma_dir);
+			mmc_omap_get_dma_dir(host, host->data));
 		omap_free_dma(host->dma_ch);
 		host->dma_ch = -1;
 		up(&host->sem);
 	}
 	host->data = NULL;
-	host->datadir = OMAP_MMC_DATADIR_NONE;
 }
 
 /*
@@ -433,9 +449,10 @@ static irqreturn_t mmc_omap_irq(int irq, void *dev_id)
 	struct mmc_data *data;
 	int end_cmd = 0, end_trans = 0, status;
 
-	if (host->cmd == NULL && host->data == NULL) {
+	if (host->mrq == NULL) {
 		OMAP_HSMMC_WRITE(host->base, STAT,
 			OMAP_HSMMC_READ(host->base, STAT));
+		OMAP_HSMMC_READ(host->base, STAT);
 		return IRQ_HANDLED;
 	}
 
@@ -464,16 +481,29 @@ static irqreturn_t mmc_omap_irq(int irq, void *dev_id)
 				}
 				end_cmd = 1;
 			}
-			if (host->data)
-				mmc_dma_cleanup(host);
+			if (host->data || host->response_busy) {
+				if (host->data)
+					mmc_dma_cleanup(host, -ETIMEDOUT);
+				host->response_busy = 0;
+
+				OMAP_HSMMC_WRITE(host->base, SYSCTL,
+					OMAP_HSMMC_READ(host->base,
+							SYSCTL) | SRD);
+				while (OMAP_HSMMC_READ(host->base,
+							SYSCTL) & SRD) ;
+			}
 		}
-		if ((status & DATA_TIMEOUT) ||
-			(status & DATA_CRC)) {
-			if (host->data) {
-				if (status & DATA_TIMEOUT)
-					mmc_dma_cleanup(host);
+		if ((status & DATA_TIMEOUT) || (status & DATA_CRC)) {
+			if (host->data || host->response_busy) {
+				int err = (status & DATA_TIMEOUT) ?
+						-ETIMEDOUT : -EILSEQ;
+
+				if (host->data)
+					mmc_dma_cleanup(host, err);
 				else
-					host->data->error = -EILSEQ;
+					host->mrq->cmd->error = err;
+				host->response_busy = 0;
+
 				OMAP_HSMMC_WRITE(host->base, SYSCTL,
 					OMAP_HSMMC_READ(host->base,
 							SYSCTL) | SRD);
@@ -494,8 +524,9 @@ static irqreturn_t mmc_omap_irq(int irq, void *dev_id)
 	}
 
 	OMAP_HSMMC_WRITE(host->base, STAT, status);
+	OMAP_HSMMC_READ(host->base, STAT);
 
-	if (end_cmd || (status & CC))
+	if (end_cmd || ((status & CC) && host->cmd))
 		mmc_omap_cmd_done(host, host->cmd);
 	if (end_trans || (status & TC))
 		mmc_omap_xfer_done(host, data);
@@ -542,11 +573,10 @@ static int omap_mmc_switch_opcond(struct mmc_omap_host *host, int vdd)
 	 * set in HCTL.
 	 */
 	if (host->id == OMAP_MMC1_DEVID) {
-		if (((1 << vdd) == MMC_VDD_32_33) ||
-		    ((1 << vdd) == MMC_VDD_33_34))
-			reg_val |= SDVS30;
-		else if ((1 << vdd) == MMC_VDD_165_195)
+		if ((1 << vdd) == MMC_VDD_165_195)
 			reg_val |= SDVS18;
+		else
+			reg_val |= SDVS30;
 	} else
 		reg_val |= SDVS18;
 
@@ -591,10 +621,62 @@ static irqreturn_t omap_mmc_cd_handler(int irq, void *dev_id)
 {
 	struct mmc_omap_host *host = (struct mmc_omap_host *)dev_id;
 
-	host->carddetect = mmc_slot(host).card_detect(irq);
+	if (mmc_slot(host).card_detect)
+		host->carddetect = mmc_slot(host).card_detect(irq);
+	else
+		host->carddetect = -ENOSYS;
 	schedule_work(&host->mmc_carddetect_work);
 
 	return IRQ_HANDLED;
+}
+
+static int mmc_omap_get_dma_sync_dev(struct mmc_omap_host *host,
+				     struct mmc_data *data)
+{
+	int sync_dev;
+
+	if (data->flags & MMC_DATA_WRITE) {
+		if (host->id == OMAP_MMC1_DEVID)
+			sync_dev = OMAP24XX_DMA_MMC1_TX;
+		else
+			sync_dev = OMAP24XX_DMA_MMC2_TX;
+	} else {
+		if (host->id == OMAP_MMC1_DEVID)
+			sync_dev = OMAP24XX_DMA_MMC1_RX;
+		else
+			sync_dev = OMAP24XX_DMA_MMC2_RX;
+	}
+	return sync_dev;
+}
+
+static void mmc_omap_config_dma_params(struct mmc_omap_host *host,
+				       struct mmc_data *data,
+				       struct scatterlist *sgl)
+{
+	int blksz, nblk, dma_ch;
+
+	dma_ch = host->dma_ch;
+	if (data->flags & MMC_DATA_WRITE) {
+		omap_set_dma_dest_params(dma_ch, 0, OMAP_DMA_AMODE_CONSTANT,
+			(host->mapbase + OMAP_HSMMC_DATA), 0, 0);
+		omap_set_dma_src_params(dma_ch, 0, OMAP_DMA_AMODE_POST_INC,
+			sg_dma_address(sgl), 0, 0);
+	} else {
+		omap_set_dma_src_params(dma_ch, 0, OMAP_DMA_AMODE_CONSTANT,
+					(host->mapbase + OMAP_HSMMC_DATA), 0, 0);
+		omap_set_dma_dest_params(dma_ch, 0, OMAP_DMA_AMODE_POST_INC,
+			sg_dma_address(sgl), 0, 0);
+	}
+
+	blksz = host->data->blksz;
+	nblk = sg_dma_len(sgl) / blksz;
+
+	omap_set_dma_transfer_params(dma_ch, OMAP_DMA_DATA_TYPE_S32,
+			blksz / 4, nblk, OMAP_DMA_SYNC_FRAME,
+			mmc_omap_get_dma_sync_dev(host, data),
+			!(data->flags & MMC_DATA_WRITE));
+
+	omap_start_dma(dma_ch);
 }
 
 /*
@@ -610,6 +692,14 @@ static void mmc_omap_dma_cb(int lch, u16 ch_status, void *data)
 	if (host->dma_ch < 0)
 		return;
 
+	host->dma_sg_idx++;
+	if (host->dma_sg_idx < host->dma_len) {
+		/* Fire up the next transfer. */
+		mmc_omap_config_dma_params(host, host->data,
+					   host->data->sg + host->dma_sg_idx);
+		return;
+	}
+
 	omap_free_dma(host->dma_ch);
 	host->dma_ch = -1;
 	/*
@@ -620,37 +710,27 @@ static void mmc_omap_dma_cb(int lch, u16 ch_status, void *data)
 }
 
 /*
- * Configure dma src and destination parameters
- */
-static int mmc_omap_config_dma_param(int sync_dir, struct mmc_omap_host *host,
-				struct mmc_data *data)
-{
-	if (sync_dir == 0) {
-		omap_set_dma_dest_params(host->dma_ch, 0,
-			OMAP_DMA_AMODE_CONSTANT,
-			(host->mapbase + OMAP_HSMMC_DATA), 0, 0);
-		omap_set_dma_src_params(host->dma_ch, 0,
-			OMAP_DMA_AMODE_POST_INC,
-			sg_dma_address(&data->sg[0]), 0, 0);
-	} else {
-		omap_set_dma_src_params(host->dma_ch, 0,
-			OMAP_DMA_AMODE_CONSTANT,
-			(host->mapbase + OMAP_HSMMC_DATA), 0, 0);
-		omap_set_dma_dest_params(host->dma_ch, 0,
-			OMAP_DMA_AMODE_POST_INC,
-			sg_dma_address(&data->sg[0]), 0, 0);
-	}
-	return 0;
-}
-/*
  * Routine to configure and start DMA for the MMC card
  */
 static int
 mmc_omap_start_dma_transfer(struct mmc_omap_host *host, struct mmc_request *req)
 {
-	int sync_dev, sync_dir = 0;
-	int dma_ch = 0, ret = 0, err = 1;
+	int dma_ch = 0, ret = 0, err = 1, i;
 	struct mmc_data *data = req->data;
+
+	/* Sanity check: all the SG entries must be aligned by block size. */
+	for (i = 0; i < host->dma_len; i++) {
+		struct scatterlist *sgl;
+
+		sgl = data->sg + i;
+		if (sgl->length % data->blksz)
+			return -EINVAL;
+	}
+	if ((data->blksz % 4) != 0)
+		/* REVISIT: The MMC buffer increments only when MSB is written.
+		 * Return error for blksz which is non multiple of four.
+		 */
+		return -EINVAL;
 
 	/*
 	 * If for some reason the DMA transfer is still active,
@@ -670,49 +750,22 @@ mmc_omap_start_dma_transfer(struct mmc_omap_host *host, struct mmc_request *req)
 			return err;
 	}
 
-	if (!(data->flags & MMC_DATA_WRITE)) {
-		host->dma_dir = DMA_FROM_DEVICE;
-		if (host->id == OMAP_MMC1_DEVID)
-			sync_dev = OMAP24XX_DMA_MMC1_RX;
-		else
-			sync_dev = OMAP24XX_DMA_MMC2_RX;
-	} else {
-		host->dma_dir = DMA_TO_DEVICE;
-		if (host->id == OMAP_MMC1_DEVID)
-			sync_dev = OMAP24XX_DMA_MMC1_TX;
-		else
-			sync_dev = OMAP24XX_DMA_MMC2_TX;
-	}
-
-	ret = omap_request_dma(sync_dev, "MMC/SD", mmc_omap_dma_cb,
-			host, &dma_ch);
+	ret = omap_request_dma(mmc_omap_get_dma_sync_dev(host, data), "MMC/SD",
+			       mmc_omap_dma_cb,host, &dma_ch);
 	if (ret != 0) {
-		dev_dbg(mmc_dev(host->mmc),
+		dev_err(mmc_dev(host->mmc),
 			"%s: omap_request_dma() failed with %d\n",
 			mmc_hostname(host->mmc), ret);
 		return ret;
 	}
 
 	host->dma_len = dma_map_sg(mmc_dev(host->mmc), data->sg,
-			data->sg_len, host->dma_dir);
+			data->sg_len, mmc_omap_get_dma_dir(host, data));
 	host->dma_ch = dma_ch;
+	host->dma_sg_idx = 0;
 
-	if (!(data->flags & MMC_DATA_WRITE))
-		mmc_omap_config_dma_param(1, host, data);
-	else
-		mmc_omap_config_dma_param(0, host, data);
+	mmc_omap_config_dma_params(host, data, data->sg);
 
-	if ((data->blksz % 4) == 0)
-		omap_set_dma_transfer_params(dma_ch, OMAP_DMA_DATA_TYPE_S32,
-			(data->blksz / 4), data->blocks, OMAP_DMA_SYNC_FRAME,
-			sync_dev, sync_dir);
-	else
-		/* REVISIT: The MMC buffer increments only when MSB is written.
-		 * Return error for blksz which is non multiple of four.
-		 */
-		return -EINVAL;
-
-	omap_start_dma(dma_ch);
 	return 0;
 }
 
@@ -762,7 +815,6 @@ mmc_omap_prepare_data(struct mmc_omap_host *host, struct mmc_request *req)
 	host->data = req->data;
 
 	if (req->data == NULL) {
-		host->datadir = OMAP_MMC_DATADIR_NONE;
 		OMAP_HSMMC_WRITE(host->base, BLK, 0);
 		return 0;
 	}
@@ -770,9 +822,6 @@ mmc_omap_prepare_data(struct mmc_omap_host *host, struct mmc_request *req)
 	OMAP_HSMMC_WRITE(host->base, BLK, (req->data->blksz)
 					| (req->data->blocks << 16));
 	set_data_timeout(host, req);
-
-	host->datadir = (req->data->flags & MMC_DATA_WRITE) ?
-			OMAP_MMC_DATADIR_WRITE : OMAP_MMC_DATADIR_READ;
 
 	if (host->use_dma) {
 		ret = mmc_omap_start_dma_transfer(host, req);
@@ -805,34 +854,31 @@ static void omap_mmc_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 	u16 dsor = 0;
 	unsigned long regval;
 	unsigned long timeout;
+	u32 con;
 
 	mmc_omap_fclk_state(host, ON);
 
 	switch (ios->power_mode) {
 	case MMC_POWER_OFF:
 		mmc_slot(host).set_power(host->dev, host->slot_id, 0, 0);
-		/*
-		 * Reset bus voltage to 3V if it got set to 1.8V earlier.
-		 * REVISIT: If we are able to detect cards after unplugging
-		 * a 1.8V card, this code should not be needed.
-		 */
-		if (!(OMAP_HSMMC_READ(host->base, HCTL) & SDVSDET)) {
-			int vdd = fls(host->mmc->ocr_avail) - 1;
-			if (omap_mmc_switch_opcond(host, vdd) != 0)
-				host->mmc->ios.vdd = vdd;
-		}
 		break;
 	case MMC_POWER_UP:
 		mmc_slot(host).set_power(host->dev, host->slot_id, 1, ios->vdd);
 		break;
 	}
 
+	con = OMAP_HSMMC_READ(host->base, CON);
 	switch (mmc->ios.bus_width) {
+	case MMC_BUS_WIDTH_8:
+		OMAP_HSMMC_WRITE(host->base, CON, con | DW8);
+		break;
 	case MMC_BUS_WIDTH_4:
+		OMAP_HSMMC_WRITE(host->base, CON, con & ~DW8);
 		OMAP_HSMMC_WRITE(host->base, HCTL,
 			OMAP_HSMMC_READ(host->base, HCTL) | FOUR_BIT);
 		break;
 	case MMC_BUS_WIDTH_1:
+		OMAP_HSMMC_WRITE(host->base, CON, con & ~DW8);
 		OMAP_HSMMC_WRITE(host->base, HCTL,
 			OMAP_HSMMC_READ(host->base, HCTL) & ~FOUR_BIT);
 		break;
@@ -920,6 +966,35 @@ static struct mmc_host_ops mmc_omap_ops = {
 	/* NYET -- enable_sdio_irq */
 };
 
+static void omap_mmc_conf_bus_power(struct mmc_omap_host *host)
+{
+	int i;
+	u32 hctl, capa;
+
+	/* Only MMC1 supports 3.0V */
+	if (host->id == OMAP_MMC1_DEVID) {
+		hctl = SDVS30;
+		capa = VS30 | VS18;
+	} else {
+		hctl = SDVS18;
+		capa = VS18;
+	}
+
+	OMAP_HSMMC_WRITE(host->base, HCTL,
+			OMAP_HSMMC_READ(host->base, HCTL) | hctl);
+
+	OMAP_HSMMC_WRITE(host->base, CAPA,
+			OMAP_HSMMC_READ(host->base, CAPA) | capa);
+
+	/* Set SD bus power bit */
+	OMAP_HSMMC_WRITE(host->base, HCTL,
+			OMAP_HSMMC_READ(host->base, HCTL) | SDBP);
+
+	for (i = 0; i < 100; i++)
+		if (OMAP_HSMMC_READ(host->base, HCTL) & SDBP)
+			break;
+}
+
 static int __init omap_mmc_probe(struct platform_device *pdev)
 {
 	struct omap_mmc_platform_data *pdata = pdev->dev.platform_data;
@@ -927,7 +1002,6 @@ static int __init omap_mmc_probe(struct platform_device *pdev)
 	struct mmc_omap_host *host = NULL;
 	struct resource *res;
 	int ret = 0, irq;
-	u32 hctl, capa;
 
 	if (pdata == NULL) {
 		dev_err(&pdev->dev, "Platform Data is missing\n");
@@ -1020,10 +1094,11 @@ static int __init omap_mmc_probe(struct platform_device *pdev)
 		else
 			host->dbclk_enabled = 1;
 
-#ifdef CONFIG_MMC_BLOCK_BOUNCE
-	mmc->max_phys_segs = 1;
-	mmc->max_hw_segs = 1;
-#endif
+	/* Since we do only SG emulation, we can have as many segs
+	 * as we want. */
+	mmc->max_phys_segs = 1024;
+	mmc->max_hw_segs = 1024;
+
 	mmc->max_blk_size = 512;       /* Block Length at max can be 1024 */
 	mmc->max_blk_count = 0xFFFF;    /* No. of Blocks is 16 bits */
 	mmc->max_req_size = mmc->max_blk_size * mmc->max_blk_count;
@@ -1032,31 +1107,15 @@ static int __init omap_mmc_probe(struct platform_device *pdev)
 	mmc->ocr_avail = mmc_slot(host).ocr_mask;
 	mmc->caps |= MMC_CAP_MMC_HIGHSPEED | MMC_CAP_SD_HIGHSPEED;
 
-	if (pdata->slots[host->slot_id].wires >= 4)
+	if (pdata->slots[host->slot_id].wires >= 8)
+		mmc->caps |= MMC_CAP_8_BIT_DATA;
+	else if (pdata->slots[host->slot_id].wires >= 4)
 		mmc->caps |= MMC_CAP_4_BIT_DATA;
-
-	/* Only MMC1 supports 3.0V */
-	if (host->id == OMAP_MMC1_DEVID) {
-		hctl = SDVS30;
-		capa = VS30 | VS18;
-	} else {
-		hctl = SDVS18;
-		capa = VS18;
-	}
-
-	OMAP_HSMMC_WRITE(host->base, HCTL,
-			OMAP_HSMMC_READ(host->base, HCTL) | hctl);
-
-	OMAP_HSMMC_WRITE(host->base, CAPA,
-			OMAP_HSMMC_READ(host->base, CAPA) | capa);
 
 	/* Set the controller to AUTO IDLE mode */
 	OMAP_HSMMC_WRITE(host->base, SYSCONFIG,
 			OMAP_HSMMC_READ(host->base, SYSCONFIG) | AUTOIDLE);
-
-	/* Set SD bus power bit */
-	OMAP_HSMMC_WRITE(host->base, HCTL,
-			OMAP_HSMMC_READ(host->base, HCTL) | SDBP);
+	omap_mmc_conf_bus_power(host);
 
 	/* Request IRQ for MMC operations */
 	ret = request_irq(host->irq, mmc_omap_irq, IRQF_DISABLED,
@@ -1075,7 +1134,7 @@ static int __init omap_mmc_probe(struct platform_device *pdev)
 	}
 
 	/* Request IRQ for card detect */
-	if ((mmc_slot(host).card_detect_irq) && (mmc_slot(host).card_detect)) {
+	if ((mmc_slot(host).card_detect_irq)) {
 		ret = request_irq(mmc_slot(host).card_detect_irq,
 				  omap_mmc_cd_handler,
 				  IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING
@@ -1098,8 +1157,8 @@ static int __init omap_mmc_probe(struct platform_device *pdev)
 		if (ret < 0)
 			goto err_slot_name;
 	}
-	if (mmc_slot(host).card_detect_irq && mmc_slot(host).card_detect &&
-			host->pdata->slots[host->slot_id].get_cover_state) {
+	if (mmc_slot(host).card_detect_irq &&
+	    host->pdata->slots[host->slot_id].get_cover_state) {
 		ret = device_create_file(&mmc->class_dev,
 					&dev_attr_cover_switch);
 		if (ret < 0)
@@ -1220,7 +1279,6 @@ static int omap_mmc_resume(struct platform_device *pdev)
 		return 0;
 
 	if (host) {
-		int i;
 		if (mmc_omap_fclk_state(host, ON) != 0)
 			goto clk_en_err;
 
@@ -1235,12 +1293,7 @@ static int omap_mmc_resume(struct platform_device *pdev)
 			dev_dbg(mmc_dev(host->mmc),
 					"Enabling debounce clk failed\n");
 
-		OMAP_HSMMC_WRITE(host->base, HCTL,
-				 OMAP_HSMMC_READ(host->base, HCTL) | SDBP);
-
-		for (i = 0; i < 100; i++)
-			if (OMAP_HSMMC_READ(host->base, HCTL) & SDBP)
-				break;
+		omap_mmc_conf_bus_power(host);
 
 		if (host->pdata->resume) {
 			ret = host->pdata->resume(&pdev->dev, host->slot_id);

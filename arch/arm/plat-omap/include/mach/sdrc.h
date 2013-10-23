@@ -31,14 +31,18 @@
 #define SDRC_POWER		0x070
 #define SDRC_MCFG_0		0x080
 #define SDRC_MR_0		0x084
+#define SDRC_EMR2_0		0x08c
 #define SDRC_ACTIM_CTRL_A_0	0x09c
 #define SDRC_ACTIM_CTRL_B_0	0x0a0
 #define SDRC_RFR_CTRL_0		0x0a4
+#define SDRC_MANUAL_0		0x0a8
 #define SDRC_MCFG_1		0x0B0
 #define SDRC_MR_1		0x0B4
+#define SDRC_EMR2_1		0x0BC
 #define SDRC_ACTIM_CTRL_A_1	0x0C4
 #define SDRC_ACTIM_CTRL_B_1	0x0C8
 #define SDRC_RFR_CTRL_1		0x0D4
+#define SDRC_MANUAL_1		0x0D8
 
 /*
  * These values represent the number of memory clock cycles between

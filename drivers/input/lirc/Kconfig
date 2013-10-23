@@ -1,0 +1,26 @@
+#
+# LIRC driver(s) configuration
+#
+menuconfig INPUT_LIRC
+	bool "Linux Infrared Remote Control IR receiver/transmitter drivers"
+	help
+	  Say Y here, and all supported Linux Infrared Remote Control IR and
+	  RF receiver and transmitter drivers will be displayed. When paired
+	  with a remote control and the lirc daemon, the receiver drivers
+	  allow control of your Linux system via remote control.
+
+if INPUT_LIRC
+
+config LIRC_DEV
+	tristate "LIRC device loadable module support"
+	help
+	  LIRC device loadable module support, required for most LIRC drivers
+
+config LIRC_RX51
+	tristate "RX51 CIR transmitter"
+	depends on LIRC_DEV
+	depends on ARCH_OMAP
+	help
+	  Driver for Nokia RX51 CIR circuitry
+
+endif

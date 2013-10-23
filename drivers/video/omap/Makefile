@@ -6,6 +6,8 @@ obj-$(CONFIG_FB_OMAP) += omapfb.o
 
 objs-yy := omapfb_main.o
 
+objs-y$(CONFIG_FB_OMAP_VENC) += venc.o
+
 objs-y$(CONFIG_ARCH_OMAP1) += lcdc.o
 objs-y$(CONFIG_ARCH_OMAP2) += dispc.o
 objs-y$(CONFIG_ARCH_OMAP3) += dispc.o
@@ -33,8 +35,8 @@ objs-y$(CONFIG_MACH_OMAP_LDP) += lcd_ldp.o
 objs-y$(CONFIG_MACH_OMAP2EVM) += lcd_omap2evm.o
 objs-y$(CONFIG_MACH_OMAP3EVM) += lcd_omap3evm.o
 objs-y$(CONFIG_MACH_OMAP3_BEAGLE) += lcd_omap3beagle.o
-objs-y$(CONFIG_FB_OMAP_LCD_MIPID) += lcd_mipid.o
 objs-y$(CONFIG_MACH_OVERO) += lcd_overo.o
 
-omapfb-objs := $(objs-yy)
+obj-$(CONFIG_FB_OMAP_LCD_MIPID) += lcd_mipid.o
 
+omapfb-objs := $(objs-yy)

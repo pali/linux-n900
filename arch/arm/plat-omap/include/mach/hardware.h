@@ -322,6 +322,15 @@
 #include "board-nokia.h"
 #endif
 
+#ifdef CONFIG_MACH_NOKIA_RX51
+#include "board-rx51.h"
+#endif
+
+#ifdef CONFIG_MACH_NOKIA_RX71
+#include "board-rx71.h"
+#endif
+
+
 #ifdef CONFIG_MACH_OMAP_2430SDP
 #include "board-2430sdp.h"
 #endif

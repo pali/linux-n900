@@ -72,8 +72,8 @@ static int read_block(struct inode *inode, void *addr, unsigned int block,
 		return err;
 	}
 
-	ubifs_assert(le64_to_cpu(dn->ch.sqnum) > ubifs_inode(inode)->creat_sqnum);
-
+	ubifs_assert(le64_to_cpu(dn->ch.sqnum) >
+		     ubifs_inode(inode)->creat_sqnum);
 	len = le32_to_cpu(dn->size);
 	if (len <= 0 || len > UBIFS_BLOCK_SIZE)
 		goto dump;
@@ -254,7 +254,7 @@ static int write_begin_slow(struct address_space *mapping,
 	}
 
 	if (!PageUptodate(page)) {
-		if (!(pos & PAGE_CACHE_MASK) && len == PAGE_CACHE_SIZE)
+		if (!(pos & ~PAGE_CACHE_MASK) && len == PAGE_CACHE_SIZE)
 			SetPageChecked(page);
 		else {
 			err = do_readpage(page);
@@ -429,8 +429,8 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
 	struct ubifs_inode *ui = ubifs_inode(inode);
 	pgoff_t index = pos >> PAGE_CACHE_SHIFT;
 	int uninitialized_var(err), appending = !!(pos + len > inode->i_size);
+	int skipped_read = 0;
 	struct page *page;
-
 
 	ubifs_assert(ubifs_inode(inode)->ui_size == inode->i_size);
 
@@ -444,7 +444,7 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
 
 	if (!PageUptodate(page)) {
 		/* The page is not loaded from the flash */
-		if (!(pos & PAGE_CACHE_MASK) && len == PAGE_CACHE_SIZE)
+		if (!(pos & ~PAGE_CACHE_MASK) && len == PAGE_CACHE_SIZE) {
 			/*
 			 * We change whole page so no need to load it. But we
 			 * have to set the @PG_checked flag to make the further
@@ -453,7 +453,8 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
 			 * the media.
 			 */
 			SetPageChecked(page);
-		else {
+			skipped_read = 1;
+		} else {
 			err = do_readpage(page);
 			if (err) {
 				unlock_page(page);
@@ -469,6 +470,14 @@ static int ubifs_write_begin(struct file *file, struct address_space *mapping,
 	err = allocate_budget(c, page, ui, appending);
 	if (unlikely(err)) {
 		ubifs_assert(err == -ENOSPC);
+		/*
+		 * If we skipped reading the page because we were going to
+		 * write all of it, then it is not up to date.
+		 */
+		if (skipped_read) {
+			ClearPageChecked(page);
+			ClearPageUptodate(page);
+		}
 		/*
 		 * Budgeting failed which means it would have to force
 		 * write-back but didn't, because we set the @fast flag in the
@@ -1540,7 +1549,7 @@ static int ubifs_file_mmap(struct file *file, struct vm_area_struct *vma)
 	return 0;
 }
 
-struct address_space_operations ubifs_file_address_operations = {
+const struct address_space_operations ubifs_file_address_operations = {
 	.readpage       = ubifs_readpage,
 	.writepage      = ubifs_writepage,
 	.write_begin    = ubifs_write_begin,
@@ -1550,7 +1559,7 @@ struct address_space_operations ubifs_file_address_operations = {
 	.releasepage    = ubifs_releasepage,
 };
 
-struct inode_operations ubifs_file_inode_operations = {
+const struct inode_operations ubifs_file_inode_operations = {
 	.setattr     = ubifs_setattr,
 	.getattr     = ubifs_getattr,
 #ifdef CONFIG_UBIFS_FS_XATTR
@@ -1561,14 +1570,14 @@ struct inode_operations ubifs_file_inode_operations = {
 #endif
 };
 
-struct inode_operations ubifs_symlink_inode_operations = {
+const struct inode_operations ubifs_symlink_inode_operations = {
 	.readlink    = generic_readlink,
 	.follow_link = ubifs_follow_link,
 	.setattr     = ubifs_setattr,
 	.getattr     = ubifs_getattr,
 };
 
-struct file_operations ubifs_file_operations = {
+const struct file_operations ubifs_file_operations = {
 	.llseek         = generic_file_llseek,
 	.read           = do_sync_read,
 	.write          = do_sync_write,

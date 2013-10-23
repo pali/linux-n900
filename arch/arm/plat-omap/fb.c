@@ -27,14 +27,43 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/bootmem.h>
+#include <linux/clk.h>
 #include <linux/io.h>
+#include <linux/omapfb.h>
 
 #include <mach/hardware.h>
 #include <asm/mach/map.h>
 
 #include <mach/board.h>
 #include <mach/sram.h>
-#include <mach/omapfb.h>
+
+#include <mach/dss_boottime.h>
+
+static int __initdata fb_initialized;
+
+#if !defined(CONFIG_FB_OMAP) && !defined(CONFIG_FB_OMAP2)
+
+static void __init reset_dss(void)
+{
+	pr_info("FB: resetting DSS\n");
+
+	if (dss_boottime_get_clocks() < 0) {
+		pr_err("can't get DSS clocks\n");
+		return;
+	}
+	if (dss_boottime_enable_clocks() < 0) {
+		pr_err("can't enable DSS clocks\n");
+		dss_boottime_put_clocks();
+		return;
+	}
+	if (dss_boottime_reset() < 0)
+		pr_err("can't reset DSS");
+
+	dss_boottime_disable_clocks();
+	dss_boottime_put_clocks();
+}
+
+#endif
 
 #if defined(CONFIG_FB_OMAP) || defined(CONFIG_FB_OMAP_MODULE)
 
@@ -70,13 +99,17 @@ static inline int range_included(unsigned long start1, unsigned long size1,
 
 
 /* Check if there is an overlapping region. */
-static int fbmem_region_reserved(unsigned long start, size_t size)
+static int fbmem_region_reserved(int region_idx,
+				 unsigned long start, size_t size)
 {
 	struct omapfb_mem_region *rg;
 	int i;
 
 	rg = &omapfb_config.mem_desc.region[0];
 	for (i = 0; i < OMAPFB_PLANE_NUM; i++, rg++) {
+		if (i == region_idx)
+			/* Don't check against self. */
+			continue;
 		if (!rg->paddr)
 			/* Empty slot. */
 			continue;
@@ -90,7 +123,8 @@ static int fbmem_region_reserved(unsigned long start, size_t size)
  * Get the region_idx`th region from board config/ATAG and convert it to
  * our internal format.
  */
-static int get_fbmem_region(int region_idx, struct omapfb_mem_region *rg)
+static int __init _get_fbmem_region(int region_idx,
+				    struct omapfb_mem_region *rg)
 {
 	const struct omap_fbmem_config	*conf;
 	u32				paddr;
@@ -111,6 +145,103 @@ static int get_fbmem_region(int region_idx, struct omapfb_mem_region *rg)
 	rg->paddr = paddr & PAGE_MASK;
 	rg->size = PAGE_ALIGN(conf->size);
 	return 0;
+}
+
+static void __init get_all_regions(void)
+{
+	int i;
+
+	i = 0;
+	while (i < OMAPFB_PLANE_NUM) {
+		struct omapfb_mem_region	rg;
+
+		if (_get_fbmem_region(i, &rg) < 0)
+			break;
+		omapfb_config.mem_desc.region[i] = rg;
+		i++;
+	}
+	omapfb_config.mem_desc.region_cnt = i;
+}
+
+
+static int __init get_fbmem_region(int region_idx,
+				   struct omapfb_mem_region *rg)
+{
+	if (region_idx >= omapfb_config.mem_desc.region_cnt)
+		return -ENOENT;
+	*rg = omapfb_config.mem_desc.region[region_idx];
+
+	return 0;
+}
+
+#ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
+
+static void __init detect_hw_base_addr(void)
+{
+	int ridx;
+
+	for (ridx = 0; ridx < OMAPFB_PLANE_NUM; ridx++) {
+		struct omapfb_mem_region rg;
+		u32 paddr;
+
+		if (get_fbmem_region(ridx, &rg) < 0)
+			break;
+		paddr = dss_boottime_get_plane_base(ridx);
+		if (paddr == -1UL)
+			continue;
+
+		rg.paddr = paddr;
+		omapfb_config.mem_desc.region[ridx] = rg;
+	}
+}
+
+#ifdef CONFIG_FB_OMAP
+static void __init enable_used_clocks(void)
+{
+	int i;
+
+	for (i = 0; i < OMAPFB_PLANE_NUM; i++)
+		if (dss_boottime_plane_is_enabled(i))
+			break;
+	if (i == OMAPFB_PLANE_NUM)
+		/* No planes active */
+		return;
+
+	if (dss_boottime_get_clocks() < 0) {
+		pr_err("Can't get DSS clocks\n");
+		return;
+	}
+
+	if (dss_boottime_enable_clocks() < 0) {
+		pr_err("Can't enable DSS clocks\n");
+		dss_boottime_put_clocks();
+	}
+
+	return;
+}
+#endif	/* CONFIG_FB_OMAP */
+
+
+#else
+static void inline __init detect_hw_base_addr(void)
+{
+}
+
+static void inline __init enable_used_clocks(void)
+{
+}
+#endif /* FB_OMAP_BOOTLOADER_INIT */
+
+static void __init init_regions(void)
+{
+	static int regions_inited;
+
+	if (regions_inited)
+		return;
+
+	regions_inited = 1;
+	get_all_regions();
+	detect_hw_base_addr();
 }
 
 static int set_fbmem_region_type(struct omapfb_mem_region *rg, int mem_type,
@@ -157,7 +288,7 @@ static int check_fbmem_region(int region_idx, struct omapfb_mem_region *rg,
 	 * Fixed region for the given RAM range. Check if it's already
 	 * reserved by the FB code or someone else.
 	 */
-	if (fbmem_region_reserved(paddr, size) ||
+	if (fbmem_region_reserved(region_idx, paddr, size) ||
 	    !range_included(paddr, size, start_avail, size_avail)) {
 		printk(KERN_ERR "Trying to use reserved memory "
 			"for FB region %d\n", region_idx);
@@ -181,6 +312,8 @@ void __init omapfb_reserve_sdram(void)
 	if (config_invalid)
 		return;
 
+	init_regions();
+
 	bdata = NODE_DATA(0)->bdata;
 	sdram_start = bdata->node_min_pfn << PAGE_SHIFT;
 	sdram_size = (bdata->node_low_pfn << PAGE_SHIFT) - sdram_start;
@@ -201,19 +334,22 @@ void __init omapfb_reserve_sdram(void)
 				          sdram_start, sdram_size) < 0 ||
 		    (rg.type != OMAPFB_MEMTYPE_SDRAM))
 			continue;
-		BUG_ON(omapfb_config.mem_desc.region[i].size);
 		if (check_fbmem_region(i, &rg, sdram_start, sdram_size) < 0) {
 			config_invalid = 1;
 			return;
 		}
+
 		if (rg.paddr) {
-			reserve_bootmem(rg.paddr, rg.size, BOOTMEM_DEFAULT);
+			if (reserve_bootmem(rg.paddr, rg.size,
+					    BOOTMEM_EXCLUSIVE) < 0) {
+				config_invalid = 1;
+				return;
+			}
 			reserved += rg.size;
 		}
 		omapfb_config.mem_desc.region[i] = rg;
 		configured_regions++;
 	}
-	omapfb_config.mem_desc.region_cnt = i;
 	if (reserved)
 		pr_info("Reserving %lu bytes SDRAM for frame buffer\n",
 			 reserved);
@@ -243,6 +379,8 @@ unsigned long omapfb_reserve_sram(unsigned long sram_pstart,
 	if (config_invalid)
 		return 0;
 
+	init_regions();
+
 	reserved = 0;
 	pend_avail = pstart_avail + size_avail;
 	for (i = 0; ; i++) {
@@ -260,7 +398,6 @@ unsigned long omapfb_reserve_sram(unsigned long sram_pstart,
 				          sram_pstart, sram_size) < 0 ||
 		    (rg.type != OMAPFB_MEMTYPE_SRAM))
 			continue;
-		BUG_ON(omapfb_config.mem_desc.region[i].size);
 
 		if (check_fbmem_region(i, &rg, pstart_avail, size_avail) < 0) {
 			config_invalid = 1;
@@ -291,7 +428,6 @@ unsigned long omapfb_reserve_sram(unsigned long sram_pstart,
 		omapfb_config.mem_desc.region[i] = rg;
 		configured_regions++;
 	}
-	omapfb_config.mem_desc.region_cnt = i;
 	if (reserved)
 		pr_info("Reserving %lu bytes SRAM for frame buffer\n",
 			 reserved);
@@ -303,12 +439,13 @@ void omapfb_set_ctrl_platform_data(void *data)
 	omapfb_config.ctrl_platform_data = data;
 }
 
-static inline int omap_init_fb(void)
+int __init omap_init_fb(void)
 {
 	const struct omap_lcd_config *conf;
 
-	if (config_invalid)
+	if (fb_initialized || config_invalid)
 		return 0;
+	fb_initialized = 1;
 	if (configured_regions != omapfb_config.mem_desc.region_cnt) {
 		printk(KERN_ERR "Invalid FB mem configuration entries\n");
 		return 0;
@@ -322,10 +459,84 @@ static inline int omap_init_fb(void)
 	}
 	omapfb_config.lcd = *conf;
 
+#if defined (CONFIG_FB_OMAP_MODULE)
+	reset_dss();
+#else
+	enable_used_clocks();
+#endif
 	return platform_device_register(&omap_fb_device);
 }
 
-arch_initcall(omap_init_fb);
+#elif defined(CONFIG_FB_OMAP2) || defined(CONFIG_FB_OMAP2_MODULE)
+
+static u64 omap_fb_dma_mask = ~(u32)0;
+static struct omapfb_platform_data omapfb_config;
+
+static struct platform_device omap_fb_device = {
+	.name		= "omapfb",
+	.id		= -1,
+	.dev = {
+		.dma_mask		= &omap_fb_dma_mask,
+		.coherent_dma_mask	= ~(u32)0,
+		.platform_data		= &omapfb_config,
+	},
+	.num_resources = 0,
+};
+
+void omapfb_set_platform_data(struct omapfb_platform_data *data)
+{
+	omapfb_config = *data;
+}
+
+#ifdef CONFIG_FB_OMAP_BOOTLOADER_INIT
+static void __init enable_used_clocks(void)
+{
+	unsigned long paddr;
+	size_t size;
+	enum omapfb_color_format format;
+
+	if (!dss_boottime_plane_is_enabled(0))
+		return;
+
+	if (dss_boottime_get_clocks() < 0) {
+		pr_err("Can't get DSS clocks\n");
+		return;
+	}
+
+	if (dss_boottime_enable_clocks() < 0) {
+		pr_err("Can't enable DSS clocks\n");
+		dss_boottime_put_clocks();
+	}
+
+	paddr = dss_boottime_get_plane_base(0);
+	format = dss_boottime_get_plane_format(0);
+	size = dss_boottime_get_plane_size(0);
+
+	omapfb_config.mem_desc.region[0].paddr = paddr;
+	omapfb_config.mem_desc.region[0].format = format;
+	omapfb_config.mem_desc.region[0].format_used = 1;
+	omapfb_config.mem_desc.region[0].size = size;
+	if (!omapfb_config.mem_desc.region_cnt)
+		omapfb_config.mem_desc.region_cnt = 1;
+
+	return;
+}
+#else
+static void inline __init enable_used_clocks(void) { }
+#endif /* FB_OMAP_BOOTLOADER_INIT */
+
+int __init omap_init_fb(void)
+{
+	if (fb_initialized)
+		return 0;
+	fb_initialized = 1;
+#if defined (CONFIG_FB_OMAP2_MODULE)
+	reset_dss();
+#else
+	enable_used_clocks();
+#endif
+	return platform_device_register(&omap_fb_device);
+}
 
 #else
 
@@ -339,5 +550,17 @@ unsigned long omapfb_reserve_sram(unsigned long sram_pstart,
 	return 0;
 }
 
+int __init omap_init_fb(void)
+{
+	if (fb_initialized)
+		return 0;
+	fb_initialized = 1;
+	reset_dss();
+
+	return 0;
+}
 
 #endif
+
+arch_initcall(omap_init_fb);
+

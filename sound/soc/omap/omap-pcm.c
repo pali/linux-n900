@@ -27,10 +27,11 @@
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 
+#include <mach/mcbsp.h>
 #include <mach/dma.h>
 #include "omap-pcm.h"
 
-static const struct snd_pcm_hardware omap_pcm_hardware = {
+static struct snd_pcm_hardware omap_pcm_hardware = {
 	.info			= SNDRV_PCM_INFO_MMAP |
 				  SNDRV_PCM_INFO_MMAP_VALID |
 				  SNDRV_PCM_INFO_INTERLEAVED |
@@ -38,7 +39,6 @@ static const struct snd_pcm_hardware omap_pcm_hardware = {
 				  SNDRV_PCM_INFO_RESUME,
 	.formats		= SNDRV_PCM_FMTBIT_S16_LE,
 	.period_bytes_min	= 32,
-	.period_bytes_max	= 64 * 1024,
 	.periods_min		= 2,
 	.periods_max		= 255,
 	.buffer_bytes_max	= 128 * 1024,
@@ -132,15 +132,22 @@ static int omap_pcm_prepare(struct snd_pcm_substream *substream)
 	struct omap_runtime_data *prtd = runtime->private_data;
 	struct omap_pcm_dma_data *dma_data = prtd->dma_data;
 	struct omap_dma_channel_params dma_params;
+	int sync_mode;
 
 	memset(&dma_params, 0, sizeof(dma_params));
+
+	if (cpu_is_omap34xx())
+		sync_mode = OMAP_DMA_SYNC_FRAME;
+	else
+		sync_mode = OMAP_DMA_SYNC_ELEMENT;
+
 	/*
 	 * Note: Regardless of interface data formats supported by OMAP McBSP
 	 * or EAC blocks, internal representation is always fixed 16-bit/sample
 	 */
 	dma_params.data_type			= OMAP_DMA_DATA_TYPE_S16;
 	dma_params.trigger			= dma_data->dma_req;
-	dma_params.sync_mode			= OMAP_DMA_SYNC_ELEMENT;
+	dma_params.sync_mode			= sync_mode;
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		dma_params.src_amode		= OMAP_DMA_AMODE_POST_INC;
 		dma_params.dst_amode		= OMAP_DMA_AMODE_CONSTANT;
@@ -168,6 +175,9 @@ static int omap_pcm_prepare(struct snd_pcm_substream *substream)
 
 	omap_enable_dma_irq(prtd->dma_ch, OMAP_DMA_FRAME_IRQ);
 
+	omap_set_dma_src_burst_mode(prtd->dma_ch, OMAP_DMA_DATA_BURST_16);
+	omap_set_dma_dest_burst_mode(prtd->dma_ch, OMAP_DMA_DATA_BURST_16);
+
 	return 0;
 }
 
@@ -175,14 +185,24 @@ static int omap_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct omap_runtime_data *prtd = runtime->private_data;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	unsigned long flags;
 	int ret = 0;
+	unsigned int bus_id = *(unsigned int *)rtd->dai->cpu_dai->private_data;
+	u16 samples = snd_pcm_lib_period_bytes(substream) >> 1;
 
-	spin_lock_irq(&prtd->lock);
+	spin_lock_irqsave(&prtd->lock, flags);
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 		prtd->period_index = 0;
+		/* Configure McBSP internal buffer usage */
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			omap_mcbsp_set_tx_threshold(bus_id, samples - 1);
+		else
+			omap_mcbsp_set_rx_threshold(bus_id, samples - 1);
+
 		omap_start_dma(prtd->dma_ch);
 		break;
 
@@ -195,7 +215,7 @@ static int omap_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	default:
 		ret = -EINVAL;
 	}
-	spin_unlock_irq(&prtd->lock);
+	spin_unlock_irqrestore(&prtd->lock, flags);
 
 	return ret;
 }
@@ -223,7 +243,23 @@ static int omap_pcm_open(struct snd_pcm_substream *substream)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct omap_runtime_data *prtd;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	unsigned int bus_id = *(unsigned int *)rtd->dai->cpu_dai->private_data;
 	int ret;
+	int max_period;
+
+	if (cpu_is_omap34xx()) {
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			max_period = omap_mcbsp_get_max_tx_threshold(bus_id);
+		else
+			max_period = omap_mcbsp_get_max_rx_threshold(bus_id);
+		max_period++;
+		max_period <<= 1;
+	} else {
+		omap_pcm_hardware.period_bytes_max = 64 * 1024;
+	}
+
+	omap_pcm_hardware.period_bytes_max = max_period;
 
 	snd_soc_set_runtime_hwparams(substream, &omap_pcm_hardware);
 
@@ -276,7 +312,7 @@ struct snd_pcm_ops omap_pcm_ops = {
 	.mmap		= omap_pcm_mmap,
 };
 
-static u64 omap_pcm_dmamask = DMA_BIT_MASK(32);
+static u64 omap_pcm_dmamask = DMA_BIT_MASK(64);
 
 static int omap_pcm_preallocate_dma_buffer(struct snd_pcm *pcm,
 	int stream)
@@ -326,7 +362,7 @@ int omap_pcm_new(struct snd_card *card, struct snd_soc_dai *dai,
 	if (!card->dev->dma_mask)
 		card->dev->dma_mask = &omap_pcm_dmamask;
 	if (!card->dev->coherent_dma_mask)
-		card->dev->coherent_dma_mask = DMA_32BIT_MASK;
+		card->dev->coherent_dma_mask = DMA_64BIT_MASK;
 
 	if (dai->playback.channels_min) {
 		ret = omap_pcm_preallocate_dma_buffer(pcm,

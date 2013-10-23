@@ -19,15 +19,18 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/io.h>
+#include <linux/clk.h>
+#include <linux/omapfb.h>
 
 #include <asm/tlb.h>
 
 #include <asm/mach/map.h>
 #include <mach/mux.h>
-#include <mach/omapfb.h>
 #include <mach/sram.h>
 #include <mach/sdrc.h>
 #include <mach/gpmc.h>
+
+#include "omapdev-common.h"
 
 #include "clock.h"
 
@@ -37,6 +40,10 @@
 
 #include <mach/clockdomain.h>
 #include "clockdomains.h"
+
+#include <mach/omap-pm.h>
+
+#include <dspbridge/host_os.h>
 
 /*
  * The machine specific code may provide the extra mapping besides the
@@ -192,14 +199,57 @@ void __init omap2_map_common_io(void)
 	omap2_check_revision();
 	omap_sram_init();
 	omapfb_reserve_sdram();
+	dspbridge_reserve_sdram();
 }
 
-void __init omap2_init_common_hw(struct omap_sdrc_params *sp)
+/*
+ * omap2_init_reprogram_sdrc - reprogram SDRC timing parameters
+ *
+ * Sets the CORE DPLL3 M2 divider to the same value that it's at
+ * currently.  This has the effect of setting the SDRC SDRAM AC timing
+ * registers to the values currently defined by the kernel.  Currently
+ * only defined for OMAP3; will return 0 if called on OMAP2.  Returns
+ * -EINVAL if the dpll3_m2_ck cannot be found, 0 if called on OMAP2,
+ * or passes along the return value of clk_set_rate().
+ */
+static int __init _omap2_init_reprogram_sdrc(void)
+{
+	struct clk *dpll3_m2_ck;
+	int v = -EINVAL;
+
+	if (!cpu_is_omap34xx())
+		return 0;
+
+	dpll3_m2_ck = clk_get(NULL, "dpll3_m2_ck");
+	if (!dpll3_m2_ck)
+		return -EINVAL;
+
+	pr_info("Reprogramming SDRC\n");
+	v = clk_set_rate(dpll3_m2_ck, clk_get_rate(dpll3_m2_ck));
+	if (v)
+		pr_err("dpll3_m2_clk rate change failed: %d\n", v);
+
+	clk_put(dpll3_m2_ck);
+
+	return v;
+}
+
+void __init omap2_init_common_hw(struct omap_sdrc_params *sp,
+				 struct omap_opp *mpu_opps,
+				 struct omap_opp *dsp_opps,
+				 struct omap_opp *l3_opps)
 {
 	omap2_mux_init();
+	/* The OPP tables have to be registered before a clk init */
+	omap_pm_if_early_init(mpu_opps, dsp_opps, l3_opps);
 	pwrdm_init(powerdomains_omap);
 	clkdm_init(clockdomains_omap, clkdm_pwrdm_autodeps);
+	omapdev_init(omapdevs);
 	omap2_clk_init();
+	omap_pm_if_init();
 	omap2_sdrc_init(sp);
+
+	_omap2_init_reprogram_sdrc();
+
 	gpmc_init();
 }

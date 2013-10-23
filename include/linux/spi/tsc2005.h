@@ -5,8 +5,6 @@
 
 struct tsc2005_platform_data {
 	s16	reset_gpio;
-	s16	dav_gpio;
-	s16	pen_int_gpio;
 	u16	ts_x_plate_ohm;
 	u32	ts_stab_time;	/* voltage settling time */
 	u8	ts_hw_avg;	/* HW assiseted averaging. Can be
@@ -22,6 +20,8 @@ struct tsc2005_platform_data {
 	u32	ts_x_fudge;
 	u32	ts_y_max;
 	u32	ts_y_fudge;
+
+	u32	esd_timeout;    /* msec of inactivity before we check */
 
 	unsigned ts_ignore_last : 1;
 };

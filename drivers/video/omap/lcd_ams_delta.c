@@ -24,13 +24,13 @@
 
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/omapfb.h>
 
 #include <asm/delay.h>
 #include <asm/io.h>
 
 #include <mach/board-ams-delta.h>
 #include <mach/hardware.h>
-#include <mach/omapfb.h>
 
 #define AMS_DELTA_DEFAULT_CONTRAST	112
 

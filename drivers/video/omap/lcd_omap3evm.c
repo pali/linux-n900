@@ -24,9 +24,9 @@
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
 #include <linux/i2c/twl4030.h>
+#include <linux/omapfb.h>
 
 #include <mach/mux.h>
-#include <mach/omapfb.h>
 #include <asm/mach-types.h>
 
 #define LCD_PANEL_ENABLE_GPIO       153

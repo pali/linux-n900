@@ -32,13 +32,13 @@
 #include <linux/delay.h>
 #include <linux/mempool.h>
 #include <linux/clk.h>
+#include <linux/omapfb.h>
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <asm/pgalloc.h>
 #include <asm/pgtable.h>
 #include <mach/tc.h>
-#include <mach/omapfb.h>
 #include <mach/dsp.h>
 #include <mach/mailbox.h>
 #include <mach/mmu.h>

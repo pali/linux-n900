@@ -1778,6 +1778,14 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
 		goto fail_unlock;
 
  	if (ispipe) {
+		char env_exe[64];
+		char env_pid[16], env_sig[16];
+		char env_uid[16], env_gid[16];
+		char *envp[] = { env_exe,
+				 env_pid, env_sig,
+				 env_uid, env_gid,
+				 NULL };
+
 		helper_argv = argv_split(GFP_KERNEL, corename+1, &helper_argc);
 		/* Terminate the string before the first option */
 		delimit = strchr(corename, ' ');
@@ -1796,8 +1804,14 @@ int do_coredump(long signr, int exit_code, struct pt_regs * regs)
 
 		core_limit = RLIM_INFINITY;
 
+		snprintf(env_exe, sizeof(env_exe), "CORE_EXE=%s", current->comm);
+		snprintf(env_pid, sizeof(env_pid), "CORE_PID=%d", current->tgid);
+		snprintf(env_sig, sizeof(env_sig), "CORE_SIG=%ld", signr);
+		snprintf(env_uid, sizeof(env_uid), "CORE_UID=%u", current->uid);
+		snprintf(env_gid, sizeof(env_gid), "CORE_GID=%u", current->gid);
+
 		/* SIGPIPE can happen, but it's just never processed */
- 		if (call_usermodehelper_pipe(corename+1, helper_argv, NULL,
+		if (call_usermodehelper_pipe(corename+1, helper_argv, envp,
 				&file)) {
  			printk(KERN_INFO "Core dump to %s pipe failed\n",
 			       corename);

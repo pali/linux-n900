@@ -20,10 +20,13 @@
 #include <linux/io.h>
 
 #include <mach/hardware.h>
+#include <mach/control.h>
 #include <asm/irq.h>
 #include <mach/irqs.h>
 #include <mach/gpio.h>
 #include <asm/mach/irq.h>
+#include <mach/powerdomain.h>
+#include <mach/mux.h>
 
 /*
  * OMAP1510 GPIO registers
@@ -153,6 +156,7 @@ struct gpio_bank {
 	spinlock_t lock;
 	struct gpio_chip chip;
 	struct clk *dbck;
+	u32 dbck_enable_mask;
 };
 
 #define METHOD_MPUIO		0
@@ -219,6 +223,73 @@ static struct gpio_bank gpio_bank_34xx[6] = {
 	{ OMAP34XX_GPIO6_BASE, INT_34XX_GPIO_BANK6, IH_GPIO_BASE + 160, METHOD_GPIO_24XX },
 };
 
+#define OMAP34XX_PAD_SAFE_MODE 0x7
+#define OMAP34XX_PAD_IN_PU_GPIO 0x11c
+#define OMAP34XX_PAD_IN_PD_GPIO 0x10c
+
+struct omap3_gpio_regs {
+	u32 sysconfig;
+	u32 irqenable1;
+	u32 irqenable2;
+	u32 wake_en;
+	u32 ctrl;
+	u32 oe;
+	u32 leveldetect0;
+	u32 leveldetect1;
+	u32 risingdetect;
+	u32 fallingdetect;
+	u32 dataout;
+};
+
+static struct omap3_gpio_regs gpio_context[OMAP34XX_NR_GPIOS];
+
+/* GPIO -> PAD init configuration struct */
+struct gpio_pad_range {
+	/* Range start GPIO # */
+	u16 min;
+	/* Range end GPIO # */
+	u16 max;
+	/* Start pad config offset */
+	u16 offset;
+};
+
+/*
+ * Defines GPIO to padconfig mapping. For example first definition tells
+ * us that there is a range of GPIOs 34...43 which have their padconfigs
+ * starting from offset 0x7a, i.e. gpio 34->0x7a, 35->0x7c, 36->0x7e ... etc.
+ */
+static const struct gpio_pad_range gpio_pads_config[] = {
+	{ 34, 43, 0x7a },
+	{ 44, 51, 0x9e },
+	{ 52, 59, 0xb0 },
+	{ 60, 62, 0xc6 },
+	{ 63, 111, 0xce },
+	{ 167, 167, 0x130 },
+	{ 126, 126, 0x132 },
+	{ 112, 166, 0x134 },
+	{ 120, 122, 0x1a2 },
+	{ 124, 125, 0x1a8 },
+	{ 130, 131, 0x1ac },
+	{ 169, 169, 0x1b0 },
+	{ 188, 191, 0x1b2 },
+	{ 168, 168, 0x1be },
+	{ 183, 185, 0x1c0 },
+	{ 170, 182, 0x1c6 },
+	{ 0, 0, 0x1e0 },
+	{ 186, 186, 0x1e2 },
+	{ 12, 29, 0x5d8 },
+};
+
+/* GPIO -> PAD config mapping for OMAP3 */
+struct gpio_pad {
+	s16 gpio;
+	u16 offset;
+	u16 save;
+};
+
+#define OMAP34XX_GPIO_AMT	(32 * OMAP34XX_NR_GPIOS)
+
+struct gpio_pad *gpio_pads;
 #endif
 
 static struct gpio_bank *gpio_bank;
@@ -471,6 +542,7 @@ void omap_set_gpio_debounce(int gpio, int enable)
 		goto done;
 
 	if (cpu_is_omap34xx()) {
+		bank->dbck_enable_mask = val;
 		if (enable)
 			clk_enable(bank->dbck);
 		else
@@ -523,7 +595,9 @@ static inline void set_24xx_gpio_triggering(struct gpio_bank *bank, int gpio,
 		else
 			__raw_writel(1 << gpio, bank->base
 					+ OMAP24XX_GPIO_CLEARWKUENA);
-	} else {
+	}
+	/* This part needs to be executed always for OMAP34xx */
+	if (cpu_is_omap34xx() || (bank->non_wakeup_gpios & gpio_bit)) {
 		if (trigger != 0)
 			bank->enabled_non_wakeup_gpios |= gpio_bit;
 		else
@@ -691,8 +765,12 @@ static void _clear_gpio_irqbank(struct gpio_bank *bank, int gpio_mask)
 
 	/* Workaround for clearing DSP GPIO interrupts to allow retention */
 #if defined(CONFIG_ARCH_OMAP24XX) || defined(CONFIG_ARCH_OMAP34XX)
+	reg = bank->base + OMAP24XX_GPIO_IRQSTATUS2;
 	if (cpu_is_omap24xx() || cpu_is_omap34xx())
-		__raw_writel(gpio_mask, bank->base + OMAP24XX_GPIO_IRQSTATUS2);
+		__raw_writel(gpio_mask, reg);
+
+	/* Flush posted write for the irq status to avoid spurious interrupts */
+	__raw_readl(reg);
 #endif
 }
 
@@ -837,13 +915,10 @@ static int _set_gpio_wakeup(struct gpio_bank *bank, int gpio, int enable)
 	case METHOD_MPUIO:
 	case METHOD_GPIO_1610:
 		spin_lock_irqsave(&bank->lock, flags);
-		if (enable) {
+		if (enable)
 			bank->suspend_wakeup |= (1 << gpio);
-			enable_irq_wake(bank->irq);
-		} else {
-			disable_irq_wake(bank->irq);
+		else
 			bank->suspend_wakeup &= ~(1 << gpio);
-		}
 		spin_unlock_irqrestore(&bank->lock, flags);
 		return 0;
 #endif
@@ -856,13 +931,10 @@ static int _set_gpio_wakeup(struct gpio_bank *bank, int gpio, int enable)
 			return -EINVAL;
 		}
 		spin_lock_irqsave(&bank->lock, flags);
-		if (enable) {
+		if (enable)
 			bank->suspend_wakeup |= (1 << gpio);
-			enable_irq_wake(bank->irq);
-		} else {
-			disable_irq_wake(bank->irq);
+		else
 			bank->suspend_wakeup &= ~(1 << gpio);
-		}
 		spin_unlock_irqrestore(&bank->lock, flags);
 		return 0;
 #endif
@@ -1275,6 +1347,68 @@ static struct clk * gpio5_fck;
 
 #if defined(CONFIG_ARCH_OMAP3)
 static struct clk *gpio_iclks[OMAP34XX_NR_GPIOS];
+
+/*
+ * Following pad init code in addition to the context / restore hooks are
+ * needed to fix glitches in GPIO outputs during off-mode. See OMAP3
+ * errate section 1.158
+ */
+static int __init omap3_gpio_pads_init(void)
+{
+	int i, j, min, max, gpio_amt;
+	u16 offset;
+	u16 *gpio_pad_map;
+
+	gpio_amt = 0;
+
+	gpio_pad_map = kzalloc(sizeof(u16) * OMAP34XX_GPIO_AMT, GFP_KERNEL);
+	if (gpio_pad_map == NULL) {
+		printk(KERN_ERR "FATAL: Failed to allocate gpio_pad_map\n");
+		return -ENOMEM;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(gpio_pads_config); i++) {
+		min = gpio_pads_config[i].min;
+		max = gpio_pads_config[i].max;
+		offset = gpio_pads_config[i].offset;
+
+		for (j = min; j <= max; j++) {
+			/*
+			 * Check if pad has been configured as GPIO.
+			 * First module (gpio 0...31) is ignored as it is
+			 * in wakeup domain and does not need special
+			 * handling during off mode.
+			 */
+			if (j > 31 && (omap_ctrl_readw(offset) &
+				OMAP34XX_MUX_MODE7) == OMAP34XX_MUX_MODE4) {
+				gpio_pad_map[j] = offset;
+				gpio_amt++;
+			}
+			offset += 2;
+		}
+	}
+	gpio_pads = kmalloc(sizeof(struct gpio_pad) * (gpio_amt + 1),
+		GFP_KERNEL);
+
+	if (gpio_pads == NULL) {
+		printk(KERN_ERR "FATAL: Failed to allocate gpio_pads\n");
+		kfree(gpio_pad_map);
+		return -ENOMEM;
+	}
+
+	gpio_amt = 0;
+	for (i = 0; i < OMAP34XX_GPIO_AMT; i++) {
+		if (gpio_pad_map[i] != 0) {
+			gpio_pads[gpio_amt].gpio = i;
+			gpio_pads[gpio_amt].offset = gpio_pad_map[i];
+			gpio_amt++;
+		}
+	}
+	gpio_pads[gpio_amt].gpio = -1;
+	kfree(gpio_pad_map);
+	return 0;
+}
+late_initcall(omap3_gpio_pads_init);
 #endif
 
 /* This lock class tells lockdep that GPIO irqs are in a different
@@ -1439,7 +1573,8 @@ static int __init _omap_gpio_init(void)
 
 			/* Initialize interface clock ungated, module enabled */
 			__raw_writel(0, bank->base + OMAP24XX_GPIO_CTRL);
-			if (i < ARRAY_SIZE(non_wakeup_gpios))
+			if (cpu_is_omap24xx() &&
+			    i < ARRAY_SIZE(non_wakeup_gpios))
 				bank->non_wakeup_gpios = non_wakeup_gpios[i];
 			gpio_count = 32;
 		}
@@ -1606,16 +1741,27 @@ static struct sys_device omap_gpio_device = {
 
 static int workaround_enabled;
 
-void omap2_gpio_prepare_for_retention(void)
+void omap2_gpio_prepare_for_idle(int power_state)
 {
 	int i, c = 0;
+	int min = 0;
 
-	/* Remove triggering for all non-wakeup GPIOs.  Otherwise spurious
-	 * IRQs will be generated.  See OMAP2420 Errata item 1.101. */
-	for (i = 0; i < gpio_bank_count; i++) {
+	if (cpu_is_omap34xx())
+		min = 1;
+
+	for (i = min; i < gpio_bank_count; i++) {
 		struct gpio_bank *bank = &gpio_bank[i];
 		u32 l1, l2;
 
+		if (cpu_is_omap34xx() && bank->dbck_enable_mask)
+			clk_disable(bank->dbck);
+
+		if (power_state > PWRDM_POWER_OFF)
+			continue;
+
+		/* If going to OFF, remove triggering for all
+		 * non-wakeup GPIOs.  Otherwise spurious IRQs will be
+		 * generated.  See OMAP2420 Errata item 1.101. */
 		if (!(bank->enabled_non_wakeup_gpios))
 			continue;
 #if defined(CONFIG_ARCH_OMAP24XX) || defined(CONFIG_ARCH_OMAP34XX)
@@ -1627,10 +1773,12 @@ void omap2_gpio_prepare_for_retention(void)
 		bank->saved_risingdetect = l2;
 		l1 &= ~bank->enabled_non_wakeup_gpios;
 		l2 &= ~bank->enabled_non_wakeup_gpios;
-#if defined(CONFIG_ARCH_OMAP24XX) || defined(CONFIG_ARCH_OMAP34XX)
-		__raw_writel(l1, bank->base + OMAP24XX_GPIO_FALLINGDETECT);
-		__raw_writel(l2, bank->base + OMAP24XX_GPIO_RISINGDETECT);
-#endif
+		if (cpu_is_omap24xx()) {
+			__raw_writel(l1, bank->base +
+					OMAP24XX_GPIO_FALLINGDETECT);
+			__raw_writel(l2, bank->base +
+					OMAP24XX_GPIO_RISINGDETECT);
+		}
 		c++;
 	}
 	if (!c) {
@@ -1640,15 +1788,22 @@ void omap2_gpio_prepare_for_retention(void)
 	workaround_enabled = 1;
 }
 
-void omap2_gpio_resume_after_retention(void)
+void omap2_gpio_resume_after_idle(void)
 {
 	int i;
+	int min = 0;
 
-	if (!workaround_enabled)
-		return;
-	for (i = 0; i < gpio_bank_count; i++) {
+	if (cpu_is_omap34xx())
+		min = 1;
+	for (i = min; i < gpio_bank_count; i++) {
 		struct gpio_bank *bank = &gpio_bank[i];
 		u32 l;
+
+		if (cpu_is_omap34xx() && bank->dbck_enable_mask)
+			clk_enable(bank->dbck);
+
+		if (!workaround_enabled)
+			continue;
 
 		if (!(bank->enabled_non_wakeup_gpios))
 			continue;
@@ -1666,7 +1821,7 @@ void omap2_gpio_resume_after_retention(void)
 		l = __raw_readl(bank->base + OMAP24XX_GPIO_DATAIN);
 #endif
 		l ^= bank->saved_datain;
-		l &= bank->non_wakeup_gpios;
+		l &= bank->enabled_non_wakeup_gpios;
 		if (l) {
 			u32 old0, old1;
 #if defined(CONFIG_ARCH_OMAP24XX) || defined(CONFIG_ARCH_OMAP34XX)
@@ -1682,6 +1837,145 @@ void omap2_gpio_resume_after_retention(void)
 
 }
 
+#endif
+
+#ifdef CONFIG_ARCH_OMAP34XX
+/* save the registers of bank 2-6 */
+void omap3_gpio_save_context(void)
+{
+	int i;
+	struct gpio_bank *bank;
+	int n;
+	u16 offset, conf;
+	u32 out, pin;
+	struct gpio_pad *pad;
+	u32 tmp_oe[OMAP34XX_NR_GPIOS];
+	/* saving banks from 2-6 only */
+	for (i = 1; i < gpio_bank_count; i++) {
+		bank = &gpio_bank[i];
+		gpio_context[i].sysconfig =
+			__raw_readl(bank->base + OMAP24XX_GPIO_SYSCONFIG);
+		gpio_context[i].irqenable1 =
+			__raw_readl(bank->base + OMAP24XX_GPIO_IRQENABLE1);
+		gpio_context[i].irqenable2 =
+			__raw_readl(bank->base + OMAP24XX_GPIO_IRQENABLE2);
+		gpio_context[i].wake_en =
+			__raw_readl(bank->base + OMAP24XX_GPIO_WAKE_EN);
+		gpio_context[i].ctrl =
+			__raw_readl(bank->base + OMAP24XX_GPIO_CTRL);
+		gpio_context[i].oe =
+			__raw_readl(bank->base + OMAP24XX_GPIO_OE);
+		tmp_oe[i] = gpio_context[i].oe;
+		gpio_context[i].leveldetect0 =
+			__raw_readl(bank->base + OMAP24XX_GPIO_LEVELDETECT0);
+		gpio_context[i].leveldetect1 =
+			__raw_readl(bank->base + OMAP24XX_GPIO_LEVELDETECT1);
+		gpio_context[i].risingdetect =
+			__raw_readl(bank->base + OMAP24XX_GPIO_RISINGDETECT);
+		gpio_context[i].fallingdetect =
+			__raw_readl(bank->base + OMAP24XX_GPIO_FALLINGDETECT);
+		gpio_context[i].dataout =
+			__raw_readl(bank->base + OMAP24XX_GPIO_DATAOUT);
+	}
+	pad = gpio_pads;
+
+	if (pad == NULL)
+		return;
+
+	while (pad->gpio >= 0) {
+		/* n = gpio number, 0..191 */
+		n = pad->gpio;
+		/* i = gpio bank, 0..5 */
+		i = n >> 5;
+		/* offset of padconf register */
+		offset = pad->offset;
+		bank = &gpio_bank[i];
+		/* bit position of gpio in the bank 0..31 */
+		pin = 1 << (n & 0x1f);
+
+		/* check if gpio is configured as output => need hack */
+		if (!(tmp_oe[i] & pin)) {
+			/* save current padconf setting */
+			pad->save = omap_ctrl_readw(offset);
+			out = gpio_context[i].dataout;
+			if (out & pin)
+				/* High: PU + input */
+				conf = OMAP34XX_PAD_IN_PU_GPIO;
+			else
+				/* Low: PD + input */
+				conf = OMAP34XX_PAD_IN_PD_GPIO;
+			/* Set PAD to GPIO + input */
+			omap_ctrl_writew(conf, offset);
+			/* Set GPIO to input */
+			tmp_oe[i] |= pin;
+			__raw_writel(tmp_oe[i],
+					bank->base + OMAP24XX_GPIO_OE);
+			/* Set PAD to safe mode */
+			omap_ctrl_writew(conf | OMAP34XX_PAD_SAFE_MODE, offset);
+		} else
+			pad->save = 0;
+		pad++;
+	}
+}
+EXPORT_SYMBOL(omap3_gpio_save_context);
+
+/* restore the required registers of bank 2-6 */
+void omap3_gpio_restore_context(void)
+{
+	int i;
+	for (i = 1; i < gpio_bank_count; i++) {
+		struct gpio_bank *bank = &gpio_bank[i];
+		__raw_writel(gpio_context[i].sysconfig,
+				bank->base + OMAP24XX_GPIO_SYSCONFIG);
+		__raw_writel(gpio_context[i].irqenable1,
+				bank->base + OMAP24XX_GPIO_IRQENABLE1);
+		__raw_writel(gpio_context[i].irqenable2,
+				bank->base + OMAP24XX_GPIO_IRQENABLE2);
+		__raw_writel(gpio_context[i].wake_en,
+				bank->base + OMAP24XX_GPIO_WAKE_EN);
+		__raw_writel(gpio_context[i].ctrl,
+				bank->base + OMAP24XX_GPIO_CTRL);
+		__raw_writel(gpio_context[i].leveldetect0,
+				bank->base + OMAP24XX_GPIO_LEVELDETECT0);
+		__raw_writel(gpio_context[i].leveldetect1,
+				bank->base + OMAP24XX_GPIO_LEVELDETECT1);
+		__raw_writel(gpio_context[i].risingdetect,
+				bank->base + OMAP24XX_GPIO_RISINGDETECT);
+		__raw_writel(gpio_context[i].fallingdetect,
+				bank->base + OMAP24XX_GPIO_FALLINGDETECT);
+		__raw_writel(gpio_context[i].dataout,
+				bank->base + OMAP24XX_GPIO_DATAOUT);
+		__raw_writel(gpio_context[i].oe,
+				bank->base + OMAP24XX_GPIO_OE);
+	}
+}
+EXPORT_SYMBOL(omap3_gpio_restore_context);
+
+void omap3_gpio_restore_pad_context(int restore_oe)
+{
+	struct gpio_pad *pad;
+	int i;
+
+	pad = gpio_pads;
+
+	if (restore_oe) {
+		for (i = 1; i < gpio_bank_count; i++) {
+			struct gpio_bank *bank = &gpio_bank[i];
+			__raw_writel(gpio_context[i].oe,
+				bank->base + OMAP24XX_GPIO_OE);
+		}
+	}
+
+	if (pad == NULL)
+		return;
+
+	while (pad->gpio >= 0) {
+		if (pad->save)
+			omap_ctrl_writew(pad->save, pad->offset);
+		pad++;
+	}
+}
+EXPORT_SYMBOL(omap3_gpio_restore_pad_context);
 #endif
 
 /*

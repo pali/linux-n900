@@ -19,6 +19,7 @@
 #include <linux/spi/ads7846.h>
 #include <linux/workqueue.h>
 #include <linux/delay.h>
+#include <linux/omapfb.h>
 
 #include <mach/hardware.h>
 #include <asm/mach-types.h>
@@ -32,7 +33,7 @@
 #include <mach/keypad.h>
 #include <mach/common.h>
 #include <mach/dsp_common.h>
-#include <mach/omapfb.h>
+#include <mach/aic23.h>
 #include <mach/hwa742.h>
 #include <mach/lcd_mipid.h>
 #include <mach/mmc.h>

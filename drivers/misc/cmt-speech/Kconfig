@@ -1,0 +1,24 @@
+#
+# OMAP SSI kernel configuration
+#
+
+config SSI_CMT_SPEECH
+	tristate "CMT speech driver"
+	depends on OMAP_SSI
+	---help---
+	  If you say Y here, you will enable the CMT speech driver.
+	  This driver provides a simple interface for the user space speech
+	  protocol implementation to communicate with the cellular engine over
+	  the SSI bus.
+
+	  If unsure, say Y, or else you will not be able to make voice calls.
+
+config SSI_CMT_SPEECH_DEBUG
+	bool "Debug CMT speech driver"
+	depends on SSI_CMT_SPEECH && DEBUG_KERNEL
+	default n
+	---help---
+	  Enable the debug information in the CMT speech driver. Be warned
+	  that it can be quite noisy.
+
+          If unsure, say N.

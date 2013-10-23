@@ -274,6 +274,10 @@ struct mesh_config {
 	u16 dot11MeshHWMPnetDiameterTraversalTime;
 };
 
+enum rssi_signal_state {
+	RSSI_SIGNAL_STATE_HIGH,
+	RSSI_SIGNAL_STATE_LOW,
+};
 
 /* flags used in struct ieee80211_if_sta.flags */
 #define IEEE80211_STA_SSID_SET		BIT(0)
@@ -351,6 +355,10 @@ struct ieee80211_if_sta {
 	u32 supp_rates_bits[IEEE80211_NUM_BANDS];
 
 	int wmm_last_param_set;
+
+	int num_beacons; /* number of TXed beacon frames by this STA */
+	unsigned int roam_threshold_count;
+	enum rssi_signal_state rssi_signal_state;
 };
 
 struct ieee80211_if_mesh {
@@ -570,6 +578,11 @@ enum {
 	IEEE80211_ADDBA_MSG	= 4,
 };
 
+enum queue_stop_reason {
+	IEEE80211_QUEUE_STOP_REASON_DRIVER,
+	IEEE80211_QUEUE_STOP_REASON_PS,
+};
+
 /* maximum number of hardware queues we support. */
 #define QD_MAX_QUEUES (IEEE80211_MAX_AMPDU_QUEUES + IEEE80211_MAX_QUEUES)
 
@@ -586,7 +599,8 @@ struct ieee80211_local {
 	const struct ieee80211_ops *ops;
 
 	unsigned long queue_pool[BITS_TO_LONGS(QD_MAX_QUEUES)];
-
+	unsigned long queue_stop_reasons[IEEE80211_MAX_QUEUES];
+	spinlock_t queue_stop_reason_lock;
 	struct net_device *mdev; /* wmaster# - "master" 802.11 device */
 	int open_count;
 	int monitors, cooked_mntrs;
@@ -722,6 +736,12 @@ struct ieee80211_local {
 	int wifi_wme_noack_test;
 	unsigned int wmm_acm; /* bit field of ACM bits (BIT(802.1D tag)) */
 
+	bool powersave;
+	int dynamic_ps_timeout;
+	struct work_struct dynamic_ps_enable_work;
+	struct work_struct dynamic_ps_disable_work;
+	struct timer_list dynamic_ps_timer;
+
 #ifdef CONFIG_MAC80211_DEBUGFS
 	struct local_debugfsdentries {
 		struct dentry *rcdir;
@@ -735,6 +755,7 @@ struct ieee80211_local {
 		struct dentry *long_retry_limit;
 		struct dentry *total_ps_buffered;
 		struct dentry *wep_iv;
+		struct dentry *rssisignal;
 		struct dentry *statistics;
 		struct local_debugfsdentries_statsdentries {
 			struct dentry *transmitted_fragment_count;
@@ -1013,6 +1034,15 @@ void ieee802_11_parse_elems(u8 *start, size_t len,
 int ieee80211_set_freq(struct ieee80211_sub_if_data *sdata, int freq);
 u64 ieee80211_mandatory_rates(struct ieee80211_local *local,
 			      enum ieee80211_band band);
+
+void ieee80211_dynamic_ps_enable_work(struct work_struct *work);
+void ieee80211_dynamic_ps_disable_work(struct work_struct *work);
+void ieee80211_dynamic_ps_timer(unsigned long data);
+
+void ieee80211_wake_queues_by_reason(struct ieee80211_hw *hw,
+				     enum queue_stop_reason reason);
+void ieee80211_stop_queues_by_reason(struct ieee80211_hw *hw,
+				     enum queue_stop_reason reason);
 
 #ifdef CONFIG_MAC80211_NOINLINE
 #define debug_noinline noinline

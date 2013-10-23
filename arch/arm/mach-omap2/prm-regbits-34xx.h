@@ -365,6 +365,7 @@
 /* PM_PREPWSTST_GFX specific bits */
 
 /* PM_WKEN_WKUP specific bits */
+#define OMAP3430_EN_IO_CHAIN				(1 << 16)
 #define OMAP3430_EN_IO					(1 << 8)
 #define OMAP3430_EN_GPIO1				(1 << 3)
 
@@ -373,6 +374,7 @@
 /* PM_IVA2GRPSEL_WKUP specific bits */
 
 /* PM_WKST_WKUP specific bits */
+#define OMAP3430_ST_IO_CHAIN				(1 << 16)
 #define OMAP3430_ST_IO					(1 << 8)
 
 /* PRM_CLKSEL */
@@ -409,7 +411,7 @@
 /* PM_PREPWSTST_CAM specific bits */
 
 /* PM_PWSTCTRL_USBHOST specific bits */
-#define OMAP3430ES2_SAVEANDRESTORE_SHIFT		(1 << 4)
+#define OMAP3430ES2_SAVEANDRESTORE_SHIFT		4
 
 /* RM_RSTST_PER specific bits */
 
@@ -461,18 +463,6 @@
 #define OMAP3430_VC_CMD_RET_MASK			(0xFF << 8)
 #define OMAP3430_VC_CMD_OFF_SHIFT			0
 #define OMAP3430_VC_CMD_OFF_MASK			(0xFF << 0)
-
-/* PRM_VC_CMD_VAL_0 specific bits */
-#define OMAP3430_VC_CMD_VAL0_ON				(0x3 << 4)
-#define OMAP3430_VC_CMD_VAL0_ONLP			(0x3 << 3)
-#define OMAP3430_VC_CMD_VAL0_RET			(0x3 << 3)
-#define OMAP3430_VC_CMD_VAL0_OFF			(0x3 << 4)
-
-/* PRM_VC_CMD_VAL_1 specific bits */
-#define OMAP3430_VC_CMD_VAL1_ON				(0xB << 2)
-#define OMAP3430_VC_CMD_VAL1_ONLP			(0x3 << 3)
-#define OMAP3430_VC_CMD_VAL1_RET			(0x3 << 3)
-#define OMAP3430_VC_CMD_VAL1_OFF			(0xB << 2)
 
 /* PRM_VC_CH_CONF */
 #define OMAP3430_CMD1					(1 << 20)

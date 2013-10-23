@@ -172,8 +172,12 @@ enum ieee80211_bss_change {
  * @assoc: association status
  * @aid: association ID number, valid only when @assoc is true
  * @use_cts_prot: use CTS protection
- * @use_short_preamble: use 802.11b short preamble
- * @use_short_slot: use short slot time (only relevant for ERP)
+ * @use_short_preamble: use 802.11b short preamble;
+ *	if the hardware cannot handle this it must set the
+ *	IEEE80211_HW_2GHZ_SHORT_PREAMBLE_INCAPABLE hardware flag
+ * @use_short_slot: use short slot time (only relevant for ERP);
+ *	if the hardware cannot handle this it must set the
+ *	IEEE80211_HW_2GHZ_SHORT_SLOT_INCAPABLE hardware flag
  * @dtim_period: num of beacons before the next DTIM, for PSM
  * @timestamp: beacon timestamp
  * @beacon_int: beacon interval
@@ -434,22 +438,22 @@ struct ieee80211_rx_status {
  *
  * Flags to define PHY configuration options
  *
- * @IEEE80211_CONF_SHORT_SLOT_TIME: use 802.11g short slot time
  * @IEEE80211_CONF_RADIOTAP: add radiotap header at receive time (if supported)
  * @IEEE80211_CONF_SUPPORT_HT_MODE: use 802.11n HT capabilities (if supported)
  * @IEEE80211_CONF_PS: Enable 802.11 power save mode
  */
 enum ieee80211_conf_flags {
-	/*
-	 * TODO: IEEE80211_CONF_SHORT_SLOT_TIME will be removed once drivers
-	 * have been converted to use bss_info_changed() for slot time
-	 * configuration
-	 */
-	IEEE80211_CONF_SHORT_SLOT_TIME	= (1<<0),
-	IEEE80211_CONF_RADIOTAP		= (1<<1),
-	IEEE80211_CONF_SUPPORT_HT_MODE	= (1<<2),
-	IEEE80211_CONF_PS		= (1<<3),
+	IEEE80211_CONF_RADIOTAP		= (1<<0),
+	IEEE80211_CONF_SUPPORT_HT_MODE	= (1<<1),
+	IEEE80211_CONF_PS		= (1<<2),
 };
+
+/* XXX: remove all this once drivers stop trying to use it */
+static inline int __deprecated __IEEE80211_CONF_SHORT_SLOT_TIME(void)
+{
+	return 0;
+}
+#define IEEE80211_CONF_SHORT_SLOT_TIME (__IEEE80211_CONF_SHORT_SLOT_TIME())
 
 /**
  * struct ieee80211_conf - configuration of the device
@@ -769,6 +773,11 @@ enum ieee80211_tkip_key_type {
  * @IEEE80211_HW_SPECTRUM_MGMT:
  * 	Hardware supports spectrum management defined in 802.11h
  * 	Measurement, Channel Switch, Quieting, TPC
+ *
+ * @IEEE80211_HW_NO_STACK_DYNAMIC_PS:
+ *	Hardware which has dynamic power save support, meaning
+ *	that power save is enabled in idle periods, and don't need support
+ *	from stack.
  */
 enum ieee80211_hw_flags {
 	IEEE80211_HW_RX_INCLUDES_FCS			= 1<<1,
@@ -780,6 +789,8 @@ enum ieee80211_hw_flags {
 	IEEE80211_HW_SIGNAL_DBM				= 1<<7,
 	IEEE80211_HW_NOISE_DBM				= 1<<8,
 	IEEE80211_HW_SPECTRUM_MGMT			= 1<<9,
+	IEEE80211_HW_AMPDU_AGGREGATION			= 1<<10,
+	IEEE80211_HW_NO_STACK_DYNAMIC_PS		= 1<<11,
 };
 
 /**

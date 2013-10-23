@@ -1,7 +1,7 @@
 /*
  * This file is part of hci_h4p bluetooth driver
  *
- * Copyright (C) 2005, 2006 Nokia Corporation.
+ * Copyright (C) 2005-2008 Nokia Corporation.
  *
  * Contact: Ville Tervo <ville.tervo@nokia.com>
  *
@@ -81,7 +81,6 @@ struct hci_h4p_info {
 	unsigned long uart_phys_base;
 	int irq;
 	struct device *dev;
-	u8 bdaddr[6];
 	u8 chip_type;
 	u8 bt_wakeup_gpio;
 	u8 host_wakeup_gpio;
@@ -97,17 +96,16 @@ struct hci_h4p_info {
 	int init_error;
 
 	struct sk_buff_head txq;
-	struct tasklet_struct tx_task;
 
 	struct sk_buff *rx_skb;
 	long rx_count;
 	unsigned long rx_state;
 	unsigned long garbage_bytes;
-	struct tasklet_struct rx_task;
 
 	int pm_enabled;
 	int tx_pm_enabled;
 	int rx_pm_enabled;
+	int host_wu;
 	struct timer_list tx_pm_timer;
 	struct timer_list rx_pm_timer;
 
@@ -154,6 +152,11 @@ struct hci_bc4_set_bdaddr {
 
 int hci_h4p_send_alive_packet(struct hci_h4p_info *info);
 
+void hci_h4p_bcm_parse_fw_event(struct hci_h4p_info *info,
+				struct sk_buff *skb);
+int hci_h4p_bcm_send_fw(struct hci_h4p_info *info,
+			struct sk_buff_head *fw_queue);
+
 void hci_h4p_bc4_parse_fw_event(struct hci_h4p_info *info,
 				struct sk_buff *skb);
 int hci_h4p_bc4_send_fw(struct hci_h4p_info *info,
@@ -169,6 +172,7 @@ int hci_h4p_send_fw(struct hci_h4p_info *info, struct sk_buff_head *fw_queue);
 void hci_h4p_parse_fw_event(struct hci_h4p_info *info, struct sk_buff *skb);
 
 int hci_h4p_sysfs_create_files(struct device *dev);
+void hci_h4p_sysfs_remove_files(struct device *dev);
 
 void hci_h4p_outb(struct hci_h4p_info *info, unsigned int offset, u8 val);
 u8 hci_h4p_inb(struct hci_h4p_info *info, unsigned int offset);
@@ -179,5 +183,6 @@ void hci_h4p_set_auto_ctsrts(struct hci_h4p_info *info, int on, u8 which);
 void hci_h4p_change_speed(struct hci_h4p_info *info, unsigned long speed);
 int hci_h4p_reset_uart(struct hci_h4p_info *info);
 int hci_h4p_init_uart(struct hci_h4p_info *info);
+void hci_h4p_enable_tx(struct hci_h4p_info *info);
 
 #endif /* __DRIVERS_BLUETOOTH_HCI_H4P_H */

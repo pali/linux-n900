@@ -27,9 +27,9 @@
 #include <linux/platform_device.h>
 #include <linux/mm.h>
 #include <linux/uaccess.h>
+#include <linux/omapfb.h>
 
 #include <mach/dma.h>
-#include <mach/omapfb.h>
 
 #include "lcdc.h"
 #include "dispc.h"
@@ -163,7 +163,7 @@ static int ctrl_init(struct omapfb_device *fbdev)
 	}
 
 	if (!fbdev->mem_desc.region_cnt) {
-		struct lcd_panel *panel = fbdev->panel;
+		struct lcd_panel *panel = fbdev->lcd_panel;
 		int def_size;
 		int bpp = panel->bpp;
 
@@ -198,36 +198,89 @@ static void ctrl_cleanup(struct omapfb_device *fbdev)
 	fbdev->ctrl->cleanup();
 }
 
+static int ctrl_change_mode(struct fb_info *fbi);
+static void set_fb_fix(struct fb_info *fbi);
+
+/*
+ * Check if some other plane is cloning this one, and if so, check if
+ * they differ and whether the changes should be propagated to the
+ * cloned framebuffer as well.
+ */
+static void update_cloned_var(struct fb_info *fbi)
+{
+	struct omapfb_plane_struct *plane = fbi->par;
+	struct omapfb_device *fbdev = plane->fbdev;
+	struct fb_var_screeninfo *var = &fbi->var;
+
+	struct fb_info *fbinfo;
+	struct omapfb_plane_struct *pla;
+	struct fb_var_screeninfo *clone_var;
+	int i;
+
+	for (i = 0; i < OMAPFB_PLANE_NUM; i++) {
+		if (i == plane->idx)
+			continue;
+		fbinfo = fbdev->fb_info[i];
+		pla = fbinfo->par;
+		clone_var = &fbinfo->var;
+
+		if (!(pla->info.clone_idx & OMAPFB_CLONE_ENABLED))
+			continue;
+
+		if ((pla->info.clone_idx & OMAPFB_CLONE_MASK) !=  plane->idx)
+			continue;
+
+		/*
+		 * The original and cloned framebuffers must have at
+		 * least the same resolution and color mode, otherwise
+		 * the image gets corrupted.
+		 */
+		if ((clone_var->xres_virtual == var->xres_virtual) &&
+		    (clone_var->yres_virtual == var->yres_virtual) &&
+		    (clone_var->bits_per_pixel == var->bits_per_pixel) &&
+		    (clone_var->nonstd == var->nonstd)) {
+			continue;
+		}
+
+		*clone_var = *var;
+		set_fb_fix(fbinfo);
+		pla->color_mode = plane->color_mode;
+		ctrl_change_mode(fbinfo);
+	}
+}
+
 /* Must be called with fbdev->rqueue_mutex held. */
 static int ctrl_change_mode(struct fb_info *fbi)
 {
 	int r;
 	unsigned long offset;
+	unsigned int paddr;
 	struct omapfb_plane_struct *plane = fbi->par;
 	struct omapfb_device *fbdev = plane->fbdev;
 	struct fb_var_screeninfo *var = &fbi->var;
 
+	if (plane->info.clone_idx & OMAPFB_CLONE_ENABLED) {
+		unsigned int clone_idx;
+
+		clone_idx = plane->info.clone_idx & OMAPFB_CLONE_MASK;
+		paddr = fbdev->mem_desc.region[clone_idx].paddr;
+	} else {
+		update_cloned_var(fbi);
+		paddr = fbdev->mem_desc.region[plane->idx].paddr;
+	}
+
 	offset = var->yoffset * fbi->fix.line_length +
 		 var->xoffset * var->bits_per_pixel / 8;
 
-	if (fbdev->ctrl->sync)
-		fbdev->ctrl->sync();
-	r = fbdev->ctrl->setup_plane(plane->idx, plane->info.channel_out,
-				 offset, var->xres_virtual,
+	paddr += offset;
+
+	r = fbdev->ctrl->setup_plane(plane->idx, plane->info.enabled,
+				 plane->info.channel_out,
+				 paddr, var->xres_virtual,
 				 plane->info.pos_x, plane->info.pos_y,
-				 var->xres, var->yres, plane->color_mode);
-	if (r < 0)
-		return r;
-
-	if (fbdev->ctrl->set_rotate != NULL)
-		if((r = fbdev->ctrl->set_rotate(var->rotate)) < 0)
-			return r;
-
-	if ((fbdev->ctrl->set_scale != NULL) && (plane->idx > 0))
-		r = fbdev->ctrl->set_scale(plane->idx,
-				   var->xres, var->yres,
-				   plane->info.out_width,
-				   plane->info.out_height);
+				 var->xres, var->yres,
+				 plane->info.out_width, plane->info.out_height,
+				 plane->color_mode, var->rotate);
 	if (r < 0)
 		return r;
 
@@ -352,7 +405,7 @@ static int omapfb_blank(int blank, struct fb_info *fbi)
 		if (fbdev->state == OMAPFB_SUSPENDED) {
 			if (fbdev->ctrl->resume)
 				fbdev->ctrl->resume();
-			fbdev->panel->enable(fbdev->panel);
+			plane->panel->enable(plane->panel);
 			fbdev->state = OMAPFB_ACTIVE;
 			if (fbdev->ctrl->get_update_mode() ==
 					OMAPFB_MANUAL_UPDATE)
@@ -361,7 +414,7 @@ static int omapfb_blank(int blank, struct fb_info *fbi)
 		break;
 	case VESA_POWERDOWN:
 		if (fbdev->state == OMAPFB_ACTIVE) {
-			fbdev->panel->disable(fbdev->panel);
+			plane->panel->disable(plane->panel);
 			if (fbdev->ctrl->suspend)
 				fbdev->ctrl->suspend();
 			fbdev->state = OMAPFB_SUSPENDED;
@@ -385,7 +438,7 @@ static void omapfb_sync(struct fb_info *fbi)
 
 	omapfb_rqueue_lock(fbdev);
 	if (fbdev->ctrl->sync)
-		fbdev->ctrl->sync();
+		fbdev->ctrl->sync(plane->info.channel_out);
 	omapfb_rqueue_unlock(fbdev);
 }
 
@@ -401,7 +454,12 @@ static void set_fb_fix(struct fb_info *fbi)
 	struct omapfb_mem_region *rg;
 	int bpp;
 
-	rg = &plane->fbdev->mem_desc.region[plane->idx];
+	if (plane->info.clone_idx & OMAPFB_CLONE_ENABLED) {
+		rg = &plane->fbdev->mem_desc.region[
+			plane->info.clone_idx & OMAPFB_CLONE_MASK];
+	} else {
+		rg = &plane->fbdev->mem_desc.region[plane->idx];
+	}
 	fbi->screen_base	= rg->vaddr;
 	fix->smem_start		= rg->paddr;
 	fix->smem_len		= rg->size;
@@ -487,9 +545,25 @@ static int set_fb_var(struct fb_info *fbi,
 	unsigned long	line_size;
 	int		xres_min, xres_max;
 	int		yres_min, yres_max;
+	int		can_scale;
 	struct omapfb_plane_struct *plane = fbi->par;
 	struct omapfb_device *fbdev = plane->fbdev;
-	struct lcd_panel *panel = fbdev->panel;
+	struct lcd_panel *panel = plane->panel;
+	int		mem_idx = plane->idx;
+
+	can_scale = plane->idx != OMAPFB_PLANE_GFX;
+
+	if (plane->info.clone_idx & OMAPFB_CLONE_ENABLED) {
+		int clone_idx = plane->info.clone_idx & OMAPFB_CLONE_MASK;
+		struct fb_info *orig_fbi = fbdev->fb_info[clone_idx];
+		struct fb_var_screeninfo *orig_var = &orig_fbi->var;
+
+		var->xres_virtual = orig_var->xres_virtual;
+		var->yres_virtual = orig_var->yres_virtual;
+		var->bits_per_pixel = orig_var->bits_per_pixel;
+		var->nonstd = orig_var->nonstd;
+		mem_idx = clone_idx;
+	}
 
 	if (set_color_mode(plane, var) < 0)
 		return -EINVAL;
@@ -525,6 +599,14 @@ static int set_fb_var(struct fb_info *fbi,
 		return -EINVAL;
 	}
 
+	/*
+	 * Video planes can downscale the screen to fit in view, so
+	 * there is no need to restrict the framebuffer resolution to
+	 * be smaller than the display resolution.
+	 */
+	if (can_scale)
+		xres_max = yres_max = 2048;
+
 	if (var->xres < xres_min)
 		var->xres = xres_min;
 	if (var->yres < yres_min)
@@ -538,7 +620,7 @@ static int set_fb_var(struct fb_info *fbi,
 		var->xres_virtual = var->xres;
 	if (var->yres_virtual < var->yres)
 		var->yres_virtual = var->yres;
-	max_frame_size = fbdev->mem_desc.region[plane->idx].size;
+	max_frame_size = fbdev->mem_desc.region[mem_idx].size;
 	line_size = var->xres_virtual * bpp / 8;
 	if (line_size * var->yres_virtual > max_frame_size) {
 		/* Try to keep yres_virtual first */
@@ -684,7 +766,7 @@ static int omapfb_check_var(struct fb_var_screeninfo *var, struct fb_info *fbi)
 
 	omapfb_rqueue_lock(fbdev);
 	if (fbdev->ctrl->sync != NULL)
-		fbdev->ctrl->sync();
+		fbdev->ctrl->sync(plane->info.channel_out);
 	r = set_fb_var(fbi, var);
 	omapfb_rqueue_unlock(fbdev);
 
@@ -722,13 +804,13 @@ int omapfb_update_window_async(struct fb_info *fbi,
 	switch (var->rotate) {
 	case 0:
 	case 180:
-		xres = fbdev->panel->x_res;
-		yres = fbdev->panel->y_res;
+		xres = plane->panel->x_res;
+		yres = plane->panel->y_res;
 		break;
 	case 90:
 	case 270:
-		xres = fbdev->panel->y_res;
-		yres = fbdev->panel->x_res;
+		xres = plane->panel->y_res;
+		yres = plane->panel->x_res;
 		break;
 	default:
 		return -EINVAL;
@@ -802,16 +884,33 @@ static int omapfb_setup_plane(struct fb_info *fbi, struct omapfb_plane_info *pi)
 {
 	struct omapfb_plane_struct *plane = fbi->par;
 	struct omapfb_device *fbdev = plane->fbdev;
-	struct lcd_panel *panel = fbdev->panel;
+	struct lcd_panel *panel = plane->panel;
 	struct omapfb_plane_info old_info;
+	int mem_idx = plane->idx;
 	int r = 0;
 
-	if (pi->pos_x + pi->out_width > panel->x_res ||
-	    pi->pos_y + pi->out_height > panel->y_res)
-		return -EINVAL;
-
 	omapfb_rqueue_lock(fbdev);
-	if (pi->enabled && !fbdev->mem_desc.region[plane->idx].size) {
+
+	if (pi->channel_out == OMAPFB_CHANNEL_OUT_DIGIT) {
+		if (fbdev->digital_panel == NULL) {
+			r = -EINVAL;
+			goto out;
+		}
+		panel = plane->panel = fbdev->digital_panel;
+	} else {
+		panel = plane->panel = fbdev->lcd_panel;
+	}
+
+	if (pi->pos_x + pi->out_width > panel->x_res ||
+	    pi->pos_y + pi->out_height > panel->y_res) {
+		r = -EINVAL;
+		goto out;
+	}
+
+	if (pi->clone_idx & OMAPFB_CLONE_ENABLED)
+		mem_idx = pi->clone_idx & OMAPFB_CLONE_MASK;
+
+	if (pi->enabled && !fbdev->mem_desc.region[mem_idx].size) {
 		/*
 		 * This plane's memory was freed, can't enable it
 		 * until it's reallocated.
@@ -819,19 +918,57 @@ static int omapfb_setup_plane(struct fb_info *fbi, struct omapfb_plane_info *pi)
 		r = -EINVAL;
 		goto out;
 	}
+
+	if ((pi->clone_idx & OMAPFB_CLONE_MASK) >= OMAPFB_PLANE_NUM) {
+		r = -EINVAL;
+		goto out;
+	}
+
 	old_info = plane->info;
 	plane->info = *pi;
-	if (pi->enabled) {
-		r = ctrl_change_mode(fbi);
-		if (r < 0) {
-			plane->info = old_info;
-			goto out;
-		}
+	if ((pi->clone_idx & OMAPFB_CLONE_ENABLED) &&
+	    (!(old_info.clone_idx & OMAPFB_CLONE_ENABLED) ||
+	     (old_info.clone_idx & OMAPFB_CLONE_MASK) != (pi->clone_idx & OMAPFB_CLONE_MASK))) {
+		struct omapfb_plane_struct *s_plane =
+			fbdev->fb_info[pi->clone_idx & OMAPFB_CLONE_MASK]->par;
+		/*
+		 * When the cloning is enabled, we copy over the
+		 * fb_var_screeninfo from the source framebuffer. We
+		 * don't need to call set_fb_var for it because we
+		 * copy it from a valid source.
+		 */
+		fbi->var =
+			fbdev->fb_info[pi->clone_idx & OMAPFB_CLONE_MASK]->var;
+		plane->color_mode = s_plane->color_mode;
+
+		/* Sync framebuffer vaddr pointer with the source */
+		set_fb_fix(fbi);
+	} else 	if ((old_info.clone_idx & OMAPFB_CLONE_ENABLED) &&
+		    !(pi->clone_idx & OMAPFB_CLONE_ENABLED)) {
+		/*
+		 * When disabling cloning, revalidate the
+		 * fb_var_screeninfo and revert the vaddr pointer.
+		 */
+		set_fb_var(fbi, &fbi->var);
+		set_fb_fix(fbi);
 	}
-	r = fbdev->ctrl->enable_plane(plane->idx, pi->enabled);
+
+	r = ctrl_change_mode(fbi);
 	if (r < 0) {
 		plane->info = old_info;
 		goto out;
+	}
+
+	if (pi->channel_out == OMAPFB_CHANNEL_OUT_DIGIT) {
+		/*
+		 * FIXME: We will not consider the possibility that
+		 * there might be multiple planes routed to digital
+		 * panel.
+		 */
+		if (pi->enabled)
+			plane->panel->enable(plane->panel);
+		else
+			plane->panel->disable(plane->panel);
 	}
 out:
 	omapfb_rqueue_unlock(fbdev);
@@ -889,7 +1026,7 @@ static int omapfb_setup_mem(struct fb_info *fbi, struct omapfb_mem_info *mi)
 		}
 
 		if (fbdev->ctrl->sync)
-			fbdev->ctrl->sync();
+			fbdev->ctrl->sync(plane->info.channel_out);
 		r = fbdev->ctrl->setup_mem(plane->idx, size, mi->type, &paddr);
 		if (r < 0) {
 			/* Revert changes. */
@@ -1055,7 +1192,7 @@ static void omapfb_get_caps(struct omapfb_device *fbdev, int plane,
 {
 	memset(caps, 0, sizeof(*caps));
 	fbdev->ctrl->get_caps(plane, caps);
-	caps->ctrl |= fbdev->panel->get_caps(fbdev->panel);
+	caps->ctrl |= fbdev->lcd_panel->get_caps(fbdev->lcd_panel);
 }
 
 /* For lcd testing */
@@ -1201,11 +1338,12 @@ static int omapfb_ioctl(struct fb_info *fbi, unsigned int cmd,
 				r = -EFAULT;
 				break;
 			}
-			if (!fbdev->panel->run_test) {
+			if (!fbdev->lcd_panel->run_test) {
 				r = -EINVAL;
 				break;
 			}
-			r = fbdev->panel->run_test(fbdev->panel, test_num);
+			r = fbdev->lcd_panel->run_test(fbdev->lcd_panel,
+						       test_num);
 			break;
 		}
 	case OMAPFB_CTRL_TEST:
@@ -1342,7 +1480,7 @@ static ssize_t omapfb_show_panel_name(struct device *dev,
 {
 	struct omapfb_device *fbdev = (struct omapfb_device *)dev->driver_data;
 
-	return snprintf(buf, PAGE_SIZE, "%s\n", fbdev->panel->name);
+	return snprintf(buf, PAGE_SIZE, "%s\n", fbdev->lcd_panel->name);
 }
 
 static ssize_t omapfb_show_bklight_level(struct device *dev,
@@ -1352,9 +1490,10 @@ static ssize_t omapfb_show_bklight_level(struct device *dev,
 	struct omapfb_device *fbdev = (struct omapfb_device *)dev->driver_data;
 	int r;
 
-	if (fbdev->panel->get_bklight_level) {
+	if (fbdev->lcd_panel->get_bklight_level) {
 		r = snprintf(buf, PAGE_SIZE, "%d\n",
-			     fbdev->panel->get_bklight_level(fbdev->panel));
+			     fbdev->lcd_panel->get_bklight_level(
+				     fbdev->lcd_panel));
 	} else
 		r = -ENODEV;
 	return r;
@@ -1367,12 +1506,12 @@ static ssize_t omapfb_store_bklight_level(struct device *dev,
 	struct omapfb_device *fbdev = (struct omapfb_device *)dev->driver_data;
 	int r;
 
-	if (fbdev->panel->set_bklight_level) {
+	if (fbdev->lcd_panel->set_bklight_level) {
 		unsigned int level;
 
 		if (sscanf(buf, "%10d", &level) == 1) {
-			r = fbdev->panel->set_bklight_level(fbdev->panel,
-							    level);
+			r = fbdev->lcd_panel->set_bklight_level(
+				fbdev->lcd_panel, level);
 		} else
 			r = -EINVAL;
 	} else
@@ -1386,9 +1525,10 @@ static ssize_t omapfb_show_bklight_max(struct device *dev,
 	struct omapfb_device *fbdev = (struct omapfb_device *)dev->driver_data;
 	int r;
 
-	if (fbdev->panel->get_bklight_level) {
+	if (fbdev->lcd_panel->get_bklight_level) {
 		r = snprintf(buf, PAGE_SIZE, "%d\n",
-			     fbdev->panel->get_bklight_max(fbdev->panel));
+			     fbdev->lcd_panel->get_bklight_max(
+				     fbdev->lcd_panel));
 	} else
 		r = -ENODEV;
 	return r;
@@ -1434,6 +1574,64 @@ static struct attribute_group ctrl_attr_grp = {
 	.attrs = ctrl_attrs,
 };
 
+#ifdef CONFIG_FB_OMAP_VENC
+
+static ssize_t omapfb_show_venc_tv_standard(struct device *dev,
+					    struct device_attribute *attr,
+					    char *buf)
+{
+	enum omapfb_tv_std standard;
+	char *std_str = 0;
+
+	standard = venc_query_tv_standard();
+	switch (standard) {
+	case OMAPFB_TV_STD_PAL:
+		std_str = "pal";
+		break;
+	case OMAPFB_TV_STD_NTSC:
+		std_str = "ntsc";
+		break;
+	default:
+		std_str = "unknown";
+		break;
+	}
+
+	return snprintf(buf, PAGE_SIZE, "%s\n", std_str);
+}
+
+static ssize_t omapfb_store_venc_tv_standard(struct device *dev,
+					     struct device_attribute *attr,
+					     const char *buf, size_t size)
+{
+	enum omapfb_tv_std standard;
+	int r = 0, s;
+	char str[8];
+
+	strncpy(str, buf, size < sizeof(str) ? size : sizeof(str));
+	str[sizeof(str) - 1] = 0;
+	for (s = 0; s < sizeof(str); s++)
+		if (str[s] == '\n') {
+			str[s] = 0;
+			break;
+		}
+
+	if (!strcmp(str, "pal"))
+		standard = OMAPFB_TV_STD_PAL;
+	else if (!strcmp(str, "ntsc"))
+		standard = OMAPFB_TV_STD_NTSC;
+	else
+		r = -EINVAL;
+
+	if (!r)
+		r = venc_change_tv_standard(standard);
+
+	return r ? r : size;
+}
+
+static DEVICE_ATTR(venc_tv_standard, 0664,
+		   omapfb_show_venc_tv_standard, omapfb_store_venc_tv_standard);
+#endif
+
 static int omapfb_register_sysfs(struct omapfb_device *fbdev)
 {
 	int r;
@@ -1449,8 +1647,19 @@ static int omapfb_register_sysfs(struct omapfb_device *fbdev)
 
 	if ((r = sysfs_create_group(&fbdev->dev->kobj, &ctrl_attr_grp)))
 		goto fail3;
+#ifdef CONFIG_FB_OMAP_VENC
+	r = device_create_file(fbdev->dev, &dev_attr_venc_tv_standard);
+	if (r)
+		goto fail4;
+#endif
 
 	return 0;
+
+#ifdef CONFIG_FB_OMAP_VENC
+fail4:
+	sysfs_remove_group(&fbdev->dev->kobj, &ctrl_attr_grp);
+#endif
+
 fail3:
 	sysfs_remove_group(&fbdev->dev->kobj, &panel_attr_grp);
 fail2:
@@ -1464,6 +1673,9 @@ fail0:
 
 static void omapfb_unregister_sysfs(struct omapfb_device *fbdev)
 {
+#ifdef CONFIG_FB_OMAP_VENC
+	device_remove_file(fbdev->dev, &dev_attr_venc_tv_standard);
+#endif
 	sysfs_remove_group(&fbdev->dev->kobj, &ctrl_attr_grp);
 	sysfs_remove_group(&fbdev->dev->kobj, &panel_attr_grp);
 	device_remove_file(fbdev->dev, &dev_attr_caps_num);
@@ -1497,7 +1709,7 @@ static int fbinfo_init(struct omapfb_device *fbdev, struct fb_info *info)
 	var->xres_virtual = def_vxres;
 	var->yres_virtual = def_vyres;
 	var->rotate	  = def_rotate;
-	var->bits_per_pixel = fbdev->panel->bpp;
+	var->bits_per_pixel = fbdev->lcd_panel->bpp;
 
 	set_fb_var(info, var);
 	set_fb_fix(info);
@@ -1547,6 +1759,9 @@ static int planes_init(struct omapfb_device *fbdev)
 		plane->idx = i;
 		plane->fbdev = fbdev;
 		plane->info.mirror = def_mirror;
+		if (i == 0)		/* GFX plane is enabled by default */
+			plane->info.enabled = 1;
+		plane->panel = fbdev->lcd_panel;
 		fbdev->fb_info[i] = fbi;
 
 		if ((r = fbinfo_init(fbdev, fbi)) < 0) {
@@ -1572,18 +1787,26 @@ static void omapfb_free_resources(struct omapfb_device *fbdev, int state)
 	case OMAPFB_ACTIVE:
 		for (i = 0; i < fbdev->mem_desc.region_cnt; i++)
 			unregister_framebuffer(fbdev->fb_info[i]);
-	case 7:
+	case 8:
 		omapfb_unregister_sysfs(fbdev);
+	case 7:
+		fbdev->lcd_panel->disable(fbdev->lcd_panel);
+
+		if (fbdev->digital_panel)
+			fbdev->digital_panel->disable(fbdev->digital_panel);
 	case 6:
-		fbdev->panel->disable(fbdev->panel);
+		venc_exit();
 	case 5:
 		omapfb_set_update_mode(fbdev, OMAPFB_UPDATE_DISABLED);
 	case 4:
+
 		planes_cleanup(fbdev);
 	case 3:
 		ctrl_cleanup(fbdev);
 	case 2:
-		fbdev->panel->cleanup(fbdev->panel);
+		fbdev->lcd_panel->cleanup(fbdev->lcd_panel);
+		if (fbdev->digital_panel && fbdev->digital_panel->cleanup)
+			fbdev->digital_panel->cleanup(fbdev->digital_panel);
 	case 1:
 		dev_set_drvdata(fbdev->dev, NULL);
 		kfree(fbdev);
@@ -1632,10 +1855,10 @@ static int omapfb_find_ctrl(struct omapfb_device *fbdev)
 static void check_required_callbacks(struct omapfb_device *fbdev)
 {
 #define _C(x) (fbdev->ctrl->x != NULL)
-#define _P(x) (fbdev->panel->x != NULL)
-	BUG_ON(fbdev->ctrl == NULL || fbdev->panel == NULL);
+#define _P(x) (fbdev->lcd_panel->x != NULL)
+	BUG_ON(fbdev->ctrl == NULL || fbdev->lcd_panel == NULL);
 	BUG_ON(!(_C(init) && _C(cleanup) && _C(get_caps) &&
-		 _C(set_update_mode) && _C(setup_plane) && _C(enable_plane) &&
+		 _C(set_update_mode) && _C(setup_plane) &&
 		 _P(init) && _P(cleanup) && _P(enable) && _P(disable) &&
 		 _P(get_caps)));
 #undef _P
@@ -1689,7 +1912,7 @@ static int omapfb_do_probe(struct platform_device *pdev,
 	init_state++;
 
 	fbdev->dev = &pdev->dev;
-	fbdev->panel = panel;
+	fbdev->lcd_panel = panel;
 	platform_set_drvdata(pdev, fbdev);
 
 	mutex_init(&fbdev->rqueue_mutex);
@@ -1712,14 +1935,14 @@ static int omapfb_do_probe(struct platform_device *pdev,
 		goto cleanup;
 	}
 
-	r = fbdev->panel->init(fbdev->panel, fbdev);
+	r = fbdev->lcd_panel->init(fbdev->lcd_panel, fbdev);
 	if (r)
 		goto cleanup;
 
-	pr_info("omapfb: configured for panel %s\n", fbdev->panel->name);
+	pr_info("omapfb: configured for panel %s\n", fbdev->lcd_panel->name);
 
-	def_vxres = def_vxres ? def_vxres : fbdev->panel->x_res;
-	def_vyres = def_vyres ? def_vyres : fbdev->panel->y_res;
+	def_vxres = def_vxres ? def_vxres : fbdev->lcd_panel->x_res;
+	def_vyres = def_vyres ? def_vyres : fbdev->lcd_panel->y_res;
 
 	init_state++;
 
@@ -1743,22 +1966,24 @@ static int omapfb_do_probe(struct platform_device *pdev,
 		omap_set_dma_priority(0, OMAP_DMA_PORT_EMIFF, 15);
 #endif
 
+	/* Change mode only for GFX plane, since this is the only enabled
+	 * by default.
+	 */
 	r = ctrl_change_mode(fbdev->fb_info[0]);
 	if (r) {
 		dev_err(fbdev->dev, "mode setting failed\n");
 		goto cleanup;
 	}
 
-	/* GFX plane is enabled by default */
-	r = fbdev->ctrl->enable_plane(OMAPFB_PLANE_GFX, 1);
-	if (r)
-		goto cleanup;
-
 	omapfb_set_update_mode(fbdev, manual_update ?
 				   OMAPFB_MANUAL_UPDATE : OMAPFB_AUTO_UPDATE);
 	init_state++;
 
-	r = fbdev->panel->enable(fbdev->panel);
+	r = venc_init(&fbdev->digital_panel);
+	if (r)
+		goto cleanup;
+
+	r = fbdev->lcd_panel->enable(fbdev->lcd_panel);
 	if (r)
 		goto cleanup;
 	init_state++;
@@ -1781,7 +2006,7 @@ static int omapfb_do_probe(struct platform_device *pdev,
 
 	fbdev->state = OMAPFB_ACTIVE;
 
-	panel = fbdev->panel;
+	panel = fbdev->lcd_panel;
 	phz = panel->pixel_clock * 1000;
 	hhz = phz * 10 / (panel->hfp + panel->x_res + panel->hbp + panel->hsw);
 	vhz = hhz / (panel->vfp + panel->y_res + panel->vbp + panel->vsw);
@@ -1821,12 +2046,34 @@ void omapfb_register_panel(struct lcd_panel *panel)
 	if (fbdev_pdev != NULL)
 		omapfb_do_probe(fbdev_pdev, fbdev_panel);
 }
+EXPORT_SYMBOL_GPL(omapfb_register_panel);
 
-/* Called when the device is being detached from the driver */
+static int omapfb_remove(struct platform_device *pdev);
+
+void omapfb_unregister_panel(struct lcd_panel *panel,
+			     struct omapfb_device *fbdev)
+{
+	struct platform_device *pdev;
+
+	BUG_ON(fbdev_panel == NULL);
+
+	pdev = to_platform_device(fbdev->dev);
+	omapfb_remove(pdev);
+	fbdev_panel = NULL;
+}
+EXPORT_SYMBOL_GPL(omapfb_unregister_panel);
+
 static int omapfb_remove(struct platform_device *pdev)
 {
-	struct omapfb_device *fbdev = platform_get_drvdata(pdev);
-	enum omapfb_state saved_state = fbdev->state;
+	struct omapfb_device *fbdev;
+	enum omapfb_state saved_state;
+
+	/* Panel not registered yet, thus omapfb_do_probe is not called. */
+	if (fbdev_panel == NULL)
+		return 0;
+
+	fbdev = platform_get_drvdata(pdev);
+	saved_state = fbdev->state;
 
 	/* FIXME: wait till completion of pending events */
 

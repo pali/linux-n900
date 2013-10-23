@@ -36,9 +36,7 @@
 #include "omap-mcbsp.h"
 #include "omap-pcm.h"
 
-#define OMAP_MCBSP_RATES	(SNDRV_PCM_RATE_44100 | \
-				 SNDRV_PCM_RATE_48000 | \
-				 SNDRV_PCM_RATE_KNOT)
+#define OMAP_MCBSP_RATES	(SNDRV_PCM_RATE_8000_96000)
 
 struct omap_mcbsp_data {
 	unsigned int			bus_id;
@@ -178,6 +176,11 @@ static int omap_mcbsp_dai_trigger(struct snd_pcm_substream *substream, int cmd)
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 		if (!mcbsp_data->active++)
 			omap_mcbsp_start(mcbsp_data->bus_id);
+		/* Make sure data transfer is frame synchronized */
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+			omap_mcbsp_xmit_enable(mcbsp_data->bus_id, 1);
+		else
+			omap_mcbsp_recv_enable(mcbsp_data->bus_id, 1);
 		break;
 
 	case SNDRV_PCM_TRIGGER_STOP:
@@ -201,7 +204,7 @@ static int omap_mcbsp_dai_hw_params(struct snd_pcm_substream *substream,
 	struct omap_mcbsp_data *mcbsp_data = to_mcbsp(cpu_dai->private_data);
 	struct omap_mcbsp_reg_cfg *regs = &mcbsp_data->regs;
 	int dma, bus_id = mcbsp_data->bus_id, id = cpu_dai->id;
-	int wlen;
+	int wlen, channels;
 	unsigned long port;
 
 	if (cpu_class_is_omap1()) {
@@ -230,12 +233,25 @@ static int omap_mcbsp_dai_hw_params(struct snd_pcm_substream *substream,
 		return 0;
 	}
 
-	switch (params_channels(params)) {
+	channels = params_channels(params);
+	switch (channels) {
 	case 2:
-		/* Set 1 word per (McBPSP) frame and use dual-phase frames */
-		regs->rcr2	|= RFRLEN2(1 - 1) | RPHASE;
+		/* Use dual-phase frames */
+		if ((mcbsp_data->fmt & SND_SOC_DAIFMT_FORMAT_MASK) == \
+			SND_SOC_DAIFMT_DSP) {
+			regs->rcr1	|= RFRLEN1(2 - 1);
+			regs->xcr1	|= XFRLEN1(2 - 1);
+			break;
+		} else {
+			/* Use dual-phase frames */
+			regs->rcr2	|= RPHASE;
+			regs->xcr2	|= XPHASE;
+		}
+	case 1:
+		/* Set 1 word per (McBSP) frame */
+		regs->rcr2	|= RFRLEN2(1 - 1);
 		regs->rcr1	|= RFRLEN1(1 - 1);
-		regs->xcr2	|= XFRLEN2(1 - 1) | XPHASE;
+		regs->xcr2	|= XFRLEN2(1 - 1);
 		regs->xcr1	|= XFRLEN1(1 - 1);
 		break;
 	default:
@@ -264,8 +280,12 @@ static int omap_mcbsp_dai_hw_params(struct snd_pcm_substream *substream,
 		regs->srgr1	|= FWID(wlen - 1);
 		break;
 	case SND_SOC_DAIFMT_DSP_A:
-		regs->srgr2	|= FPER(wlen * 2 - 1);
-		regs->srgr1	|= FWID(wlen * 2 - 2);
+		regs->srgr2	|= FPER(wlen * channels - 1);
+		regs->srgr1	|= FWID(wlen * channels - 2);
+		break;
+	case SND_SOC_DAIFMT_DSP:
+		regs->srgr2	|= FPER(wlen * channels - 1);
+		regs->srgr1	|= FWID(0);
 		break;
 	}
 
@@ -293,19 +313,33 @@ static int omap_mcbsp_dai_set_dai_fmt(struct snd_soc_dai *cpu_dai,
 	/* Generic McBSP register settings */
 	regs->spcr2	|= XINTM(3) | FREE;
 	regs->spcr1	|= RINTM(3);
-	regs->rcr2	|= RFIG;
-	regs->xcr2	|= XFIG;
+	/* RFIG and XFIG are not defined in 34xx */
+	if (!cpu_is_omap34xx()) {
+		regs->rcr2	|= RFIG;
+		regs->xcr2	|= XFIG;
+	}
 
 	switch (fmt & SND_SOC_DAIFMT_FORMAT_MASK) {
 	case SND_SOC_DAIFMT_I2S:
 		/* 1-bit data delay */
 		regs->rcr2	|= RDATDLY(1);
 		regs->xcr2	|= XDATDLY(1);
+		regs->rccr	|= RFULL_CYCLE | RDMAEN | RDISABLE;
+		regs->xccr	|= (DXENDLY(1) | XDMAEN | XDISABLE);
 		break;
 	case SND_SOC_DAIFMT_DSP_A:
 		/* 0-bit data delay */
 		regs->rcr2      |= RDATDLY(0);
 		regs->xcr2      |= XDATDLY(0);
+		regs->rccr	|= RFULL_CYCLE | RDMAEN | RDISABLE;
+		regs->xccr	|= (DXENDLY(1) | XDMAEN | XDISABLE);
+		break;
+	case SND_SOC_DAIFMT_DSP:
+		regs->rcr2      |= RDATDLY(0);
+		regs->xcr2      |= XDATDLY(0);
+		regs->rccr	|= RDMAEN | RDISABLE;
+		regs->xccr	|= (DXENDLY(1) | XFULL_CYCLE | XDMAEN \
+					| XDISABLE);
 		break;
 	default:
 		/* Unsupported data format */
@@ -452,17 +486,17 @@ static int omap_mcbsp_dai_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
 
 #define OMAP_MCBSP_DAI_BUILDER(link_id)				\
 {								\
-	.name = "omap-mcbsp-dai-(link_id)",			\
+	.name = "omap-mcbsp-dai-"#link_id,			\
 	.id = (link_id),					\
 	.type = SND_SOC_DAI_I2S,				\
 	.playback = {						\
-		.channels_min = 2,				\
+		.channels_min = 1,				\
 		.channels_max = 2,				\
 		.rates = OMAP_MCBSP_RATES,			\
 		.formats = SNDRV_PCM_FMTBIT_S16_LE,		\
 	},							\
 	.capture = {						\
-		.channels_min = 2,				\
+		.channels_min = 1,				\
 		.channels_max = 2,				\
 		.rates = OMAP_MCBSP_RATES,			\
 		.formats = SNDRV_PCM_FMTBIT_S16_LE,		\

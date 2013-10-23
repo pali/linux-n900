@@ -22,111 +22,7 @@
 #include <mach/cpu.h>
 #include <mach/mcbsp.h>
 
-struct mcbsp_internal_clk {
-	struct clk clk;
-	struct clk **childs;
-	int n_childs;
-};
-
-#if defined(CONFIG_ARCH_OMAP24XX) || defined(CONFIG_ARCH_OMAP34XX)
-static void omap_mcbsp_clk_init(struct mcbsp_internal_clk *mclk)
-{
-	const char *clk_names[] = { "mcbsp_ick", "mcbsp_fck" };
-	int i;
-
-	mclk->n_childs = ARRAY_SIZE(clk_names);
-	mclk->childs = kzalloc(mclk->n_childs * sizeof(struct clk *),
-				GFP_KERNEL);
-
-	for (i = 0; i < mclk->n_childs; i++) {
-		/* We fake a platform device to get correct device id */
-		struct platform_device pdev;
-
-		pdev.dev.bus = &platform_bus_type;
-		pdev.id = mclk->clk.id;
-		mclk->childs[i] = clk_get(&pdev.dev, clk_names[i]);
-		if (IS_ERR(mclk->childs[i]))
-			printk(KERN_ERR "Could not get clock %s (%d).\n",
-				clk_names[i], mclk->clk.id);
-	}
-}
-
-static int omap_mcbsp_clk_enable(struct clk *clk)
-{
-	struct mcbsp_internal_clk *mclk = container_of(clk,
-					struct mcbsp_internal_clk, clk);
-	int i;
-
-	for (i = 0; i < mclk->n_childs; i++)
-		clk_enable(mclk->childs[i]);
-	return 0;
-}
-
-static void omap_mcbsp_clk_disable(struct clk *clk)
-{
-	struct mcbsp_internal_clk *mclk = container_of(clk,
-					struct mcbsp_internal_clk, clk);
-	int i;
-
-	for (i = 0; i < mclk->n_childs; i++)
-		clk_disable(mclk->childs[i]);
-}
-
-static struct mcbsp_internal_clk omap_mcbsp_clks[] = {
-	{
-		.clk = {
-			.name 		= "mcbsp_clk",
-			.id		= 1,
-			.clkdm		= { .name = "virt_opp_clkdm" },
-			.enable		= omap_mcbsp_clk_enable,
-			.disable	= omap_mcbsp_clk_disable,
-		},
-	},
-	{
-		.clk = {
-			.name 		= "mcbsp_clk",
-			.id		= 2,
-			.clkdm		= { .name = "virt_opp_clkdm" },
-			.enable		= omap_mcbsp_clk_enable,
-			.disable	= omap_mcbsp_clk_disable,
-		},
-	},
-	{
-		.clk = {
-			.name		= "mcbsp_clk",
-			.id		= 3,
-			.clkdm		= { .name = "virt_opp_clkdm" },
-			.enable		= omap_mcbsp_clk_enable,
-			.disable	= omap_mcbsp_clk_disable,
-		},
-	},
-	{
-		.clk = {
-			.name		= "mcbsp_clk",
-			.id		= 4,
-			.clkdm		= { .name = "virt_opp_clkdm" },
-			.enable		= omap_mcbsp_clk_enable,
-			.disable	= omap_mcbsp_clk_disable,
-		},
-	},
-	{
-		.clk = {
-			.name		= "mcbsp_clk",
-			.id		= 5,
-			.clkdm		= { .name = "virt_opp_clkdm" },
-			.enable		= omap_mcbsp_clk_enable,
-			.disable	= omap_mcbsp_clk_disable,
-		},
-	},
-};
-
-#define omap_mcbsp_clks_size	ARRAY_SIZE(omap_mcbsp_clks)
-#else
-#define omap_mcbsp_clks_size	0
-static struct mcbsp_internal_clk __initdata *omap_mcbsp_clks;
-static inline void omap_mcbsp_clk_init(struct clk *clk)
-{ }
-#endif
+const char *clk_names[] = { "mcbsp_ick", "mcbsp_fck" };
 
 static void omap2_mcbsp2_mux_setup(void)
 {
@@ -159,7 +55,8 @@ static struct omap_mcbsp_platform_data omap2420_mcbsp_pdata[] = {
 		.rx_irq		= INT_24XX_MCBSP1_IRQ_RX,
 		.tx_irq		= INT_24XX_MCBSP1_IRQ_TX,
 		.ops		= &omap2_mcbsp_ops,
-		.clk_name	= "mcbsp_clk",
+		.clk_names	= clk_names,
+		.num_clks	= 2,
 	},
 	{
 		.phys_base	= OMAP24XX_MCBSP2_BASE,
@@ -168,7 +65,8 @@ static struct omap_mcbsp_platform_data omap2420_mcbsp_pdata[] = {
 		.rx_irq		= INT_24XX_MCBSP2_IRQ_RX,
 		.tx_irq		= INT_24XX_MCBSP2_IRQ_TX,
 		.ops		= &omap2_mcbsp_ops,
-		.clk_name	= "mcbsp_clk",
+		.clk_names	= clk_names,
+		.num_clks	= 2,
 	},
 };
 #define OMAP2420_MCBSP_PDATA_SZ		ARRAY_SIZE(omap2420_mcbsp_pdata)
@@ -186,7 +84,8 @@ static struct omap_mcbsp_platform_data omap2430_mcbsp_pdata[] = {
 		.rx_irq		= INT_24XX_MCBSP1_IRQ_RX,
 		.tx_irq		= INT_24XX_MCBSP1_IRQ_TX,
 		.ops		= &omap2_mcbsp_ops,
-		.clk_name	= "mcbsp_clk",
+		.clk_names	= clk_names,
+		.num_clks	= 2,
 	},
 	{
 		.phys_base	= OMAP24XX_MCBSP2_BASE,
@@ -195,7 +94,8 @@ static struct omap_mcbsp_platform_data omap2430_mcbsp_pdata[] = {
 		.rx_irq		= INT_24XX_MCBSP2_IRQ_RX,
 		.tx_irq		= INT_24XX_MCBSP2_IRQ_TX,
 		.ops		= &omap2_mcbsp_ops,
-		.clk_name	= "mcbsp_clk",
+		.clk_names	= clk_names,
+		.num_clks	= 2,
 	},
 	{
 		.phys_base	= OMAP2430_MCBSP3_BASE,
@@ -204,7 +104,8 @@ static struct omap_mcbsp_platform_data omap2430_mcbsp_pdata[] = {
 		.rx_irq		= INT_24XX_MCBSP3_IRQ_RX,
 		.tx_irq		= INT_24XX_MCBSP3_IRQ_TX,
 		.ops		= &omap2_mcbsp_ops,
-		.clk_name	= "mcbsp_clk",
+		.clk_names	= clk_names,
+		.num_clks	= 2,
 	},
 	{
 		.phys_base	= OMAP2430_MCBSP4_BASE,
@@ -213,7 +114,8 @@ static struct omap_mcbsp_platform_data omap2430_mcbsp_pdata[] = {
 		.rx_irq		= INT_24XX_MCBSP4_IRQ_RX,
 		.tx_irq		= INT_24XX_MCBSP4_IRQ_TX,
 		.ops		= &omap2_mcbsp_ops,
-		.clk_name	= "mcbsp_clk",
+		.clk_names	= clk_names,
+		.num_clks	= 2,
 	},
 	{
 		.phys_base	= OMAP2430_MCBSP5_BASE,
@@ -222,7 +124,8 @@ static struct omap_mcbsp_platform_data omap2430_mcbsp_pdata[] = {
 		.rx_irq		= INT_24XX_MCBSP5_IRQ_RX,
 		.tx_irq		= INT_24XX_MCBSP5_IRQ_TX,
 		.ops		= &omap2_mcbsp_ops,
-		.clk_name	= "mcbsp_clk",
+		.clk_names	= clk_names,
+		.num_clks	= 2,
 	},
 };
 #define OMAP2430_MCBSP_PDATA_SZ		ARRAY_SIZE(omap2430_mcbsp_pdata)
@@ -240,25 +143,33 @@ static struct omap_mcbsp_platform_data omap34xx_mcbsp_pdata[] = {
 		.rx_irq		= INT_24XX_MCBSP1_IRQ_RX,
 		.tx_irq		= INT_24XX_MCBSP1_IRQ_TX,
 		.ops		= &omap2_mcbsp_ops,
-		.clk_name	= "mcbsp_clk",
+		.clk_names	= clk_names,
+		.num_clks	= 2,
+		.buffer_size	= 0x7F,
 	},
 	{
 		.phys_base	= OMAP34XX_MCBSP2_BASE,
+		.phys_base_st	= OMAP34XX_MCBSP2_ST_BASE,
 		.dma_rx_sync	= OMAP24XX_DMA_MCBSP2_RX,
 		.dma_tx_sync	= OMAP24XX_DMA_MCBSP2_TX,
 		.rx_irq		= INT_24XX_MCBSP2_IRQ_RX,
 		.tx_irq		= INT_24XX_MCBSP2_IRQ_TX,
 		.ops		= &omap2_mcbsp_ops,
-		.clk_name	= "mcbsp_clk",
+		.clk_names	= clk_names,
+		.num_clks	= 2,
+		.buffer_size	= 0x3FF,
 	},
 	{
 		.phys_base	= OMAP34XX_MCBSP3_BASE,
+		.phys_base_st	= OMAP34XX_MCBSP3_ST_BASE,
 		.dma_rx_sync	= OMAP24XX_DMA_MCBSP3_RX,
 		.dma_tx_sync	= OMAP24XX_DMA_MCBSP3_TX,
 		.rx_irq		= INT_24XX_MCBSP3_IRQ_RX,
 		.tx_irq		= INT_24XX_MCBSP3_IRQ_TX,
 		.ops		= &omap2_mcbsp_ops,
-		.clk_name	= "mcbsp_clk",
+		.clk_names	= clk_names,
+		.num_clks	= 2,
+		.buffer_size	= 0x7F,
 	},
 	{
 		.phys_base	= OMAP34XX_MCBSP4_BASE,
@@ -267,7 +178,9 @@ static struct omap_mcbsp_platform_data omap34xx_mcbsp_pdata[] = {
 		.rx_irq		= INT_24XX_MCBSP4_IRQ_RX,
 		.tx_irq		= INT_24XX_MCBSP4_IRQ_TX,
 		.ops		= &omap2_mcbsp_ops,
-		.clk_name	= "mcbsp_clk",
+		.clk_names	= clk_names,
+		.num_clks	= 2,
+		.buffer_size	= 0x7F,
 	},
 	{
 		.phys_base	= OMAP34XX_MCBSP5_BASE,
@@ -276,7 +189,9 @@ static struct omap_mcbsp_platform_data omap34xx_mcbsp_pdata[] = {
 		.rx_irq		= INT_24XX_MCBSP5_IRQ_RX,
 		.tx_irq		= INT_24XX_MCBSP5_IRQ_TX,
 		.ops		= &omap2_mcbsp_ops,
-		.clk_name	= "mcbsp_clk",
+		.clk_names	= clk_names,
+		.num_clks	= 2,
+		.buffer_size	= 0x7F,
 	},
 };
 #define OMAP34XX_MCBSP_PDATA_SZ		ARRAY_SIZE(omap34xx_mcbsp_pdata)
@@ -287,14 +202,6 @@ static struct omap_mcbsp_platform_data omap34xx_mcbsp_pdata[] = {
 
 static int __init omap2_mcbsp_init(void)
 {
-	int i;
-
-	for (i = 0; i < omap_mcbsp_clks_size; i++) {
-		/* Once we call clk_get inside init, we do not register it */
-		omap_mcbsp_clk_init(&omap_mcbsp_clks[i]);
-		clk_register(&omap_mcbsp_clks[i].clk);
-	}
-
 	if (cpu_is_omap2420())
 		omap_mcbsp_count = OMAP2420_MCBSP_PDATA_SZ;
 	if (cpu_is_omap2430())

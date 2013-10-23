@@ -1,0 +1,19 @@
+#
+# SSI protocol kernel configuration
+#
+config SSI_MCSAAB_IMP
+	tristate "Enable SSI McSAAB improved protocol"
+	depends on OMAP_SSI && PHONET
+	---help---
+	  If you say Y here, you will enable the SSI McSAAB improved protocol.
+
+	  If unsure, say Y, or else you will not be able to connect to the CMT.
+
+config SSI_MCSAAB_DEBUG
+	bool "Debug on the SSI McSAAB improved protocol"
+	depends on SSI_MCSAAB_IMP && DEBUG_KERNEL
+	default n
+	---help---
+	  Enable the debug information in the SSI McSAAB improved protocol.
+
+          If unsure, say N.

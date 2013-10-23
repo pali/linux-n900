@@ -1,0 +1,204 @@
+
+The OMAP PM interface
+=====================
+
+This document describes the temporary OMAP PM interface.  Driver
+authors use these functions to communicate minimum latency or
+throughput constraints to the kernel power management code.
+Over time, the intention is to merge features from the OMAP PM
+interface into the Linux PM QoS code.
+
+This document is divided into two parts:
+
+     - Rationale
+     - Overview
+
+
+Rationale: existing PM interfaces are currently not ideal for OMAP
+------------------------------------------------------------------
+
+There are two PM interfaces in use with publicly-distributed OMAP
+Linux code: the TI Shared Resource Framework (SRF) and the Linux PM
+QoS parameters code.  Neither interface is currently ideal for Linux
+OMAP code.
+
+TI Shared Resource Framework:
+
+The TI CDP tree drivers use the TI Shared Resource Framework (SRF) to
+control chip power management.  TI got their "CDP" drivers up and
+running quickly with considerable power savings using the SRF.
+However, the SRF has some problems.  Many parameters are specified in
+OMAP-specific terms, such as target OPPs (operating performance
+points), rather than in terms of actual latency or throughput
+requirements.  OPPs change depending on OMAP silicon revisions or OMAP
+types, and are meaningless for other architectures, so drivers shared
+between OMAP and other architectures would have to #ifdef out the SRF
+constraints.
+
+Linux PM QoS parameters:
+
+In February 2008, the mainline Linux kernel added the Linux PM QoS
+parameters code, located in kernel/pm_qos_params.c.  (This code
+replaced the latency management code that was present in earlier
+kernels.)  Ideally, OMAP drivers would be able to use this Linux PM
+QoS code directly, but the PM QoS code has some drawbacks:
+
+- It combines some power management parameters that should be kept
+  separate for maximum power savings on OMAP3.  For example, in the PM
+  QoS code, CPU and system DMA wakeup latency are combined into one
+  parameter; but on OMAP3, these are distinct parameters.  The Linux
+  PM QoS code also combines all network power management knobs into
+  two non-device-specific parameters.  OMAP2/3 systems can have
+  different network devices with different power management
+  requirements - for example, a wired Ethernet interface may have
+  different latency and throughput constraints than a WiFi interface.
+
+- It does not yet cover all of the power management capabilities of
+  the OMAP3 architecture.  It does not express latency constraints on
+  a per-device or per-powerdomain basis; it only covers
+  cpu_dma_latency and network throughput and latency, which would not
+  cover most of the OMAP3 devices.
+
+The result: drivers using the current Linux PM QoS layer directly are
+unlikely to reach the same level of power efficiency as driver code
+using the SRF.
+
+So, the SRF provides significant power savings, but expresses power
+constraints in an OMAP- and silicon-revision-specific way; and the PM
+QoS layer expresses PM constraints in a cross-platform manner (in
+terms of fundamental physical units), but does not support
+per-powerdomain constraints and does not support many of the OMAP power
+management features.
+
+
+Overview:  A medium-term alternative: the OMAP PM interface
+-----------------------------------------------------------
+
+Drivers need to express PM parameters which:
+
+- support the range of power management parameters present in the TI SRF;
+
+- separate the drivers from the underlying PM parameter
+  implementation, whether it is the TI SRF or Linux PM QoS or Linux
+  latency framework or something else;
+
+- specify PM parameters in terms of fundamental units, such as
+  latency and throughput, rather than units which are specific to OMAP
+  or to particular OMAP variants;
+
+- allow drivers which are shared with other architectures (e.g.,
+  DaVinci) to add these constraints in a way which won't affect non-OMAP
+  systems,
+
+- can be implemented immediately with minimal disruption of other
+  architectures.
+
+
+This document proposes the OMAP PM interface, including the following
+five power management functions for driver code:
+
+1. Set the maximum MPU wakeup latency:
+   (*pdata->set_max_mpu_wakeup_lat)(struct device *dev, unsigned long t)
+
+2. Set the maximum device wakeup latency:
+   (*pdata->set_max_dev_wakeup_lat)(struct device *dev, unsigned long t)
+
+3. Set the maximum system DMA transfer start latency (CORE pwrdm):
+   (*pdata->set_max_sdma_lat)(struct device *dev, long t)
+
+4. Set the minimum bus throughput needed by a device:
+   (*pdata->set_min_bus_tput)(struct device *dev, u8 agent_id, unsigned long r)
+
+5. Return the number of times the device has lost context
+   (*pdata->get_dev_context_loss_count)(struct device *dev)
+
+
+Further documentation for all OMAP PM interface functions can be
+found in arch/arm/plat-omap/include/mach/omap-pm.h.
+
+
+The OMAP PM layer is intended to be temporary
+---------------------------------------------
+
+The intention is that eventually the Linux PM QoS layer should support
+the range of power management features present in OMAP3.  As this
+happens, existing drivers using the OMAP PM interface can be modified
+to use the Linux PM QoS code; and the OMAP PM interface can disappear.
+
+
+Driver usage of the OMAP PM functions
+-------------------------------------
+
+As the 'pdata' in the above examples indicates, these functions are
+exposed to drivers through function pointers in driver .platform_data
+structures.  The function pointers are initialized by the board-*.c
+files to point to the corresponding OMAP PM functions:
+.set_max_dev_wakeup_lat will point to
+omap_pm_set_max_dev_wakeup_lat(), etc.  Other architectures which do
+not support these functions should leave these function pointers set
+to NULL.  Drivers should use the following idiom:
+
+        if (pdata->set_max_dev_wakeup_lat)
+            (*pdata->set_max_dev_wakeup_lat)(dev, t);
+
+The most common usage of these functions will probably be to specify
+the maximum time from when an interrupt occurs, to when the device
+becomes accessible.  To accomplish this, driver writers should use the
+set_max_mpu_wakeup_lat() function to to constrain the MPU wakeup
+latency, and the set_max_dev_wakeup_lat() function to constrain the
+device wakeup latency (from clk_enable() to accessibility).  For
+example,
+
+        /* Limit MPU wakeup latency */
+        if (pdata->set_max_mpu_wakeup_lat)
+            (*pdata->set_max_mpu_wakeup_lat)(dev, tc);
+
+        /* Limit device powerdomain wakeup latency */
+        if (pdata->set_max_dev_wakeup_lat)
+            (*pdata->set_max_dev_wakeup_lat)(dev, td);
+
+        /* total wakeup latency in this example: (tc + td) */
+
+The PM parameters can be overwritten by calling the function again
+with the new value.  The settings can be removed by calling the
+function with a t argument of -1 (except in the case of
+set_max_bus_tput(), which should be called with an r argument of 0).
+
+The fifth function above, omap_pm_get_dev_context_loss_count(),
+is intended as an optimization to allow drivers to determine whether the
+device has lost its internal context.  If context has been lost, the
+driver must restore its internal context before proceeding.
+
+
+Other specialized interface functions
+-------------------------------------
+
+The five functions listed above are intended to be usable by any
+device driver.  DSPBridge and CPUFreq have a few special requirements.
+DSPBridge expresses target DSP performance levels in terms of OPP IDs.
+CPUFreq expresses target MPU performance levels in terms of MPU
+frequency.  The OMAP PM interface contains functions for these
+specialized cases to convert that input information (OPPs/MPU
+frequency) into the form that the underlying power management
+implementation needs:
+
+6. (*pdata->dsp_get_opp_table)(void)
+
+7. (*pdata->dsp_set_min_opp)(u8 opp_id)
+
+8. (*pdata->dsp_get_opp)(void)
+
+9. (*pdata->cpu_get_freq_table)(void)
+
+10. (*pdata->cpu_set_freq)(unsigned long f)
+
+11. (*pdata->cpu_get_freq)(void)
+
+
+There are also functions for use by the clockdomain layer to indicate
+that a powerdomain should wake up or be put to sleep.  These are not called
+via .platform_data.
+
+12. omap_pm_pwrdm_active(struct powerdomain *pwrdm)
+
+13. omap_pm_pwrdm_inactive(struct powerdomain *pwrdm)

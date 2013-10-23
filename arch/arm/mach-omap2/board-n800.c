@@ -26,6 +26,8 @@
 #include <linux/i2c.h>
 #include <linux/i2c/lm8323.h>
 #include <linux/i2c/menelaus.h>
+#include <linux/omapfb.h>
+
 #include <mach/hardware.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -38,7 +40,6 @@
 #include <mach/lcd_mipid.h>
 #include <mach/clock.h>
 #include <mach/gpio-switch.h>
-#include <mach/omapfb.h>
 #include <mach/blizzard.h>
 
 #include <../drivers/cbus/tahvo.h>
@@ -122,7 +123,7 @@ static struct lm8323_platform_data lm8323_pdata = {
 
 void __init nokia_n800_init_irq(void)
 {
-	omap2_init_common_hw(NULL);
+	omap2_init_common_hw(NULL, NULL, NULL, NULL);
 	omap_init_irq();
 	omap_gpio_init();
 
@@ -305,7 +306,7 @@ static void tsc2301_dev_init(void)
 		gpio_direction_input(gpio);
 		tsc2301_config.keyb_int = gpio_to_irq(gpio);
 	} else {
-		printk(KERN_ERR "unable to get KBD GPIO");
+		printk(KERN_ERR "unable to get KBD GPIO\n");
 	}
 
 	gpio = N800_DAV_IRQ_GPIO;
@@ -314,7 +315,7 @@ static void tsc2301_dev_init(void)
 		gpio_direction_input(gpio);
 		tsc2301_config.dav_int = gpio_to_irq(gpio);
 	} else {
-		printk(KERN_ERR "unable to get DAV GPIO");
+		printk(KERN_ERR "unable to get DAV GPIO\n");
 	}
 }
 

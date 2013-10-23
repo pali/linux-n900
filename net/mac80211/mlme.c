@@ -45,6 +45,10 @@
 
 #define IEEE80211_IBSS_MAX_STA_ENTRIES 128
 
+#define IEEE80211_ROAMING_SIGNAL_THRESHOLD -75
+
+#define RSSI_HIGHSIGNAL "HIGHSIGNAL"
+#define RSSI_LOWSIGNAL "LOWSIGNAL"
 
 /* utils */
 static int ecw2cw(int ecw)
@@ -568,9 +572,8 @@ static void ieee80211_sta_wmm_params(struct ieee80211_local *local,
 	}
 }
 
-static u32 ieee80211_handle_protect_preamb(struct ieee80211_sub_if_data *sdata,
-					   bool use_protection,
-					   bool use_short_preamble)
+static u32 ieee80211_handle_bss_capability(struct ieee80211_sub_if_data *sdata,
+										   u16 capab, bool erp_valid, u8 erp)
 {
 	struct ieee80211_bss_conf *bss_conf = &sdata->bss_conf;
 #ifdef CONFIG_MAC80211_VERBOSE_DEBUG
@@ -578,6 +581,18 @@ static u32 ieee80211_handle_protect_preamb(struct ieee80211_sub_if_data *sdata,
 	DECLARE_MAC_BUF(mac);
 #endif
 	u32 changed = 0;
+	bool use_protection;
+	bool use_short_preamble;
+	bool use_short_slot;
+
+	if (erp_valid) {
+		use_protection = (erp & WLAN_ERP_USE_PROTECTION) != 0;
+		use_short_preamble = (erp & WLAN_ERP_BARKER_PREAMBLE) == 0;
+	} else {
+		use_protection = false;
+		use_short_preamble = !!(capab & WLAN_CAPABILITY_SHORT_PREAMBLE);
+	}
+	use_short_slot = !!(capab & WLAN_CAPABILITY_SHORT_SLOT_TIME);
 
 	if (use_protection != bss_conf->use_cts_prot) {
 #ifdef CONFIG_MAC80211_VERBOSE_DEBUG
@@ -607,30 +622,18 @@ static u32 ieee80211_handle_protect_preamb(struct ieee80211_sub_if_data *sdata,
 		changed |= BSS_CHANGED_ERP_PREAMBLE;
 	}
 
-	return changed;
-}
-
-static u32 ieee80211_handle_erp_ie(struct ieee80211_sub_if_data *sdata,
-				   u8 erp_value)
-{
-	bool use_protection = (erp_value & WLAN_ERP_USE_PROTECTION) != 0;
-	bool use_short_preamble = (erp_value & WLAN_ERP_BARKER_PREAMBLE) == 0;
-
-	return ieee80211_handle_protect_preamb(sdata,
-			use_protection, use_short_preamble);
-}
-
-static u32 ieee80211_handle_bss_capability(struct ieee80211_sub_if_data *sdata,
-					   struct ieee80211_bss *bss)
-{
-	u32 changed = 0;
-
-	if (bss->has_erp_value)
-		changed |= ieee80211_handle_erp_ie(sdata, bss->erp_value);
-	else {
-		u16 capab = bss->capability;
-		changed |= ieee80211_handle_protect_preamb(sdata, false,
-				(capab & WLAN_CAPABILITY_SHORT_PREAMBLE) != 0);
+	if (use_short_slot != bss_conf->use_short_slot) {
+#ifdef CONFIG_MAC80211_VERBOSE_DEBUG
+		if (net_ratelimit()) {
+			printk(KERN_DEBUG "%s: switched to %s slot"
+			       " (BSSID=%s)\n",
+			       sdata->dev->name,
+			       use_short_slot ? "short" : "long",
+			       ifsta->bssid);
+		}
+#endif
+		bss_conf->use_short_slot = use_short_slot;
+		changed |= BSS_CHANGED_ERP_SLOT;
 	}
 
 	return changed;
@@ -723,7 +726,8 @@ static void ieee80211_set_associated(struct ieee80211_sub_if_data *sdata,
 		sdata->bss_conf.timestamp = bss->timestamp;
 		sdata->bss_conf.dtim_period = bss->dtim_period;
 
-		changed |= ieee80211_handle_bss_capability(sdata, bss);
+		changed |= ieee80211_handle_bss_capability(sdata,
+			bss->capability, bss->has_erp_value, bss->erp_value);
 
 		ieee80211_rx_bss_put(local, bss);
 	}
@@ -739,6 +743,9 @@ static void ieee80211_set_associated(struct ieee80211_sub_if_data *sdata,
 	memcpy(ifsta->prev_bssid, sdata->u.sta.bssid, ETH_ALEN);
 	ieee80211_sta_send_associnfo(sdata, ifsta);
 
+	ifsta->rssi_signal_state = RSSI_SIGNAL_STATE_HIGH;
+	ifsta->roam_threshold_count = 0;
+
 	ifsta->last_probe = jiffies;
 	ieee80211_led_assoc(local, 1);
 
@@ -750,6 +757,16 @@ static void ieee80211_set_associated(struct ieee80211_sub_if_data *sdata,
 	 */
 	changed |= BSS_CHANGED_BASIC_RATES;
 	ieee80211_bss_info_change_notify(sdata, changed);
+
+	if (local->powersave) {
+		if (local->dynamic_ps_timeout > 0)
+			mod_timer(&local->dynamic_ps_timer, jiffies +
+				  msecs_to_jiffies(local->dynamic_ps_timeout));
+		else {
+			conf->flags |= IEEE80211_CONF_PS;
+			ieee80211_hw_config(local);
+		}
+	}
 
 	netif_tx_start_all_queues(sdata->dev);
 	netif_carrier_on(sdata->dev);
@@ -767,6 +784,7 @@ static void ieee80211_direct_probe(struct ieee80211_sub_if_data *sdata,
 		printk(KERN_DEBUG "%s: direct probe to AP %s timed out\n",
 		       sdata->dev->name, print_mac(mac, ifsta->bssid));
 		ifsta->state = IEEE80211_STA_MLME_DISABLED;
+		ieee80211_sta_send_apinfo(sdata, ifsta);
 		return;
 	}
 
@@ -799,6 +817,7 @@ static void ieee80211_authenticate(struct ieee80211_sub_if_data *sdata,
 		       " timed out\n",
 		       sdata->dev->name, print_mac(mac, ifsta->bssid));
 		ifsta->state = IEEE80211_STA_MLME_DISABLED;
+		ieee80211_sta_send_apinfo(sdata, ifsta);
 		return;
 	}
 
@@ -870,6 +889,14 @@ static void ieee80211_set_disassoc(struct ieee80211_sub_if_data *sdata,
 
 	rcu_read_unlock();
 
+	del_timer_sync(&local->dynamic_ps_timer);
+	cancel_work_sync(&local->dynamic_ps_enable_work);
+
+	if (local->hw.conf.flags & IEEE80211_CONF_PS) {
+		local->hw.conf.flags &= ~IEEE80211_CONF_PS;
+		ieee80211_hw_config(local);
+	}
+
 	sta_info_destroy(sta);
 }
 
@@ -922,6 +949,7 @@ static void ieee80211_associate(struct ieee80211_sub_if_data *sdata,
 		       " timed out\n",
 		       sdata->dev->name, print_mac(mac, ifsta->bssid));
 		ifsta->state = IEEE80211_STA_MLME_DISABLED;
+		ieee80211_sta_send_apinfo(sdata, ifsta);
 		return;
 	}
 
@@ -940,6 +968,62 @@ static void ieee80211_associate(struct ieee80211_sub_if_data *sdata,
 	mod_timer(&ifsta->timer, jiffies + IEEE80211_ASSOC_TIMEOUT);
 }
 
+static void ieee80211_rx_check_threshold(struct ieee80211_sub_if_data *sdata,
+					 int freq)
+{
+	struct ieee80211_if_sta *ifsta = &sdata->u.sta;
+	enum rssi_signal_state uninitialized_var(new_state);
+	struct ieee80211_bss *bss;
+	const char *event = NULL;
+	union iwreq_data wrqu;
+	char *buf = NULL;
+
+	if (ifsta->state != IEEE80211_STA_MLME_ASSOCIATED)
+		return;
+
+	bss = ieee80211_rx_bss_get(sdata->local, ifsta->bssid, freq,
+				   ifsta->ssid, ifsta->ssid_len);
+
+	if (!bss)
+		return;
+
+	switch (ifsta->rssi_signal_state) {
+	case RSSI_SIGNAL_STATE_HIGH:
+		if (bss->signal < IEEE80211_ROAMING_SIGNAL_THRESHOLD) {
+			event = RSSI_LOWSIGNAL;
+			new_state = RSSI_SIGNAL_STATE_LOW;
+		}
+		break;
+	case RSSI_SIGNAL_STATE_LOW:
+		if (bss->signal > IEEE80211_ROAMING_SIGNAL_THRESHOLD) {
+			event = RSSI_HIGHSIGNAL;
+			new_state = RSSI_SIGNAL_STATE_HIGH;
+		}
+		break;
+	default:
+		WARN_ON(1);
+		break;
+	}
+
+	if (event) {
+		ifsta->roam_threshold_count++;
+		if (ifsta->roam_threshold_count >= 3) {
+			buf = kstrdup(event, GFP_ATOMIC);
+			printk(KERN_DEBUG "%s: roaming threshold exceeded, "
+			       "sending %s\n", sdata->dev->name, buf);
+			memset(&wrqu, 0, sizeof(wrqu));
+			wrqu.data.length = strlen(buf);
+			wireless_send_event(sdata->dev, IWEVCUSTOM, &wrqu,
+					    buf);
+			ifsta->rssi_signal_state = new_state;
+			ifsta->roam_threshold_count = 0;
+			kfree(buf);
+		}
+	} else
+		ifsta->roam_threshold_count = 0;
+
+	ieee80211_rx_bss_put(sdata->local, bss);
+}
 
 static void ieee80211_associated(struct ieee80211_sub_if_data *sdata,
 				 struct ieee80211_if_sta *ifsta)
@@ -1139,8 +1223,7 @@ static void ieee80211_rx_mgmt_deauth(struct ieee80211_sub_if_data *sdata,
 		printk(KERN_DEBUG "%s: deauthenticated\n", sdata->dev->name);
 
 	if (ifsta->state == IEEE80211_STA_MLME_AUTHENTICATE ||
-	    ifsta->state == IEEE80211_STA_MLME_ASSOCIATE ||
-	    ifsta->state == IEEE80211_STA_MLME_ASSOCIATED) {
+	    ifsta->state == IEEE80211_STA_MLME_ASSOCIATE) {
 		ifsta->state = IEEE80211_STA_MLME_DIRECT_PROBE;
 		mod_timer(&ifsta->timer, jiffies +
 				      IEEE80211_RETRY_AUTH_INTERVAL);
@@ -1673,6 +1756,8 @@ static void ieee80211_rx_mgmt_beacon(struct ieee80211_sub_if_data *sdata,
 	struct ieee80211_local *local = sdata->local;
 	struct ieee80211_conf *conf = &local->hw.conf;
 	u32 changed = 0;
+	bool erp_valid;
+	u8 erp_value = 0;
 
 	/* Process beacon from the current BSS */
 	baselen = (u8 *) mgmt->u.beacon.variable - (u8 *) mgmt;
@@ -1694,13 +1779,16 @@ static void ieee80211_rx_mgmt_beacon(struct ieee80211_sub_if_data *sdata,
 	ieee80211_sta_wmm_params(local, ifsta, elems.wmm_param,
 				 elems.wmm_param_len);
 
-	if (elems.erp_info && elems.erp_info_len >= 1)
-		changed |= ieee80211_handle_erp_ie(sdata, elems.erp_info[0]);
-	else {
-		u16 capab = le16_to_cpu(mgmt->u.beacon.capab_info);
-		changed |= ieee80211_handle_protect_preamb(sdata, false,
-				(capab & WLAN_CAPABILITY_SHORT_PREAMBLE) != 0);
+
+	if (elems.erp_info && elems.erp_info_len >= 1) {
+		erp_valid = true;
+		erp_value = elems.erp_info[0];
+	} else {
+		erp_valid = false;
 	}
+	changed |= ieee80211_handle_bss_capability(sdata,
+			le16_to_cpu(mgmt->u.beacon.capab_info),
+			erp_valid, erp_value);
 
 	if (elems.ht_cap_elem && elems.ht_info_elem &&
 	    elems.wmm_param && conf->flags & IEEE80211_CONF_SUPPORT_HT_MODE) {
@@ -1712,6 +1800,7 @@ static void ieee80211_rx_mgmt_beacon(struct ieee80211_sub_if_data *sdata,
 					       &bss_info);
 	}
 
+	ieee80211_rx_check_threshold(sdata, rx_status->freq);
 	ieee80211_bss_info_change_notify(sdata, changed);
 }
 
@@ -2559,4 +2648,40 @@ void ieee80211_mlme_notify_scan_completed(struct ieee80211_local *local)
 	list_for_each_entry_rcu(sdata, &local->interfaces, list)
 		ieee80211_restart_sta_timer(sdata);
 	rcu_read_unlock();
+}
+
+void ieee80211_dynamic_ps_disable_work(struct work_struct *work)
+{
+	struct ieee80211_local *local =
+		container_of(work, struct ieee80211_local,
+			     dynamic_ps_disable_work);
+
+	if (local->hw.conf.flags & IEEE80211_CONF_PS) {
+		local->hw.conf.flags &= ~IEEE80211_CONF_PS;
+		ieee80211_hw_config(local);
+	}
+
+	ieee80211_wake_queues_by_reason(&local->hw,
+					IEEE80211_QUEUE_STOP_REASON_PS);
+}
+
+void ieee80211_dynamic_ps_enable_work(struct work_struct *work)
+{
+	struct ieee80211_local *local =
+		container_of(work, struct ieee80211_local,
+			     dynamic_ps_enable_work);
+
+	if (local->hw.conf.flags & IEEE80211_CONF_PS)
+		return;
+
+	local->hw.conf.flags |= IEEE80211_CONF_PS;
+
+	ieee80211_hw_config(local);
+}
+
+void ieee80211_dynamic_ps_timer(unsigned long data)
+{
+	struct ieee80211_local *local = (void *) data;
+
+	queue_work(local->hw.workqueue, &local->dynamic_ps_enable_work);
 }

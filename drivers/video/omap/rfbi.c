@@ -26,8 +26,7 @@
 #include <linux/interrupt.h>
 #include <linux/clk.h>
 #include <linux/io.h>
-
-#include <mach/omapfb.h>
+#include <linux/omapfb.h>
 
 #include "dispc.h"
 

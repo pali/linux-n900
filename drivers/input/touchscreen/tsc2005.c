@@ -37,12 +37,12 @@
  *
  * Initialize:
  *    Request access to GPIO103 (DAV)
- *    tsc2005_dav_irq_handler will trigger when DAV line goes down
+ *    tsc2005_ts_irq_handler will trigger when DAV line goes down
  *
  *  1) Pen is pressed against touchscreeen
  *  2) TSC2005 performs AD conversion
  *  3) After the conversion is done TSC2005 drives DAV line down
- *  4) GPIO IRQ is received and tsc2005_dav_irq_handler is called
+ *  4) GPIO IRQ is received and tsc2005_ts_irq_handler is called
  *  5) tsc2005_ts_irq_handler queues up an spi transfer to fetch
  *     the x, y, z1, z2 values
  *  6) tsc2005_ts_rx() reports coordinates to input layer and
@@ -77,8 +77,8 @@
 #define TSC2005_CMD_AUX_CONT	(8 << 3)
 #define TSC2005_CMD_TEST_X_CONN	(9 << 3)
 #define TSC2005_CMD_TEST_Y_CONN	(10 << 3)
-/* command 11 reserved */
-#define TSC2005_CMD_TEST_SHORT	(12 << 3)
+#define TSC2005_CMD_TEST_SHORT	(11 << 3)
+/* command 12 reserved, according to 2008-03 erratum */
 #define TSC2005_CMD_DRIVE_XX	(13 << 3)
 #define TSC2005_CMD_DRIVE_YY	(14 << 3)
 #define TSC2005_CMD_DRIVE_YX	(15 << 3)
@@ -136,6 +136,9 @@
 				 TSC2005_CFR0_PRECHARGE_276US | \
 				 TSC2005_CFR0_PENMODE)
 
+/* Bits common to both read and write of config register 0 */
+#define	TSC2005_CFR0_RW_MASK	0x3fff
+
 #define TSC2005_CFR1_BATCHDELAY_0MS	(0x0000)
 #define TSC2005_CFR1_BATCHDELAY_1MS	(0x0001)
 #define TSC2005_CFR1_BATCHDELAY_2MS	(0x0002)
@@ -145,7 +148,7 @@
 #define TSC2005_CFR1_BATCHDELAY_40MS	(0x0006)
 #define TSC2005_CFR1_BATCHDELAY_100MS	(0x0007)
 
-#define TSC2005_CFR1_INITVALUE	(TSC2005_CFR1_BATCHDELAY_2MS)
+#define TSC2005_CFR1_INITVALUE	(TSC2005_CFR1_BATCHDELAY_4MS)
 
 #define TSC2005_CFR2_MAVE_TEMP	(0x0001)
 #define TSC2005_CFR2_MAVE_AUX	(0x0002)
@@ -160,11 +163,12 @@
 #define TSC2005_CFR2_MEDIUM_7	(0x2000)
 #define TSC2005_CFR2_MEDIUM_15	(0x3000)
 
+#define TSC2005_CFR2_IRQ_MASK   (0xC000)
 #define TSC2005_CFR2_IRQ_DAV	(0x4000)
 #define TSC2005_CFR2_IRQ_PEN	(0x8000)
 #define TSC2005_CFR2_IRQ_PENDAV	(0x0000)
 
-#define TSC2005_CFR2_INITVALUE	(TSC2005_CFR2_IRQ_DAV   |	\
+#define TSC2005_CFR2_INITVALUE	(TSC2005_CFR2_IRQ_PENDAV |	\
 				 TSC2005_CFR2_MAVE_X    |	\
 				 TSC2005_CFR2_MAVE_Y    |	\
 				 TSC2005_CFR2_MAVE_Z    |	\
@@ -173,8 +177,7 @@
 
 #define MAX_12BIT					((1 << 12) - 1)
 #define TS_SAMPLES					4
-#define TS_RECT_SIZE					8
-#define TSC2005_TS_PENUP_TIME				20
+#define TSC2005_TS_PENUP_TIME				40
 
 static const u32 tsc2005_read_reg[] = {
 	(TSC2005_REG | TSC2005_REG_X | TSC2005_REG_READ) << 16,
@@ -190,6 +193,17 @@ struct tsc2005 {
 	struct input_dev	*idev;
 	char			phys[32];
 	struct timer_list	penup_timer;
+
+	/* ESD recovery via a hardware reset (GPIO) if the tsc2005
+	 * doesn't respond after a configurable period (in ms) of
+	 * IRQ/SPI inactivity. If esd_timeout is 0, timer and work
+	 * fields are used.
+	 */
+	u32			esd_timeout;
+	struct timer_list	esd_timer;
+	struct work_struct	esd_work;
+	s16			reset_gpio;
+
 	spinlock_t		lock;
 	struct mutex		mutex;
 
@@ -197,10 +211,19 @@ struct tsc2005 {
 	struct spi_transfer	read_xfer[NUM_READ_REGS];
 	u32                     data[NUM_READ_REGS];
 
-	/* previous x,y,z */
-	int			x;
-	int			y;
-	int			p;
+	/* previously reported x,y,p (if pen_down) */
+	int			out_x;
+	int			out_y;
+	int			out_p;
+	/* fudge parameters - changes must exceed one of these. */
+	int			fudge_x;
+	int			fudge_y;
+	int			fudge_p;
+	/* raw copy of previous x,y,z */
+	int			in_x;
+	int			in_y;
+	int			in_z1;
+	int			in_z2;
 	/* average accumulators for each component */
 	int			sample_cnt;
 	int			avg_x;
@@ -213,19 +236,17 @@ struct tsc2005 {
 	int			stab_time;
 	int			p_max;
 	int			touch_pressure;
-	int			irq;
-	s16			dav_gpio;
 	/* status */
 	u8			sample_sent;
 	u8			pen_down;
 	u8			disabled;
 	u8			disable_depth;
-	u8			spi_active;
+	u8			spi_pending;
 };
 
 static void tsc2005_cmd(struct tsc2005 *ts, u8 cmd)
 {
-	u16 data = TSC2005_CMD | TSC2005_CMD_12BIT | cmd;
+	u8 data = TSC2005_CMD | TSC2005_CMD_12BIT | cmd;
 	struct spi_message msg;
 	struct spi_transfer xfer = { 0 };
 
@@ -257,6 +278,26 @@ static void tsc2005_write(struct tsc2005 *ts, u8 reg, u16 value)
 	spi_message_init(&msg);
 	spi_message_add_tail(&xfer, &msg);
 	spi_sync(ts->spi, &msg);
+}
+
+static void tsc2005_read(struct tsc2005 *ts, u8 reg, u16 *value)
+{
+	u32 tx;
+	u32 rx = 0;
+	struct spi_message msg;
+	struct spi_transfer xfer = { 0 };
+
+	tx = (TSC2005_REG | reg | TSC2005_REG_READ) << 16;
+
+	xfer.tx_buf = &tx;
+	xfer.rx_buf = &rx;
+	xfer.len = 4;
+	xfer.bits_per_word = 24;
+
+	spi_message_init(&msg);
+	spi_message_add_tail(&xfer, &msg);
+	spi_sync(ts->spi, &msg);
+	*value = rx;
 }
 
 static void tsc2005_ts_update_pen_state(struct tsc2005 *ts,
@@ -294,6 +335,11 @@ static void tsc2005_ts_rx(void *arg)
 
 	spin_lock_irqsave(&ts->lock, flags);
 
+	if (ts->disable_depth) {
+		ts->spi_pending = 0;
+		goto out;
+	}
+
 	x = ts->data[0];
 	y = ts->data[1];
 	z1 = ts->data[2];
@@ -304,8 +350,26 @@ static void tsc2005_ts_rx(void *arg)
 		goto out;
 
 	/* skip coords if the pressure-components are out of range */
-	if (z1 < 100 || z2 > 4000)
+	if (z1 < 100 || z2 > MAX_12BIT || z1 >= z2)
 		goto out;
+
+	/* skip point if this is a pen down with the exact same values as
+	 * the value before pen-up - that implies SPI fed us stale data
+	 */
+	if (!ts->pen_down &&
+	    ts->in_x == x &&
+	    ts->in_y == y &&
+	    ts->in_z1 == z1 &&
+	    ts->in_z2 == z2)
+		goto out;
+
+	/* At this point we are happy we have a valid and useful reading.
+	 * Remember it for later comparisons. We may now begin downsampling
+	 */
+	ts->in_x = x;
+	ts->in_y = y;
+	ts->in_z1 = z1;
+	ts->in_z2 = z2;
 
 	/* don't run average on the "pen down" event */
 	if (ts->sample_sent) {
@@ -329,48 +393,71 @@ static void tsc2005_ts_rx(void *arg)
 	ts->avg_z1 = 0;
 	ts->avg_z2 = 0;
 
-	if (z1) {
-		pressure = x * (z2 - z1) / z1;
-		pressure = pressure * ts->x_plate_ohm / 4096;
-	} else
-		goto out;
+	pressure = x * (z2 - z1) / z1;
+	pressure = pressure * ts->x_plate_ohm / 4096;
 
 	pressure_limit = ts->sample_sent? ts->p_max: ts->touch_pressure;
 	if (pressure > pressure_limit)
 		goto out;
 
-	/* discard the event if it still is within the previous rect - unless
-	 * if the pressure is harder, but then use previous x,y position */
+	/* Discard the event if it still is within the previous rect -
+	 * unless the pressure is clearly harder, but then use previous
+	 * x,y position. If any coordinate deviates enough, fudging
+	 * of all three will still take place in the input layer.
+	 */
 	inside_rect = (ts->sample_sent &&
-		x > (int)ts->x - TS_RECT_SIZE &&
-		x < (int)ts->x + TS_RECT_SIZE &&
-		y > (int)ts->y - TS_RECT_SIZE &&
-		y < (int)ts->y + TS_RECT_SIZE);
+		x > (int)ts->out_x - ts->fudge_x &&
+		x < (int)ts->out_x + ts->fudge_x &&
+		y > (int)ts->out_y - ts->fudge_y &&
+		y < (int)ts->out_y + ts->fudge_y);
 	if (inside_rect)
-		x = ts->x, y = ts->y;
+		x = ts->out_x, y = ts->out_y;
 
-	if (!inside_rect || pressure < ts->p) {
+	if (!inside_rect || pressure < (ts->out_p - ts->fudge_p)) {
 		tsc2005_ts_update_pen_state(ts, x, y, pressure);
 		ts->sample_sent = 1;
-		ts->x = x;
-		ts->y = y;
-		ts->p = pressure;
+		ts->out_x = x;
+		ts->out_y = y;
+		ts->out_p = pressure;
 	}
 out:
-	ts->spi_active = 0;
+	if (ts->spi_pending > 1) {
+		/* One or more interrupts (sometimes several dozens)
+		 * occured while waiting for the SPI read - get
+		 * another read going.
+		 */
+		ts->spi_pending = 1;
+		if (spi_async(ts->spi, &ts->read_msg)) {
+			dev_err(&ts->spi->dev, "ts: spi_async() failed");
+			ts->spi_pending = 0;
+		}
+	} else
+		ts->spi_pending = 0;
+
 	spin_unlock_irqrestore(&ts->lock, flags);
 
 	/* kick pen up timer - to make sure it expires again(!) */
-	if (ts->sample_sent)
+	if (ts->sample_sent) {
 		mod_timer(&ts->penup_timer,
 			  jiffies + msecs_to_jiffies(TSC2005_TS_PENUP_TIME));
+		/* Also kick the watchdog, as we still think we're alive */
+		if (ts->esd_timeout) {
+			unsigned long wdj = msecs_to_jiffies(ts->esd_timeout);
+			mod_timer(&ts->esd_timer, round_jiffies(jiffies+wdj));
+		}
+	}
 }
 
+/* This penup timer is very forgiving of delayed SPI reads. The
+ * (ESD) watchdog will rescue us if spi_pending remains set, unless
+ * we are enterring the disabled state. In that case we must just
+ * handle the pen up, and let disabling complete.
+ */
 static void tsc2005_ts_penup_timer_handler(unsigned long data)
 {
 	struct tsc2005 *ts = (struct tsc2005 *)data;
-
-	if (ts->sample_sent) {
+	if ((!ts->spi_pending || ts->disable_depth) &&
+	    ts->sample_sent) {
 		tsc2005_ts_update_pen_state(ts, 0, 0, 0);
 		ts->sample_sent = 0;
 	}
@@ -378,25 +465,35 @@ static void tsc2005_ts_penup_timer_handler(unsigned long data)
 
 /*
  * This interrupt is called when pen is down and coordinates are
- * available. That is indicated by a falling edge on DAV line.
+ * available. That is indicated by a either:
+ * a) a rising edge on PINTDAV or (PENDAV mode)
+ * b) a falling edge on DAV line (DAV mode)
+ * depending on the setting of the IRQ bits in the CFR2 setting above.
  */
 static irqreturn_t tsc2005_ts_irq_handler(int irq, void *dev_id)
 {
 	struct tsc2005 *ts = dev_id;
-	int r;
 
-	if (ts->spi_active)
-		return IRQ_HANDLED;
+	if (!ts->spi_pending) {
+		if (spi_async(ts->spi, &ts->read_msg)) {
+			dev_err(&ts->spi->dev, "ts: spi_async() failed");
+			return IRQ_HANDLED;
+		}
+	}
+	/* By shifting in 1s we can never wrap */
+	ts->spi_pending = (ts->spi_pending<<1)+1;
 
-	ts->spi_active = 1;
-	r = spi_async(ts->spi, &ts->read_msg);
-	if (r)
-		dev_err(&ts->spi->dev, "ts: spi_async() failed");
-
-	/* kick pen up timer */
-	mod_timer(&ts->penup_timer,
-		  jiffies + msecs_to_jiffies(TSC2005_TS_PENUP_TIME));
-
+	/* Kick pen up timer only if it's not been started yet. Strictly,
+	 * it isn't even necessary to start it at all here,  but doing so
+	 * keeps an equivalence between pen state and timer state.
+	 * The SPI read loop will keep pushing it into the future.
+	 * If it times out with an SPI pending, it's ignored anyway.
+	 */
+	if (!timer_pending(&ts->penup_timer)) {
+		unsigned long pu = msecs_to_jiffies(TSC2005_TS_PENUP_TIME);
+		ts->penup_timer.expires = jiffies + pu;
+		add_timer(&ts->penup_timer);
+	}
 	return IRQ_HANDLED;
 }
 
@@ -425,31 +522,31 @@ static ssize_t tsc2005_ts_pen_down_show(struct device *dev,
 					struct device_attribute *attr,
 					char *buf)
 {
-	struct tsc2005 *tsc = dev_get_drvdata(dev);
+	struct tsc2005 *ts = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%u\n", tsc->pen_down);
+	return sprintf(buf, "%u\n", ts->pen_down);
 }
 
 static DEVICE_ATTR(pen_down, S_IRUGO, tsc2005_ts_pen_down_show, NULL);
 
-static int tsc2005_configure(struct tsc2005 *tsc, int flags)
+static int tsc2005_configure(struct tsc2005 *ts, int flags)
 {
-	tsc2005_write(tsc, TSC2005_REG_CFR0, TSC2005_CFR0_INITVALUE);
-	tsc2005_write(tsc, TSC2005_REG_CFR1, TSC2005_CFR1_INITVALUE);
-	tsc2005_write(tsc, TSC2005_REG_CFR2, TSC2005_CFR2_INITVALUE);
-	tsc2005_cmd(tsc, flags);
+	tsc2005_write(ts, TSC2005_REG_CFR0, TSC2005_CFR0_INITVALUE);
+	tsc2005_write(ts, TSC2005_REG_CFR1, TSC2005_CFR1_INITVALUE);
+	tsc2005_write(ts, TSC2005_REG_CFR2, TSC2005_CFR2_INITVALUE);
+	tsc2005_cmd(ts, flags);
 
 	return 0;
 }
 
-static void tsc2005_start_scan(struct tsc2005 *tsc)
+static void tsc2005_start_scan(struct tsc2005 *ts)
 {
-	tsc2005_configure(tsc, TSC2005_CMD_SCAN_XYZZ);
+	tsc2005_configure(ts, TSC2005_CMD_SCAN_XYZZ);
 }
 
-static void tsc2005_stop_scan(struct tsc2005 *tsc)
+static void tsc2005_stop_scan(struct tsc2005 *ts)
 {
-	tsc2005_cmd(tsc, TSC2005_CMD_STOP);
+	tsc2005_cmd(ts, TSC2005_CMD_STOP);
 }
 
 /* Must be called with mutex held */
@@ -458,7 +555,9 @@ static void tsc2005_disable(struct tsc2005 *ts)
 	if (ts->disable_depth++ != 0)
 		return;
 
-	disable_irq(ts->irq);
+	disable_irq(ts->spi->irq);
+	if (ts->esd_timeout)
+		del_timer(&ts->esd_timer);
 
 	/* wait until penup timer expire normally */
 	do {
@@ -473,7 +572,12 @@ static void tsc2005_enable(struct tsc2005 *ts)
 	if (--ts->disable_depth != 0)
 		return;
 
-	enable_irq(ts->irq);
+	if (ts->esd_timeout) {
+		unsigned long wdj = msecs_to_jiffies(ts->esd_timeout);
+		ts->esd_timer.expires = round_jiffies(jiffies+wdj);
+		add_timer(&ts->esd_timer);
+	}
+	enable_irq(ts->spi->irq);
 
 	tsc2005_start_scan(ts);
 }
@@ -490,55 +594,86 @@ static ssize_t tsc2005_disable_store(struct device *dev,
 				     struct device_attribute *attr,
 				     const char *buf, size_t count)
 {
-	struct tsc2005		*tsc = dev_get_drvdata(dev);
+	struct tsc2005		*ts = dev_get_drvdata(dev);
 	unsigned long res;
 	int i;
 
-	i = strict_strtoul(buf, 10, &res);
-	i = i ? 1 : 0;
+	if (strict_strtoul(buf, 10, &res) < 0)
+		return -EINVAL;
+	i = res ? 1 : 0;
 
-	mutex_lock(&tsc->mutex);
-	if (i == tsc->disabled)
+	mutex_lock(&ts->mutex);
+	if (i == ts->disabled)
 		goto out;
-	tsc->disabled = i;
+	ts->disabled = i;
 
 	if (i)
-		tsc2005_disable(tsc);
+		tsc2005_disable(ts);
 	else
-		tsc2005_enable(tsc);
+		tsc2005_enable(ts);
 out:
-	mutex_unlock(&tsc->mutex);
+	mutex_unlock(&ts->mutex);
 	return count;
 }
 
 static DEVICE_ATTR(disable_ts, 0664, tsc2005_disable_show,
 		   tsc2005_disable_store);
 
+static void tsc2005_esd_timer_handler(unsigned long data)
+{
+	struct tsc2005 *ts = (struct tsc2005 *)data;
+	if (!ts->disable_depth)
+		schedule_work(&ts->esd_work);
+}
+
+static void tsc2005_rst_handler(struct work_struct *work)
+{
+	u16 reg_val;
+	struct tsc2005 *ts = container_of(work, struct tsc2005, esd_work);
+	unsigned long wdj;
+
+	mutex_lock(&ts->mutex);
+
+	/* If we are disabled, or the a touch has been detected,
+	 * then ignore this timeout. The enable will restart the
+	 * watchdog, as it restarts scanning
+	 */
+	if (ts->disable_depth)
+		goto out;
+
+	/* If we cannot read our known value from configuration register 0
+	 * then reset the controller as if from power-up and start
+	 * scanning again. Always re-arm the watchdog.
+	 */
+	tsc2005_read(ts, TSC2005_REG_CFR0, &reg_val);
+	if ((reg_val ^ TSC2005_CFR0_INITVALUE) & TSC2005_CFR0_RW_MASK) {
+		dev_info(&ts->spi->dev, "TSC not responding, resetting.\n");
+		/* If this timer kicked in, the penup timer, if ever active
+		 * at all, must have expired ages ago, so no need to del it.
+		 */
+		gpio_set_value(ts->reset_gpio, 0);
+		if (ts->sample_sent) {
+			tsc2005_ts_update_pen_state(ts, 0, 0, 0);
+			ts->sample_sent = 0;
+		}
+		ts->spi_pending = 0;
+		msleep(1); /* only 10us required */
+		gpio_set_value(ts->reset_gpio, 1);
+		tsc2005_start_scan(ts);
+	}
+	wdj = msecs_to_jiffies(ts->esd_timeout);
+	mod_timer(&ts->esd_timer, round_jiffies(jiffies+wdj));
+
+out:
+	mutex_unlock(&ts->mutex);
+}
 
 static int __devinit tsc2005_ts_init(struct tsc2005 *ts,
 				     struct tsc2005_platform_data *pdata)
 {
 	struct input_dev *idev;
-	int dav_gpio, r;
+	int r;
 	int x_max, y_max;
-	int x_fudge, y_fudge, p_fudge;
-
-	if (pdata->dav_gpio < 0) {
-		dev_err(&ts->spi->dev, "need DAV GPIO");
-		return -EINVAL;
-	}
-	dav_gpio = pdata->dav_gpio;
-	ts->dav_gpio = dav_gpio;
-	dev_dbg(&ts->spi->dev, "TSC2005: DAV GPIO = %d\n", dav_gpio);
-
-	r = gpio_request(dav_gpio, "TSC2005 dav");
-	if (r < 0) {
-		dev_err(&ts->spi->dev, "unable to get DAV GPIO");
-		goto err1;
-	}
-	gpio_direction_input(dav_gpio);
-	ts->irq = gpio_to_irq(dav_gpio);
-	dev_dbg(&ts->spi->dev, "TSC2005: DAV IRQ = %d\n", ts->irq);
 
 	init_timer(&ts->penup_timer);
 	setup_timer(&ts->penup_timer, tsc2005_ts_penup_timer_handler,
@@ -551,17 +686,17 @@ static int __devinit tsc2005_ts_init(struct tsc2005 *ts,
 	ts->hw_avg_max		= pdata->ts_hw_avg;
 	ts->stab_time		= pdata->ts_stab_time;
 	x_max			= pdata->ts_x_max ? : 4096;
-	x_fudge			= pdata->ts_x_fudge ? : 4;
+	ts->fudge_x		= pdata->ts_x_fudge ? : 4;
 	y_max			= pdata->ts_y_max ? : 4096;
-	y_fudge			= pdata->ts_y_fudge ? : 8;
+	ts->fudge_y		= pdata->ts_y_fudge ? : 8;
 	ts->p_max		= pdata->ts_pressure_max ? : MAX_12BIT;
 	ts->touch_pressure	= pdata->ts_touch_pressure ? : ts->p_max;
-	p_fudge			= pdata->ts_pressure_fudge ? : 2;
+	ts->fudge_p		= pdata->ts_pressure_fudge ? : 2;
 
 	idev = input_allocate_device();
 	if (idev == NULL) {
 		r = -ENOMEM;
-		goto err2;
+		goto err1;
 	}
 
 	idev->name = "TSC2005 touchscreen";
@@ -571,65 +706,85 @@ static int __devinit tsc2005_ts_init(struct tsc2005 *ts,
 
 	idev->evbit[0] = BIT(EV_ABS) | BIT(EV_KEY);
 	idev->absbit[0] = BIT(ABS_X) | BIT(ABS_Y) | BIT(ABS_PRESSURE);
+	idev->keybit[BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH);
 	ts->idev = idev;
 
 	tsc2005_ts_setup_spi_xfer(ts);
 
-	input_set_abs_params(idev, ABS_X, 0, x_max, x_fudge, 0);
-	input_set_abs_params(idev, ABS_Y, 0, y_max, y_fudge, 0);
-	input_set_abs_params(idev, ABS_PRESSURE, 0, ts->p_max, p_fudge, 0);
+	input_set_abs_params(idev, ABS_X, 0, x_max, ts->fudge_x, 0);
+	input_set_abs_params(idev, ABS_Y, 0, y_max, ts->fudge_y, 0);
+	input_set_abs_params(idev, ABS_PRESSURE, 0, ts->p_max, ts->fudge_p, 0);
 
 	tsc2005_start_scan(ts);
 
-	r = request_irq(ts->irq, tsc2005_ts_irq_handler,
-			IRQF_TRIGGER_FALLING | IRQF_DISABLED |
-			IRQF_SAMPLE_RANDOM, "tsc2005", ts);
+	r = request_irq(ts->spi->irq, tsc2005_ts_irq_handler,
+			(((TSC2005_CFR2_INITVALUE & TSC2005_CFR2_IRQ_MASK) ==
+			  TSC2005_CFR2_IRQ_PENDAV)
+			 ? IRQF_TRIGGER_RISING
+			 : IRQF_TRIGGER_FALLING) |
+			IRQF_DISABLED | IRQF_SAMPLE_RANDOM, "tsc2005", ts);
 	if (r < 0) {
 		dev_err(&ts->spi->dev, "unable to get DAV IRQ");
-		goto err3;
+		goto err2;
 	}
 
-	set_irq_wake(ts->irq, 1);
+	set_irq_wake(ts->spi->irq, 1);
 
 	r = input_register_device(idev);
 	if (r < 0) {
 		dev_err(&ts->spi->dev, "can't register touchscreen device\n");
-		goto err4;
+		goto err3;
 	}
 
 	/* We can tolerate these failing */
 	if (device_create_file(&ts->spi->dev, &dev_attr_pen_down));
 	if (device_create_file(&ts->spi->dev, &dev_attr_disable_ts));
 
+	/* Finally, configure and start the optional EDD watchdog. */
+	ts->esd_timeout = pdata->esd_timeout;
+	if (ts->esd_timeout) {
+		unsigned long wdj;
+		ts->reset_gpio = pdata->reset_gpio;
+		/* Presume the platform has already set up reset GPIO */
+		setup_timer(&ts->esd_timer, tsc2005_esd_timer_handler,
+			    (unsigned long)ts);
+		INIT_WORK(&ts->esd_work, tsc2005_rst_handler);
+		wdj = msecs_to_jiffies(ts->esd_timeout);
+		ts->esd_timer.expires = round_jiffies(jiffies+wdj);
+		add_timer(&ts->esd_timer);
+	}
+
 	return 0;
-err4:
-	free_irq(ts->irq, ts);
 err3:
+	free_irq(ts->spi->irq, ts);
+err2:
 	tsc2005_stop_scan(ts);
 	input_free_device(idev);
-err2:
-	gpio_free(dav_gpio);
 err1:
 	return r;
 }
 
 static int __devinit tsc2005_probe(struct spi_device *spi)
 {
-	struct tsc2005			*tsc;
+	struct tsc2005			*ts;
 	struct tsc2005_platform_data	*pdata = spi->dev.platform_data;
 	int r;
 
+	if (spi->irq < 0) {
+		dev_dbg(&spi->dev, "no irq?\n");
+		return -ENODEV;
+	}
 	if (!pdata) {
 		dev_dbg(&spi->dev, "no platform data?\n");
 		return -ENODEV;
 	}
 
-	tsc = kzalloc(sizeof(*tsc), GFP_KERNEL);
-	if (tsc == NULL)
+	ts = kzalloc(sizeof(*ts), GFP_KERNEL);
+	if (ts == NULL)
 		return -ENOMEM;
 
-	dev_set_drvdata(&spi->dev, tsc);
-	tsc->spi = spi;
+	dev_set_drvdata(&spi->dev, ts);
+	ts->spi = spi;
 	spi->dev.power.power_state = PMSG_ON;
 
 	spi->mode = SPI_MODE_0;
@@ -641,14 +796,14 @@ static int __devinit tsc2005_probe(struct spi_device *spi)
 
 	spi_setup(spi);
 
-	r = tsc2005_ts_init(tsc, pdata);
+	r = tsc2005_ts_init(ts, pdata);
 	if (r)
 		goto err1;
 
 	return 0;
 
 err1:
-	kfree(tsc);
+	kfree(ts);
 	return r;
 }
 
@@ -663,10 +818,11 @@ static int __devexit tsc2005_remove(struct spi_device *spi)
 	device_remove_file(&ts->spi->dev, &dev_attr_disable_ts);
 	device_remove_file(&ts->spi->dev, &dev_attr_pen_down);
 
-	free_irq(ts->irq, ts);
+	free_irq(ts->spi->irq, ts);
 	input_unregister_device(ts->idev);
 
-	gpio_free(ts->dav_gpio);
+	if (ts->esd_timeout)
+		del_timer(&ts->esd_timer);
 	kfree(ts);
 
 	return 0;

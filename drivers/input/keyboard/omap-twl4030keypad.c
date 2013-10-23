@@ -55,6 +55,8 @@ struct omap_keypad {
 	int		n_rows;
 	int		n_cols;
 	int		irq;
+	unsigned	user_disabled:1;
+	unsigned	disable_depth;
 
 	struct device	*dbg_dev;
 	struct input_dev *omap_twl4030kp;
@@ -91,6 +93,26 @@ static int twl4030_kpwrite_u8(struct omap_keypad *kp,
 		return ret;
 	}
 	return ret;
+}
+
+static int twl4030_kp_enable_interrupts(struct omap_keypad *kp)
+{
+	u8 reg;
+	int ret;
+	/* Enable KP and TO interrupts now. */
+	reg = ~(KEYP_IMR1_KP | KEYP_IMR1_TO);
+	ret = twl4030_kpwrite_u8(kp, TWL4030_MODULE_KEYPAD,
+					reg, KEYP_IMR1);
+	return ret;
+}
+
+static void twl4030_kp_disable_interrupts(struct omap_keypad *kp)
+{
+	u8 reg;
+	/* mask all events - we don't care about the result */
+	reg = KEYP_IMR1_MIS | KEYP_IMR1_TO | KEYP_IMR1_LK | KEYP_IMR1_KP;
+	(void)twl4030_kpwrite_u8(kp, TWL4030_MODULE_KEYPAD,
+					reg, KEYP_IMR1);
 }
 
 static int omap_kp_find_key(struct omap_keypad *kp, int col, int row)
@@ -146,26 +168,9 @@ static int omap_kp_is_in_ghost_state(struct omap_keypad *kp, u16 *key_state)
 
 	return 0;
 }
-
-static void twl4030_kp_scan(struct omap_keypad *kp, int release_all)
+static void twl4030_kp_report_changes(struct omap_keypad *kp, u16 *new_state)
 {
-	u16 new_state[MAX_ROWS];
 	int col, row;
-
-	if (release_all)
-		memset(new_state, 0, sizeof(new_state));
-	else {
-		/* check for any changes */
-		int ret = omap_kp_read_kp_matrix_state(kp, new_state);
-		if (ret < 0)	/* panic ... */
-			return;
-
-		if (omap_kp_is_in_ghost_state(kp, new_state))
-			return;
-	}
-
-	mutex_lock(&kp->mutex);
-
 	/* check for changes and print those */
 	for (row = 0; row < kp->n_rows; row++) {
 		int changed = new_state[row] ^ kp->kp_state[row];
@@ -196,8 +201,80 @@ static void twl4030_kp_scan(struct omap_keypad *kp, int release_all)
 		}
 		kp->kp_state[row] = new_state[row];
 	}
+}
 
+static inline int twl4030_kp_disabled(struct omap_keypad *kp)
+{
+	return kp->disable_depth != 0;
+}
+
+static int twl4030_kp_scan(struct omap_keypad *kp, u16 *new_state)
+{
+	/* check for any changes */
+	int ret = omap_kp_read_kp_matrix_state(kp, new_state);
+	if (ret < 0)	/* panic ... */
+		return ret;
+
+	return omap_kp_is_in_ghost_state(kp, new_state);
+}
+
+static void twl4030_kp_enable(struct omap_keypad *kp)
+{
+	BUG_ON(!twl4030_kp_disabled(kp));
+	if (--kp->disable_depth == 0) {
+		enable_irq(kp->irq);
+		twl4030_kp_enable_interrupts(kp);
+	}
+}
+
+static void twl4030_kp_disable(struct omap_keypad *kp)
+{
+	u16 new_state[MAX_ROWS];
+
+	if (kp->disable_depth++ == 0) {
+		memset(new_state, 0, sizeof(new_state));
+		twl4030_kp_report_changes(kp, new_state);
+		twl4030_kp_disable_interrupts(kp);
+		disable_irq(kp->irq);
+	}
+}
+
+
+static ssize_t twl4030_kp_disable_show(struct device *dev,
+				       struct device_attribute *attr, char *buf)
+{
+	struct omap_keypad *kp = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%u\n", twl4030_kp_disabled(kp));
+}
+
+static ssize_t twl4030_kp_disable_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct omap_keypad *kp = dev_get_drvdata(dev);
+	long i = 0;
+	int ret;
+
+	ret = strict_strtoul(buf, 10, &i);
+	if (ret)
+		return -EINVAL;
+	i = !!i;
+
+	mutex_lock(&kp->mutex);
+	if (i == kp->user_disabled) {
+		mutex_unlock(&kp->mutex);
+		return count;
+	}
+	kp->user_disabled = i;
+
+	if (i)
+		twl4030_kp_disable(kp);
+	else
+		twl4030_kp_enable(kp);
 	mutex_unlock(&kp->mutex);
+
+	return count;
 }
 
 /*
@@ -208,6 +285,10 @@ static irqreturn_t do_kp_irq(int irq, void *_kp)
 	struct omap_keypad *kp = _kp;
 	u8 reg;
 	int ret;
+	u16 new_state[MAX_ROWS];
+	/* This not real interrupt handler.
+	 * This can only be called from thread context. */
+	BUG_ON(in_irq());
 
 #ifdef CONFIG_LOCKDEP
 	/* WORKAROUND for lockdep forcing IRQF_DISABLED on us, which
@@ -220,15 +301,28 @@ static irqreturn_t do_kp_irq(int irq, void *_kp)
 	/* Read & Clear TWL4030 pending interrupt */
 	ret = twl4030_kpread(kp, TWL4030_MODULE_KEYPAD, &reg, KEYP_ISR1, 1);
 
+	mutex_lock(&kp->mutex);
+
+	if (twl4030_kp_disabled(kp)) {
+		mutex_unlock(&kp->mutex);
+		return IRQ_HANDLED;
+	}
 	/* Release all keys if I2C has gone bad or
 	 * the KEYP has gone to idle state */
 	if ((ret >= 0) && (reg & KEYP_IMR1_KP))
-		twl4030_kp_scan(kp, 0);
+		(void)twl4030_kp_scan(kp, new_state);
 	else
-		twl4030_kp_scan(kp, 1);
+		memset(new_state, 0, sizeof(new_state));
+
+	twl4030_kp_report_changes(kp, new_state);
+
+	mutex_unlock(&kp->mutex);
 
 	return IRQ_HANDLED;
 }
+
+static DEVICE_ATTR(disable_kp, 0664, twl4030_kp_disable_show,
+		   twl4030_kp_disable_store);
 
 /*
  * Registers keypad device with input sub system
@@ -355,10 +449,7 @@ static int __init omap_kp_probe(struct platform_device *pdev)
 			kp->irq);
 		goto err3;
 	} else {
-		/* Enable KP and TO interrupts now. */
-		reg = ~(KEYP_IMR1_KP | KEYP_IMR1_TO);
-		ret = twl4030_kpwrite_u8(kp, TWL4030_MODULE_KEYPAD,
-					 reg, KEYP_IMR1);
+		ret = twl4030_kp_enable_interrupts(kp);
 		if (ret < 0)
 			goto err5;
 	}
@@ -367,10 +458,14 @@ static int __init omap_kp_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto err4;
 
+	ret = device_create_file(&pdev->dev, &dev_attr_disable_kp);
+
+	if (ret < 0)
+		goto err5;
+
 	return ret;
 err5:
-	/* mask all events - we don't care about the result */
-	(void) twl4030_kpwrite_u8(kp, TWL4030_MODULE_KEYPAD, 0xff, KEYP_IMR1);
+	twl4030_kp_disable_interrupts(kp);
 err4:
 	free_irq(kp->irq, NULL);
 err3:
@@ -387,15 +482,43 @@ static int omap_kp_remove(struct platform_device *pdev)
 
 	free_irq(kp->irq, kp);
 	input_unregister_device(kp->omap_twl4030kp);
+	device_remove_file(&pdev->dev, &dev_attr_disable_kp);
 	kfree(kp);
 
 	return 0;
 }
 
+#ifdef CONFIG_PM
+static int twl4030_kp_suspend(struct platform_device *pdev, pm_message_t mesg)
+{
+	struct omap_keypad *kp = dev_get_drvdata(&pdev->dev);
+	mutex_lock(&kp->mutex);
+	twl4030_kp_disable(kp);
+	mutex_unlock(&kp->mutex);
+	return 0;
+}
+
+static int twl4030_kp_resume(struct platform_device *pdev)
+{
+	struct omap_keypad *kp = dev_get_drvdata(&pdev->dev);
+	mutex_lock(&kp->mutex);
+	twl4030_kp_enable(kp);
+	mutex_unlock(&kp->mutex);
+	return 0;
+}
+#else
+
+#define twl4030_kp_suspend NULL
+#define twl4030_kp_resume NULL
+
+#endif /* CONFIG_PM */
+
 
 static struct platform_driver omap_kp_driver = {
 	.probe		= omap_kp_probe,
 	.remove		= __devexit_p(omap_kp_remove),
+	.suspend	= twl4030_kp_suspend,
+	.resume		= twl4030_kp_resume,
 	.driver		= {
 		.name	= "twl4030_keypad",
 		.owner	= THIS_MODULE,

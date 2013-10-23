@@ -19,7 +19,7 @@
 #include <mach/board.h>
 #include <mach/gpmc.h>
 
-struct mtd_partition n800_partitions[ONENAND_MAX_PARTITIONS];
+struct mtd_partition n800_partitions[8];
 
 int n800_onenand_setup(void __iomem *, int freq);
 

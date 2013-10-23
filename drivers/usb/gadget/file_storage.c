@@ -242,6 +242,8 @@
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
 
+#include <asm/mach-types.h>
+
 #include "gadget_chips.h"
 
 
@@ -265,6 +267,13 @@
 
 static const char longname[] = DRIVER_DESC;
 static const char shortname[] = DRIVER_NAME;
+
+static const char manufacturer_nokia[] = "Nokia";
+static const char longname_770[] = "Nokia 770";
+static const char longname_n800[] = "Nokia N800 Internet Tablet";
+static const char longname_n810[] = "Nokia N810 Internet Tablet";
+static const char longname_n810_wimax[] = "Nokia N810 Internet Tablet WiMAX Edition";
+static const char longname_rx51[] = "Nokia Nxxx (RX51) Internet Tablet (Storage Mode)";
 
 MODULE_DESCRIPTION(DRIVER_DESC);
 MODULE_AUTHOR("Alan Stern");
@@ -357,8 +366,8 @@ static struct {
 } mod_data = {					// Default values
 	.transport_parm		= "BBB",
 	.protocol_parm		= "SCSI",
-	.removable		= 0,
-	.can_stall		= 1,
+	.removable		= 1,
+	.can_stall		= 0,
 	.vendor			= DRIVER_VENDOR_ID,
 	.product		= DRIVER_PRODUCT_ID,
 	.release		= 0xffff,	// Use controller chip type
@@ -816,11 +825,13 @@ static void put_be32(u8 *buf, u32 val)
 #define STRING_MANUFACTURER	1
 #define STRING_PRODUCT		2
 #define STRING_SERIAL		3
-#define STRING_CONFIG		4
-#define STRING_INTERFACE	5
+#define STRING_CONFIG_MAXPOWER	4
+#define STRING_CONFIG_SELFPOWERED	5
+#define STRING_INTERFACE	6
 
 /* There is only one configuration. */
-#define	CONFIG_VALUE		1
+#define	CONFIG_VALUE_MAXPOWER	1
+#define	CONFIG_VALUE_SELFPOWERED	2
 
 static struct usb_device_descriptor
 device_desc = {
@@ -838,20 +849,33 @@ device_desc = {
 	.iManufacturer =	STRING_MANUFACTURER,
 	.iProduct =		STRING_PRODUCT,
 	.iSerialNumber =	STRING_SERIAL,
-	.bNumConfigurations =	1,
+	.bNumConfigurations =	2,
 };
 
 static struct usb_config_descriptor
-config_desc = {
-	.bLength =		sizeof config_desc,
+config_desc_500 = {
+	.bLength =		sizeof config_desc_500,
 	.bDescriptorType =	USB_DT_CONFIG,
 
 	/* wTotalLength computed by usb_gadget_config_buf() */
 	.bNumInterfaces =	1,
-	.bConfigurationValue =	CONFIG_VALUE,
-	.iConfiguration =	STRING_CONFIG,
+	.bConfigurationValue =	CONFIG_VALUE_MAXPOWER,
+	.iConfiguration =	STRING_CONFIG_MAXPOWER,
+	.bmAttributes =		USB_CONFIG_ATT_ONE,
+	.bMaxPower =		250, /* 500mA */
+};
+
+static struct usb_config_descriptor
+config_desc_100 = {
+	.bLength =		sizeof config_desc_100,
+	.bDescriptorType =	USB_DT_CONFIG,
+
+	/* wTotalLength computed by usb_gadget_config_buf() */
+	.bNumInterfaces =	1,
+	.bConfigurationValue =	CONFIG_VALUE_SELFPOWERED,
+	.iConfiguration =	STRING_CONFIG_SELFPOWERED,
 	.bmAttributes =		USB_CONFIG_ATT_ONE | USB_CONFIG_ATT_SELFPOWER,
-	.bMaxPower =		CONFIG_USB_GADGET_VBUS_DRAW / 2,
+	.bMaxPower =		50, /* 100mA */
 };
 
 static struct usb_otg_descriptor
@@ -937,7 +961,7 @@ dev_qualifier = {
 	.bcdUSB =		__constant_cpu_to_le16(0x0200),
 	.bDeviceClass =		USB_CLASS_PER_INTERFACE,
 
-	.bNumConfigurations =	1,
+	.bNumConfigurations =	2,
 };
 
 static struct usb_endpoint_descriptor
@@ -1003,7 +1027,8 @@ static struct usb_string		strings[] = {
 	{STRING_MANUFACTURER,	manufacturer},
 	{STRING_PRODUCT,	longname},
 	{STRING_SERIAL,		serial},
-	{STRING_CONFIG,		"Self-powered"},
+	{STRING_CONFIG_MAXPOWER,	"Max power"},
+	{STRING_CONFIG_SELFPOWERED,	"Self-powered"},
 	{STRING_INTERFACE,	"Mass Storage"},
 	{}
 };
@@ -1025,8 +1050,9 @@ static int populate_config_buf(struct usb_gadget *gadget,
 	enum usb_device_speed			speed = gadget->speed;
 	int					len;
 	const struct usb_descriptor_header	**function;
+	struct usb_config_descriptor		*config;
 
-	if (index > 0)
+	if (index > 1)
 		return -EINVAL;
 
 	if (gadget_is_dualspeed(gadget) && type == USB_DT_OTHER_SPEED_CONFIG)
@@ -1036,11 +1062,17 @@ static int populate_config_buf(struct usb_gadget *gadget,
 	else
 		function = fs_function;
 
+	if (device_desc.bNumConfigurations == 2 && index == 0)
+		config = &config_desc_500;
+	else
+		config = &config_desc_100;
+
 	/* for now, don't advertise srp-only devices */
-	if (!gadget_is_otg(gadget))
+	if (machine_is_nokia770() || machine_is_nokia_n800()
+			|| !gadget_is_otg(gadget))
 		function++;
 
-	len = usb_gadget_config_buf(&config_desc, buf, EP0_BUFSIZE, function);
+	len = usb_gadget_config_buf(config, buf, EP0_BUFSIZE, function);
 	((struct usb_config_descriptor *) buf)->bDescriptorType = type;
 	return len;
 }
@@ -1397,7 +1429,8 @@ get_config:
 				USB_RECIP_DEVICE))
 			break;
 		VDBG(fsg, "set configuration\n");
-		if (w_value == CONFIG_VALUE || w_value == 0) {
+		if (w_value == CONFIG_VALUE_MAXPOWER || w_value == 0
+				|| w_value == CONFIG_VALUE_SELFPOWERED) {
 			fsg->new_config = w_value;
 
 			/* Raise an exception to wipe out previous transaction
@@ -2024,6 +2057,21 @@ static int do_inquiry(struct fsg_dev *fsg, struct fsg_buffhd *bh)
 	static char vendor_id[] = "Linux   ";
 	static char product_id[] = "File-Stor Gadget";
 
+#if defined(CONFIG_MACH_NOKIA770) || defined(CONFIG_MACH_NOKIA_N800) \
+	|| defined(CONFIG_MACH_NOKIA_N810) || defined(CONFIG_MACH_NOKIA_N810_WIMAX) \
+	|| defined(CONFIG_MACH_NOKIA_RX51)
+		sprintf(vendor_id, "Nokia   ");
+	if (machine_is_nokia770())
+		sprintf(product_id, "770             ");
+	else if (machine_is_nokia_n800())
+		sprintf(product_id, "N800             ");
+	else if (machine_is_nokia_n810())
+		sprintf(product_id, "N810             ");
+	else if (machine_is_nokia_n810_wimax())
+		sprintf(product_id, "N810 WiMAX       ");
+	else
+		sprintf(product_id, "Nxxx (RX51)      ");
+#endif
 	if (!fsg->curlun) {		// Unsupported LUNs are okay
 		fsg->bad_lun_okay = 1;
 		memset(buf, 0, 36);
@@ -3237,6 +3285,7 @@ reset:
  */
 static int do_set_config(struct fsg_dev *fsg, u8 new_config)
 {
+	unsigned power;
 	int	rc = 0;
 
 	/* Disable the single interface */
@@ -3262,7 +3311,21 @@ static int do_set_config(struct fsg_dev *fsg, u8 new_config)
 			}
 			INFO(fsg, "%s speed config #%d\n", speed, fsg->config);
 		}
+
+		switch (new_config) {
+			case CONFIG_VALUE_MAXPOWER:
+				power = 2 * config_desc_500.bMaxPower;
+				break;
+			case CONFIG_VALUE_SELFPOWERED:
+				power = 2 * config_desc_100.bMaxPower;
+				break;
+			default:
+				power = gadget_is_otg(fsg->gadget) ? 8 : 100;
+		}
+
+		usb_gadget_vbus_draw(fsg->gadget, power);
 	}
+
 	return rc;
 }
 
@@ -3942,10 +4005,36 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 		fsg->intr_in = ep;
 	}
 
-	/* Fix up the descriptors */
-	device_desc.bMaxPacketSize0 = fsg->ep0->maxpacket;
+#if defined(CONFIG_MACH_NOKIA770) || defined(CONFIG_MACH_NOKIA_N800) \
+	|| defined(CONFIG_MACH_NOKIA_N810) || defined(CONFIG_MACH_NOKIA_N810_WIMAX) \
+	|| defined(CONFIG_MACH_NOKIA_RX51)
+	/* REVISIT: Get configuration from platform_data in board-*.c files */
+	strings[0].s		= manufacturer_nokia;
+	device_desc.idVendor	= 0x0421;	/* Nokia */
+
+	if (machine_is_nokia770()) {
+		strings[1].s		= longname_770;
+		device_desc.idProduct	= 0x0431;	/* 770 */
+	} else if (machine_is_nokia_n800()) {
+		strings[1].s		= longname_n800;
+		device_desc.idProduct	= 0x04c3;	/* N800 */
+	} else if (machine_is_nokia_n810()) {
+		strings[1].s		= longname_n810;
+		device_desc.idProduct	= 0x0096;	/* N810 */
+	} else if (machine_is_nokia_n810_wimax()){
+		strings[1].s		= longname_n810_wimax;
+		device_desc.idProduct	= 0x0189;	/* N810 WiMAX*/
+	} else {
+		strings[1].s		= longname_rx51;
+		device_desc.idProduct	= 0x01c7;	/* Nxxx (rx51) */
+	}
+#else
 	device_desc.idVendor = cpu_to_le16(mod_data.vendor);
 	device_desc.idProduct = cpu_to_le16(mod_data.product);
+#endif
+
+	/* Fix up the descriptors */
+	device_desc.bMaxPacketSize0 = fsg->ep0->maxpacket;
 	device_desc.bcdDevice = cpu_to_le16(mod_data.release);
 
 	i = (transport_is_cbi() ? 3 : 2);	// Number of endpoints
@@ -4066,6 +4155,7 @@ out:
 	fsg->state = FSG_STATE_TERMINATED;	// The thread is dead
 	fsg_unbind(gadget);
 	close_all_backing_files(fsg);
+	complete(&fsg->thread_notifier);
 	return rc;
 }
 

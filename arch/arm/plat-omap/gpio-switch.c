@@ -286,12 +286,17 @@ static int __init new_switch(struct gpio_switch *sw)
 
 	/* input: 1, output: 0 */
 	direction = !(sw->flags & OMAP_GPIO_SWITCH_FLAG_OUTPUT);
-	if (direction)
+	if (direction) {
 		gpio_direction_input(sw->gpio);
-	else
-		gpio_direction_output(sw->gpio, true);
+		sw->state = gpio_sw_get_state(sw);
+	} else {
+		int state = sw->state = !!(sw->flags &
+			OMAP_GPIO_SWITCH_FLAG_OUTPUT_INIT_ACTIVE);
 
-	sw->state = gpio_sw_get_state(sw);
+		if (sw->flags & OMAP_GPIO_SWITCH_FLAG_INVERTED)
+			state = !state;
+		gpio_direction_output(sw->gpio, state);
+	}
 
 	r = 0;
 	r |= device_create_file(&sw->pdev.dev, &dev_attr_state);
@@ -387,6 +392,51 @@ no_check:
 	}
 	return NULL;
 }
+
+int omap_update_gpio_switch(const struct omap_gpio_switch *cfg)
+{
+	struct gpio_switch *sw;
+	int r;
+
+	if (cfg->name != NULL && strlen(cfg->name) > sizeof(sw->name) - 1)
+		return -EINVAL;
+
+	sw = find_switch(cfg->gpio, cfg->name);
+	if (sw != NULL) {
+		sw->debounce_rising = cfg->debounce_rising;
+		sw->debounce_falling = cfg->debounce_falling;
+		sw->notify = cfg->notify;
+		sw->notify_data = cfg->notify_data;
+		return 0;
+	} else {
+		if (cfg->gpio < 0 || cfg->name == NULL) {
+			printk(KERN_ERR "gpio-switch: required switch not "
+				"found (%d, %s)\n", cfg->gpio,
+				cfg->name);
+			return -EINVAL;
+		}
+	}
+	sw = kzalloc(sizeof(*sw), GFP_KERNEL);
+	if (sw == NULL) {
+		printk(KERN_ERR "gpio-switch: kmalloc failed\n");
+		return -ENOMEM;
+	}
+	strlcpy(sw->name, cfg->name, sizeof(sw->name));
+	sw->gpio = cfg->gpio;
+	sw->flags = cfg->flags;
+	sw->type = cfg->type;
+	sw->debounce_rising = cfg->debounce_rising;
+	sw->debounce_falling = cfg->debounce_falling;
+	sw->notify = cfg->notify;
+	sw->notify_data = cfg->notify_data;
+	r = new_switch(sw);
+	if (r < 0) {
+		kfree(sw);
+		return r;
+	}
+	return 0;
+}
+EXPORT_SYMBOL(omap_update_gpio_switch);
 
 static int __init add_board_switches(void)
 {

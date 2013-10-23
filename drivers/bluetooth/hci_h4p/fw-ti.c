@@ -1,7 +1,7 @@
 /*
  * This file is part of hci_h4p bluetooth driver
  *
- * Copyright (C) 2005, 2006 Nokia Corporation.
+ * Copyright (C) 2005-2008 Nokia Corporation.
  *
  * Contact: Ville Tervo <ville.tervo@nokia.com>
  *
@@ -22,6 +22,7 @@
  */
 
 #include <linux/skbuff.h>
+#include <linux/serial_reg.h>
 
 #include "hci_h4p.h"
 
@@ -55,10 +56,12 @@ ret:
 	complete(&info->fw_completion);
 }
 
-int hci_h4p_brf6150_send_fw(struct hci_h4p_info *info, struct sk_buff_head *fw_queue)
+int hci_h4p_brf6150_send_fw(struct hci_h4p_info *info,
+			    struct sk_buff_head *fw_queue)
 {
 	struct sk_buff *skb;
 	int err = 0;
+	unsigned long flags;
 
 	info->fw_error = 0;
 
@@ -72,7 +75,10 @@ int hci_h4p_brf6150_send_fw(struct hci_h4p_info *info, struct sk_buff_head *fw_q
 
 		init_completion(&info->fw_completion);
 		skb_queue_tail(&info->txq, skb);
-		tasklet_schedule(&info->tx_task);
+		spin_lock_irqsave(&info->lock, flags);
+		hci_h4p_outb(info, UART_IER, hci_h4p_inb(info, UART_IER) |
+			     UART_IER_THRI);
+		spin_unlock_irqrestore(&info->lock, flags);
 
 		if (!wait_for_completion_timeout(&info->fw_completion, HZ)) {
 			dev_err(info->dev, "Timeout while sending brf6150 fw\n");
@@ -80,7 +86,8 @@ int hci_h4p_brf6150_send_fw(struct hci_h4p_info *info, struct sk_buff_head *fw_q
 		}
 
 		if (info->fw_error) {
-			dev_err(info->dev, "There was fw_error while sending bfr6150 fw\n");
+			dev_err(info->dev,
+				"fw_error while sending bfr6150 fw\n");
 			return -EPROTO;
 		}
 	}

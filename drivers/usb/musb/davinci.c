@@ -32,9 +32,9 @@
 #include <linux/io.h>
 #include <linux/gpio.h>
 
-#include <mach/arch/hardware.h>
-#include <mach/arch/memory.h>
-#include <mach/arch/gpio.h>
+#include <mach/hardware.h>
+#include <mach/gpio.h>
+#include <mach/memory.h>
 #include <asm/mach-types.h>
 
 #include "musb_core.h"
@@ -199,7 +199,7 @@ static void otg_timer(unsigned long _musb)
 	DBG(7, "poll devctl %02x (%s)\n", devctl, otg_state_string(musb));
 
 	spin_lock_irqsave(&musb->lock, flags);
-	switch (musb->xceiv.state) {
+	switch (musb->xceiv->state) {
 	case OTG_STATE_A_WAIT_VFALL:
 		/* Wait till VBUS falls below SessionEnd (~0.2V); the 1.3 RTL
 		 * seems to mis-handle session "start" otherwise (or in our
@@ -210,7 +210,7 @@ static void otg_timer(unsigned long _musb)
 			mod_timer(&otg_workaround, jiffies + POLL_SECONDS * HZ);
 			break;
 		}
-		musb->xceiv.state = OTG_STATE_A_WAIT_VRISE;
+		musb->xceiv->state = OTG_STATE_A_WAIT_VRISE;
 		musb_writel(musb->ctrl_base, DAVINCI_USB_INT_SET_REG,
 			MUSB_INTR_VBUSERROR << DAVINCI_USB_USBINT_SHIFT);
 		break;
@@ -235,7 +235,7 @@ static void otg_timer(unsigned long _musb)
 		if (devctl & MUSB_DEVCTL_BDEVICE)
 			mod_timer(&otg_workaround, jiffies + POLL_SECONDS * HZ);
 		else
-			musb->xceiv.state = OTG_STATE_A_IDLE;
+			musb->xceiv->state = OTG_STATE_A_IDLE;
 		break;
 	default:
 		break;
@@ -315,21 +315,21 @@ static irqreturn_t davinci_interrupt(int irq, void *__hci)
 			 * to stop registering in devctl.
 			 */
 			musb->int_usb &= ~MUSB_INTR_VBUSERROR;
-			musb->xceiv.state = OTG_STATE_A_WAIT_VFALL;
+			musb->xceiv->state = OTG_STATE_A_WAIT_VFALL;
 			mod_timer(&otg_workaround, jiffies + POLL_SECONDS * HZ);
 			WARNING("VBUS error workaround (delay coming)\n");
 		} else if (is_host_enabled(musb) && drvvbus) {
 			musb->is_active = 1;
 			MUSB_HST_MODE(musb);
-			musb->xceiv.default_a = 1;
-			musb->xceiv.state = OTG_STATE_A_WAIT_VRISE;
+			musb->xceiv->default_a = 1;
+			musb->xceiv->state = OTG_STATE_A_WAIT_VRISE;
 			portstate(musb->port1_status |= USB_PORT_STAT_POWER);
 			del_timer(&otg_workaround);
 		} else {
 			musb->is_active = 0;
 			MUSB_DEV_MODE(musb);
-			musb->xceiv.default_a = 0;
-			musb->xceiv.state = OTG_STATE_B_IDLE;
+			musb->xceiv->default_a = 0;
+			musb->xceiv->state = OTG_STATE_B_IDLE;
 			portstate(musb->port1_status &= ~USB_PORT_STAT_POWER);
 		}
 
@@ -351,7 +351,7 @@ static irqreturn_t davinci_interrupt(int irq, void *__hci)
 
 	/* poll for ID change */
 	if (is_otg_enabled(musb)
-			&& musb->xceiv.state == OTG_STATE_B_IDLE)
+			&& musb->xceiv->state == OTG_STATE_B_IDLE)
 		mod_timer(&otg_workaround, jiffies + POLL_SECONDS * HZ);
 
 	spin_unlock_irqrestore(&musb->lock, flags);
@@ -378,6 +378,7 @@ int musb_platform_set_mode(struct musb *musb, u8 mode)
 
 int __init musb_platform_init(struct musb *musb)
 {
+	struct otg_transceiver xceiv;
 	void __iomem	*tibase = musb->ctrl_base;
 	u32		revision;
 
@@ -394,6 +395,12 @@ int __init musb_platform_init(struct musb *musb)
 	if (status < 0)
 		return -ENODEV;
 #endif
+
+	memset(&xceiv, 0, sizeof(xceiv));
+	xceiv.label = "davinci";
+	xceiv.dev = musb->controller;
+	otg_set_transceiver(&xceiv);
+	musb->xceiv = &xceiv;
 
 	/* returns zero if e.g. not clocked */
 	revision = musb_readl(tibase, DAVINCI_USB_VERSION_REG);
@@ -421,6 +428,8 @@ int __init musb_platform_init(struct musb *musb)
 		musb_readb(tibase, DAVINCI_USB_CTRL_REG));
 
 	musb->isr = davinci_interrupt;
+	musb->suspendm = true;
+
 	return 0;
 }
 
@@ -432,7 +441,7 @@ int musb_platform_exit(struct musb *musb)
 	davinci_source_power(musb, 0 /*off*/, 1);
 
 	/* delay, to avoid problems with module reload */
-	if (is_host_enabled(musb) && musb->xceiv.default_a) {
+	if (is_host_enabled(musb) && musb->xceiv->default_a) {
 		int	maxdelay = 30;
 		u8	devctl, warn = 0;
 

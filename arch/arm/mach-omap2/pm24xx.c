@@ -114,7 +114,7 @@ static void omap2_enter_full_retention(void)
 	l = omap_ctrl_readl(OMAP2_CONTROL_DEVCONF0) | OMAP24XX_USBSTANDBYCTRL;
 	omap_ctrl_writel(l, OMAP2_CONTROL_DEVCONF0);
 
-	omap2_gpio_prepare_for_retention();
+	omap2_gpio_prepare_for_idle(PWRDM_POWER_RET);
 
 	if (omap2_pm_debug) {
 		omap2_pm_dump(0, 0, 0);
@@ -147,7 +147,7 @@ no_sleep:
 		tmp = timespec_to_ns(&ts_idle) * NSEC_PER_USEC;
 		omap2_pm_dump(0, 1, tmp);
 	}
-	omap2_gpio_resume_after_retention();
+	omap2_gpio_resume_after_idle();
 
 	clk_enable(osc_ck);
 
@@ -349,7 +349,7 @@ static struct platform_suspend_ops omap_pm_ops = {
 	.valid		= suspend_valid_only_mem,
 };
 
-static int _pm_clkdm_enable_hwsup(struct clockdomain *clkdm)
+static int _pm_clkdm_enable_hwsup(struct clockdomain *clkdm, void *unused)
 {
 	omap2_clkdm_allow_idle(clkdm);
 	return 0;
@@ -401,7 +401,7 @@ static void __init prcm_setup_regs(void)
 	omap2_clkdm_sleep(gfx_clkdm);
 
 	/* Enable clockdomain hardware-supervised control for all clkdms */
-	clkdm_for_each(_pm_clkdm_enable_hwsup);
+	clkdm_for_each(_pm_clkdm_enable_hwsup, NULL);
 
 	/* Enable clock autoidle for all domains */
 	cm_write_mod_reg(OMAP24XX_AUTO_CAM |

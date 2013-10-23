@@ -26,6 +26,8 @@
 #include <linux/io.h>
 #include <linux/limits.h>
 #include <linux/bitops.h>
+#include <linux/err.h>
+#include <linux/cpufreq.h>
 
 #include <mach/clock.h>
 #include <mach/sram.h>
@@ -38,12 +40,29 @@
 #include "prm-regbits-34xx.h"
 #include "cm.h"
 #include "cm-regbits-34xx.h"
+#include "pm.h"
 
 /* CM_AUTOIDLE_PLL*.AUTO_* bit values */
 #define DPLL_AUTOIDLE_DISABLE			0x0
 #define DPLL_AUTOIDLE_LOW_POWER_STOP		0x1
 
 #define MAX_DPLL_WAIT_TRIES		1000000
+
+#define MIN_SDRC_DLL_LOCK_FREQ		83000000
+
+#define CYCLES_PER_MHZ			1000000
+
+/* Scale factor for fixed-point arith in omap3_core_dpll_m2_set_rate() */
+#define SDRC_MPURATE_SCALE		8
+
+/* 2^SDRC_MPURATE_BASE_SHIFT: MPU MHz that SDRC_MPURATE_LOOPS is defined for */
+#define SDRC_MPURATE_BASE_SHIFT		9
+
+/*
+ * SDRC_MPURATE_LOOPS: Number of MPU loops to execute at
+ * 2^MPURATE_BASE_SHIFT MHz for SDRC to stabilize
+ */
+#define SDRC_MPURATE_LOOPS		96
 
 /**
  * omap3_dpll_recalc - recalculate DPLL rate
@@ -456,7 +475,9 @@ static int omap3_noncore_dpll_set_rate(struct clk *clk, unsigned long rate)
 static int omap3_core_dpll_m2_set_rate(struct clk *clk, unsigned long rate)
 {
 	u32 new_div = 0;
-	unsigned long validrate, sdrcrate;
+	u32 unlock_dll = 0;
+	u32 c;
+	unsigned long validrate, sdrcrate, mpurate;
 	struct omap_sdrc_params *sp;
 
 	if (!clk || !rate)
@@ -465,34 +486,44 @@ static int omap3_core_dpll_m2_set_rate(struct clk *clk, unsigned long rate)
 	if (clk != &dpll3_m2_ck)
 		return -EINVAL;
 
-	if (rate == clk->rate)
-		return 0;
-
 	validrate = omap2_clksel_round_rate_div(clk, rate, &new_div);
 	if (validrate != rate)
 		return -EINVAL;
 
 	sdrcrate = sdrc_ick.rate;
 	if (rate > clk->rate)
-		sdrcrate <<= ((rate / clk->rate) - 1);
+		sdrcrate <<= ((rate / clk->rate) >> 1);
 	else
-		sdrcrate >>= ((clk->rate / rate) - 1);
+		sdrcrate >>= ((clk->rate / rate) >> 1);
 
 	sp = omap2_sdrc_get_params(sdrcrate);
 	if (!sp)
 		return -EINVAL;
 
-	pr_info("clock: changing CORE DPLL rate from %lu to %lu\n", clk->rate,
-		validrate);
-	pr_info("clock: SDRC timing params used: %08x %08x %08x\n",
-		sp->rfr_ctrl, sp->actim_ctrla, sp->actim_ctrlb);
+	if (sdrcrate < MIN_SDRC_DLL_LOCK_FREQ) {
+		pr_debug("clock: will unlock SDRC DLL\n");
+		unlock_dll = 1;
+	}
 
-	/* REVISIT: SRAM code doesn't support other M2 divisors yet */
-	WARN_ON(new_div != 1 && new_div != 2);
+	/*
+	 * XXX This only needs to be done when the CPU frequency changes
+	 */
+	mpurate = arm_fck.rate / CYCLES_PER_MHZ;
+	c = (mpurate << SDRC_MPURATE_SCALE) >> SDRC_MPURATE_BASE_SHIFT;
+	c += 1;  /* for safety */
+	c *= SDRC_MPURATE_LOOPS;
+	c >>= SDRC_MPURATE_SCALE;
+	if (c == 0)
+		c = 1;
 
-	/* REVISIT: Add SDRC_MR changing to this code also */
+	pr_debug("clock: changing CORE DPLL rate from %lu to %lu\n", clk->rate,
+		 validrate);
+	pr_debug("clock: SDRC timing params used: %08x %08x %08x\n",
+		 sp->rfr_ctrl, sp->actim_ctrla, sp->actim_ctrlb);
+
 	omap3_configure_core_dpll(sp->rfr_ctrl, sp->actim_ctrla,
-				  sp->actim_ctrlb, new_div);
+				  sp->actim_ctrlb, new_div, unlock_dll, c,
+				  sp->mr, rate > clk->rate);
 
 	return 0;
 }
@@ -630,15 +661,51 @@ static void omap3_clkoutx2_recalc(struct clk *clk, unsigned long parent_rate,
  */
 #if defined(CONFIG_ARCH_OMAP3)
 
+#ifdef CONFIG_CPU_FREQ
+static struct cpufreq_frequency_table freq_table[MAX_VDD1_OPP+1];
+
+void omap2_clk_init_cpufreq_table(struct cpufreq_frequency_table **table)
+{
+	struct omap_opp *prcm;
+	int i = 0;
+
+	if (!mpu_opps)
+		return;
+
+	prcm = mpu_opps + MAX_VDD1_OPP;
+	for (; prcm->rate; prcm--) {
+		freq_table[i].index = i;
+		freq_table[i].frequency = prcm->rate / 1000;
+		i++;
+	}
+
+	if (i == 0) {
+		printk(KERN_WARNING "%s: failed to initialize frequency \
+								table\n",
+								__func__);
+		return;
+	}
+
+	freq_table[i].index = i;
+	freq_table[i].frequency = CPUFREQ_TABLE_END;
+
+	*table = &freq_table[0];
+}
+#endif
+
 static struct clk_functions omap2_clk_functions = {
 	.clk_register		= omap2_clk_register,
 	.clk_enable		= omap2_clk_enable,
 	.clk_disable		= omap2_clk_disable,
 	.clk_round_rate		= omap2_clk_round_rate,
+	.clk_round_rate_parent	= omap2_clk_round_rate_parent,
 	.clk_set_rate		= omap2_clk_set_rate,
 	.clk_set_parent		= omap2_clk_set_parent,
 	.clk_get_parent		= omap2_clk_get_parent,
 	.clk_disable_unused	= omap2_clk_disable_unused,
+#ifdef CONFIG_CPU_FREQ
+	.clk_init_cpufreq_table = omap2_clk_init_cpufreq_table,
+#endif
 };
 
 /*
@@ -760,13 +827,6 @@ int __init omap2_clk_init(void)
 	 */
 	clk_enable_init_clocks();
 
-	/* Avoid sleeping during omap2_clk_prepare_for_reboot() */
-	/* REVISIT: not yet ready for 343x */
-#if 0
-	vclk = clk_get(NULL, "virt_prcm_set");
-	sclk = clk_get(NULL, "sys_ck");
-#endif
 	return 0;
 }
-
-#endif
+#endif /* CONFIG_ARCH_OMAP3 */

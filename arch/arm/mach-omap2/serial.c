@@ -138,8 +138,6 @@ static inline void omap_uart_enable_clocks(struct omap_uart_state *uart)
 #ifdef CONFIG_PM
 #ifdef CONFIG_ARCH_OMAP3
 
-static int enable_off_mode; /* to be removed by full off-mode patches */
-
 static void omap_uart_save_context(struct omap_uart_state *uart)
 {
 	u16 lcr = 0;
@@ -432,6 +430,20 @@ static void omap_uart_idle_init(struct omap_uart_state *uart)
 	ret = request_irq(p->irq, omap_uart_interrupt, IRQF_SHARED,
 			  "serial idle", (void *)uart);
 	WARN_ON(ret);
+}
+
+void omap_uart_enable_irqs(int enable)
+{
+	int ret;
+	struct omap_uart_state *uart;
+
+	list_for_each_entry(uart, &uart_list, node) {
+		if (enable)
+			ret = request_irq(uart->p->irq, omap_uart_interrupt,
+				IRQF_SHARED, "serial idle", (void *)uart);
+		else
+			free_irq(uart->p->irq, (void *)uart);
+	}
 }
 
 static ssize_t sleep_timeout_show(struct kobject *kobj,

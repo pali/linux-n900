@@ -271,6 +271,12 @@ struct musb_hw_ep {
 	struct musb_qh		*in_qh;
 	struct musb_qh		*out_qh;
 
+	/* list of rx and tx qhs, control transfer needs only
+	 * one list thus only in_list is used for control.
+	 */
+	struct list_head        in_list;
+	struct list_head        out_list;
+
 	u8			rx_reinit;
 	u8			tx_reinit;
 #endif
@@ -300,12 +306,56 @@ static inline struct usb_request *next_out_request(struct musb_hw_ep *hw_ep)
 #endif
 }
 
+#define MUSB_MAX_EPS	16
+
+struct musb_ctx {
+	/* common register */
+	u16	intrtx;
+	u16	intrrx;
+	u16	intrtxe;
+	u16	intrrxe;
+
+	u8	intrusb;
+	u8	intrusbe;
+
+	u8	faddr;
+	u8	power;
+
+	u8	frame;
+	u8	index;
+	u8	testmode;
+	u8	devctl;
+	u8	misc;
+
+	/* indexed registers */
+	u16	txmaxp[MUSB_MAX_EPS];
+	u16	txcsr[MUSB_MAX_EPS];
+
+	u16	rxmaxp[MUSB_MAX_EPS];
+	u16	rxcsr[MUSB_MAX_EPS];
+
+	u16	csr0;		/* select ep0 to read/write this register */
+
+	u8	txtype[MUSB_MAX_EPS];
+	u8	txinterval[MUSB_MAX_EPS];
+
+	u8	rxtype[MUSB_MAX_EPS];
+	u8	rxinterval[MUSB_MAX_EPS];
+
+	u8	fifosize[MUSB_MAX_EPS];
+
+	u8	count0;
+	u8	type0;
+	u8	naklimit0;
+};
+
 /*
  * struct musb - Driver instance data.
  */
 struct musb {
 	/* device lock */
 	spinlock_t		lock;
+	struct mutex		mutex;
 	struct clk		*clock;
 	irqreturn_t		(*isr)(int, void *);
 	struct work_struct	irq_work;
@@ -328,9 +378,6 @@ struct musb {
 	 */
 	struct musb_hw_ep	*bulk_ep;
 
-	struct list_head	control;	/* of musb_qh */
-	struct list_head	in_bulk;	/* of musb_qh */
-	struct list_head	out_bulk;	/* of musb_qh */
 	struct musb_qh		*periodic[32];	/* tree of interrupt+iso */
 #endif
 
@@ -356,7 +403,7 @@ struct musb {
 	u16			int_rx;
 	u16			int_tx;
 
-	struct otg_transceiver	xceiv;
+	struct otg_transceiver	*xceiv;
 
 	int nIrq;
 	unsigned		irq_wake:1;
@@ -375,6 +422,8 @@ struct musb {
 	int			(*set_clock)(struct clk *clk, int is_active);
 
 	u8			min_power;	/* vbus for periph, in mA/2 */
+
+	unsigned		power_draw;	/* current power draw, gadget only */
 
 	bool			is_host;
 
@@ -420,6 +469,12 @@ struct musb {
 	unsigned		set_address:1;
 	unsigned		test_mode:1;
 	unsigned		softconnect:1;
+
+	/* true if this chip can enable SUSPENDM */
+	unsigned		suspendm:1;
+
+	/* true if we're using dma */
+	unsigned		use_dma:1;
 
 	u8			address;
 	u8			test_mode_nr;
@@ -549,5 +604,23 @@ extern int musb_platform_get_vbus_status(struct musb *musb);
 
 extern int __init musb_platform_init(struct musb *musb);
 extern int musb_platform_exit(struct musb *musb);
+
+/*-------------------------- ProcFS definitions ---------------------*/
+
+struct proc_dir_entry;
+
+#ifdef CONFIG_MUSB_PROC_FS
+extern struct proc_dir_entry *musb_debug_create(char *name, struct musb *data);
+extern void musb_debug_delete(char *name, struct musb *data);
+#else
+static inline struct proc_dir_entry *
+musb_debug_create(char *name, struct musb *data)
+{
+	return NULL;
+}
+static inline void musb_debug_delete(char *name, struct musb *data)
+{
+}
+#endif
 
 #endif	/* __MUSB_CORE_H__ */

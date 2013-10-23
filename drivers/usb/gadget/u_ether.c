@@ -116,7 +116,6 @@ static inline int qlen(struct usb_gadget *gadget)
 #undef DBG
 #undef VDBG
 #undef ERROR
-#undef INFO
 
 #define xprintk(d, level, fmt, args...) \
 	printk(level "%s: " fmt , (d)->net->name , ## args)
@@ -139,7 +138,7 @@ static inline int qlen(struct usb_gadget *gadget)
 
 #define ERROR(dev, fmt, args...) \
 	xprintk(dev , KERN_ERR , fmt , ## args)
-#define INFO(dev, fmt, args...) \
+#define ETH_INFO(dev, fmt, args...) \
 	xprintk(dev , KERN_INFO , fmt , ## args)
 
 /*-------------------------------------------------------------------------*/
@@ -789,8 +788,8 @@ int __init gether_setup(struct usb_gadget *g, u8 ethaddr[ETH_ALEN])
 	} else {
 		DECLARE_MAC_BUF(tmp);
 
-		INFO(dev, "MAC %s\n", print_mac(tmp, net->dev_addr));
-		INFO(dev, "HOST MAC %s\n", print_mac(tmp, dev->host_mac));
+		ETH_INFO(dev, "MAC %s\n", print_mac(tmp, net->dev_addr));
+		ETH_INFO(dev, "HOST MAC %s\n", print_mac(tmp, dev->host_mac));
 
 		the_dev = dev;
 	}

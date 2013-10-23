@@ -1,7 +1,7 @@
 /*
  * This file is part of hci_h4p bluetooth driver
  *
- * Copyright (C) 2005, 2006 Nokia Corporation.
+ * Copyright (C) 2005-2008 Nokia Corporation.
  *
  * Contact: Ville Tervo <ville.tervo@nokia.com>
  *
@@ -50,6 +50,8 @@ int hci_h4p_bc4_send_fw(struct hci_h4p_info *info,
 	struct sk_buff *skb;
 	unsigned int offset;
 	int retries, count, i;
+	unsigned long flags;
+	struct omap_bluetooth_config *config;
 
 	info->fw_error = 0;
 
@@ -59,21 +61,27 @@ int hci_h4p_bc4_send_fw(struct hci_h4p_info *info,
 	if (!skb)
 		return -ENOMSG;
 
+	config = info->dev->platform_data;
+	if (!config) {
+		kfree_skb(skb);
+		return -ENODEV;
+	}
+
 	/* Check if this is bd_address packet */
 	if (skb->data[15] == 0x01 && skb->data[16] == 0x00) {
 		offset = 21;
 		skb->data[offset + 1] = 0x00;
 		skb->data[offset + 5] = 0x00;
-		skb->data[offset + 7] = info->bdaddr[0];
-		skb->data[offset + 6] = info->bdaddr[1];
-		skb->data[offset + 4] = info->bdaddr[2];
-		skb->data[offset + 0] = info->bdaddr[3];
-		skb->data[offset + 3] = info->bdaddr[4];
-		skb->data[offset + 2] = info->bdaddr[5];
+		skb->data[offset + 7] = config->bd_addr[0];
+		skb->data[offset + 6] = config->bd_addr[1];
+		skb->data[offset + 4] = config->bd_addr[2];
+		skb->data[offset + 0] = config->bd_addr[3];
+		skb->data[offset + 3] = config->bd_addr[4];
+		skb->data[offset + 2] = config->bd_addr[5];
 	}
 
 	for (i = 0; i < 6; i++) {
-		if (info->bdaddr[i] != 0x00)
+		if (config->bd_addr[i] != 0x00)
 			break;
 	}
 
@@ -87,7 +95,10 @@ int hci_h4p_bc4_send_fw(struct hci_h4p_info *info,
 		NBT_DBG_FW("Sending firmware command %d\n", count);
 		init_completion(&info->fw_completion);
 		skb_queue_tail(&info->txq, skb);
-		tasklet_schedule(&info->tx_task);
+		spin_lock_irqsave(&info->lock, flags);
+		hci_h4p_outb(info, UART_IER, hci_h4p_inb(info, UART_IER) |
+							 UART_IER_THRI);
+		spin_unlock_irqrestore(&info->lock, flags);
 
 		skb = skb_dequeue(fw_queue);
 		if (!skb)
@@ -120,7 +131,7 @@ int hci_h4p_bc4_send_fw(struct hci_h4p_info *info,
 	hci_h4p_change_speed(info, BC4_MAX_BAUD_RATE);
 
 	if (hci_h4p_wait_for_cts(info, 1, 100)) {
-		dev_err(info->dev, "cts didn't go down after final speed change\n");
+		dev_err(info->dev, "cts didn't deassert after final speed\n");
 		return -ETIMEDOUT;
 	}
 

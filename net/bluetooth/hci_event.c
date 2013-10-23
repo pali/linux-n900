@@ -45,11 +45,6 @@
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
 
-#ifndef CONFIG_BT_HCI_CORE_DEBUG
-#undef  BT_DBG
-#define BT_DBG(D...)
-#endif
-
 /* Handle HCI Event packets */
 
 static void hci_cc_inquiry_cancel(struct hci_dev *hdev, struct sk_buff *skb)
@@ -489,6 +484,15 @@ static void hci_cc_read_local_features(struct hci_dev *hdev, struct sk_buff *skb
 	if (hdev->features[4] & LMP_EV5)
 		hdev->esco_type |= (ESCO_EV5);
 
+	if (hdev->features[5] & LMP_EDR_ESCO_2M)
+		hdev->esco_type |= (ESCO_2EV3);
+
+	if (hdev->features[5] & LMP_EDR_ESCO_3M)
+		hdev->esco_type |= (ESCO_3EV3);
+
+	if (hdev->features[5] & LMP_EDR_3S_ESCO)
+		hdev->esco_type |= (ESCO_2EV5 | ESCO_3EV5);
+
 	BT_DBG("%s features 0x%.2x%.2x%.2x%.2x%.2x%.2x%.2x%.2x", hdev->name,
 					hdev->features[0], hdev->features[1],
 					hdev->features[2], hdev->features[3],
@@ -533,6 +537,14 @@ static void hci_cc_read_bd_addr(struct hci_dev *hdev, struct sk_buff *skb)
 		bacpy(&hdev->bdaddr, &rp->bdaddr);
 
 	hci_req_complete(hdev, rp->status);
+}
+
+static void hci_cc_enable_dut_mode(struct hci_dev *hdev, struct sk_buff *skb)
+{
+	struct hci_rp_enable_dut_mode *rp = (void *) skb->data;
+
+	if (!rp->status)
+		set_bit(HCI_DUT_MODE, &hdev->flags);
 }
 
 static inline void hci_cs_inquiry(struct hci_dev *hdev, __u8 status)
@@ -919,7 +931,8 @@ static inline void hci_conn_complete_evt(struct hci_dev *hdev, struct sk_buff *s
 	if (ev->status) {
 		hci_proto_connect_cfm(conn, ev->status);
 		hci_conn_del(conn);
-	}
+	} else if (ev->link_type != ACL_LINK)
+		hci_proto_connect_cfm(conn, ev->status);
 
 unlock:
 	hci_dev_unlock(hdev);
@@ -1014,9 +1027,7 @@ static inline void hci_disconn_complete_evt(struct hci_dev *hdev, struct sk_buff
 	if (conn) {
 		conn->state = BT_CLOSED;
 
-		hci_conn_del_sysfs(conn);
-
-		hci_proto_disconn_ind(conn, ev->reason);
+		hci_proto_disconn_cfm(conn, ev->reason);
 		hci_conn_del(conn);
 	}
 
@@ -1292,6 +1303,10 @@ static inline void hci_cmd_complete_evt(struct hci_dev *hdev, struct sk_buff *sk
 
 	case HCI_OP_READ_BD_ADDR:
 		hci_cc_read_bd_addr(hdev, skb);
+		break;
+
+	case HCI_OP_ENABLE_DUT_MODE:
+		hci_cc_enable_dut_mode(hdev, skb);
 		break;
 
 	default:
@@ -1605,7 +1620,8 @@ static inline void hci_remote_ext_features_evt(struct hci_dev *hdev, struct sk_b
 
 		if (conn->state == BT_CONFIG) {
 			if (!ev->status && hdev->ssp_mode > 0 &&
-					conn->ssp_mode > 0 && conn->out) {
+					conn->ssp_mode > 0 && conn->out &&
+					conn->sec_level != BT_SECURITY_SDP) {
 				struct hci_cp_auth_requested cp;
 				cp.handle = ev->handle;
 				hci_send_cmd(hdev, HCI_OP_AUTH_REQUESTED,
@@ -1640,6 +1656,13 @@ static inline void hci_sync_conn_complete_evt(struct hci_dev *hdev, struct sk_bu
 			goto unlock;
 
 		conn->type = SCO_LINK;
+	}
+
+	if (conn->out && ev->status == 0x1c && conn->attempt < 2) {
+		conn->pkt_type = (hdev->esco_type & SCO_ESCO_MASK) |
+					(hdev->esco_type & EDR_ESCO_MASK);
+		hci_setup_sync(conn, conn->link->handle);
+		goto unlock;
 	}
 
 	if (!ev->status) {

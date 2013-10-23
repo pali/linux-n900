@@ -49,7 +49,9 @@
 
 #define OMAP34XX_MCBSP1_BASE	0x48074000
 #define OMAP34XX_MCBSP2_BASE	0x49022000
+#define OMAP34XX_MCBSP2_ST_BASE	0x49028000
 #define OMAP34XX_MCBSP3_BASE	0x49024000
+#define OMAP34XX_MCBSP3_ST_BASE	0x4902A000
 #define OMAP34XX_MCBSP4_BASE	0x49026000
 #define OMAP34XX_MCBSP5_BASE	0x48096000
 
@@ -130,8 +132,22 @@
 #define OMAP_MCBSP_REG_XCERG	0x74
 #define OMAP_MCBSP_REG_XCERH	0x78
 #define OMAP_MCBSP_REG_SYSCON	0x8C
+#define OMAP_MCBSP_REG_THRSH2	0x90
+#define OMAP_MCBSP_REG_THRSH1	0x94
+#define OMAP_MCBSP_REG_IRQST	0xA0
+#define OMAP_MCBSP_REG_IRQEN	0xA4
+#define OMAP_MCBSP_REG_WAKEUPEN	0xA8
 #define OMAP_MCBSP_REG_XCCR	0xAC
 #define OMAP_MCBSP_REG_RCCR	0xB0
+#define OMAP_MCBSP_REG_SSELCR	0xBC
+
+#define OMAP_ST_REG_REV		0x00
+#define OMAP_ST_REG_SYSCONFIG	0x10
+#define OMAP_ST_REG_IRQSTATUS	0x18
+#define OMAP_ST_REG_IRQENABLE	0x1C
+#define OMAP_ST_REG_SGAINCR	0x24
+#define OMAP_ST_REG_SFIRCR	0x28
+#define OMAP_ST_REG_SSELCR	0x2C
 
 #define AUDIO_MCBSP_DATAWRITE	(OMAP24XX_MCBSP2_BASE + OMAP_MCBSP_REG_DXR1)
 #define AUDIO_MCBSP_DATAREAD	(OMAP24XX_MCBSP2_BASE + OMAP_MCBSP_REG_DRR1)
@@ -245,7 +261,44 @@
 #define RDISABLE		0x0001
 
 /********************** McBSP SYSCONFIG bit definitions ********************/
+#define CLOCKACTIVITY(value)	((value)<<8)
+#define SIDLEMODE(value)	((value)<<3)
+#define ENAWAKEUP		0x0004
 #define SOFTRST			0x0002
+
+/********************** McBSP IRQSTATUS bit definitions ********************/
+#define IRQST_XRDY		(1<<10)
+#define IRQST_RRDY		(1<<3)
+
+/********************** McBSP WAKEUPEN bit definitions *********************/
+#define XEMPTYEOFEN		0x4000
+#define XRDYEN			0x0400
+#define XEOFEN			0x0200
+#define XFSXEN			0x0100
+#define XSYNCERREN		0x0080
+#define RRDYEN			0x0008
+#define REOFEN			0x0004
+#define RFSREN			0x0002
+#define RSYNCERREN		0x0001
+#define WAKEUPEN_ALL		(XRDYEN | RRDYEN)
+
+/********************** McBSP SSELCR bit definitions ***********************/
+#define SIDETONEEN		0x0400
+
+/********************** McBSP Sidetone SYSCONFIG bit definitions ***********/
+#define ST_AUTOIDLE		0x0001
+
+/********************** McBSP Sidetone SGAINCR bit definitions *************/
+#define ST_CH1GAIN(value)	((value<<16))	/* Bits 16:31 */
+#define ST_CH0GAIN(value)	(value)		/* Bits 0:15 */
+
+/********************** McBSP Sidetone SFIRCR bit definitions **************/
+#define ST_FIRCOEFF(value)	(value)		/* Bits 0:15 */
+
+/********************** McBSP Sidetone SSELCR bit definitions **************/
+#define ST_COEFFWRDONE		0x0004
+#define ST_COEFFWREN		0x0002
+#define ST_SIDETONEEN		0x0001
 
 /* we don't do multichannel for now */
 struct omap_mcbsp_reg_cfg {
@@ -340,7 +393,23 @@ struct omap_mcbsp_platform_data {
 	u8 dma_rx_sync, dma_tx_sync;
 	u16 rx_irq, tx_irq;
 	struct omap_mcbsp_ops *ops;
-	char const *clk_name;
+	char const **clk_names;
+	int num_clks;
+#ifdef CONFIG_ARCH_OMAP34XX
+	/* Sidetone block for McBSP 2 and 3 */
+	unsigned long phys_base_st;
+	u16 buffer_size;
+#endif
+};
+
+struct omap_mcbsp_st_data {
+	void __iomem *io_base_st;
+	int enabled;
+	int running;
+	s16 taps[128];	/* Sidetone filter coefficients */
+	int nr_taps;	/* Number of filter coefficients in use */
+	s16 ch0gain;
+	s16 ch1gain;
 };
 
 struct omap_mcbsp {
@@ -372,7 +441,14 @@ struct omap_mcbsp {
 	/* Protect the field .free, while checking if the mcbsp is in use */
 	spinlock_t lock;
 	struct omap_mcbsp_platform_data *pdata;
-	struct clk *clk;
+	struct clk **clks;
+	int num_clks;
+
+#ifdef CONFIG_ARCH_OMAP34XX
+	struct omap_mcbsp_st_data *st_data;
+	u16 max_tx_thres;
+	u16 max_rx_thres;
+#endif
 };
 extern struct omap_mcbsp **mcbsp_ptr;
 extern int omap_mcbsp_count;
@@ -381,10 +457,25 @@ int omap_mcbsp_init(void);
 void omap_mcbsp_register_board_cfg(struct omap_mcbsp_platform_data *config,
 					int size);
 void omap_mcbsp_config(unsigned int id, const struct omap_mcbsp_reg_cfg * config);
+#ifdef CONFIG_ARCH_OMAP34XX
+void omap_mcbsp_set_tx_threshold(unsigned int id, u16 threshold);
+void omap_mcbsp_set_rx_threshold(unsigned int id, u16 threshold);
+u16 omap_mcbsp_get_max_tx_threshold(unsigned int id);
+u16 omap_mcbsp_get_max_rx_threshold(unsigned int id);
+#else
+static inline void omap_mcbsp_set_tx_threshold(unsigned int id, u16 threshold)
+{ }
+static inline void omap_mcbsp_set_rx_threshold(unsigned int id, u16 threshold)
+{ }
+static inline u16 omap_mcbsp_get_max_tx_threshold(unsigned int id) { return 0; }
+static inline u16 omap_mcbsp_get_max_rx_threshold(unsigned int id) { return 0; }
+#endif
 int omap_mcbsp_request(unsigned int id);
 void omap_mcbsp_free(unsigned int id);
 void omap_mcbsp_start(unsigned int id);
 void omap_mcbsp_stop(unsigned int id);
+void omap_mcbsp_xmit_enable(unsigned int id, u8 enable);
+void omap_mcbsp_recv_enable(unsigned int id, u8 enable);
 void omap_mcbsp_xmit_word(unsigned int id, u32 word);
 u32 omap_mcbsp_recv_word(unsigned int id);
 

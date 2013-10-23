@@ -277,7 +277,7 @@ static struct twl4030_keypad_data omap2evm_kp_data = {
 
 static void __init omap2_evm_init_irq(void)
 {
-	omap2_init_common_hw(NULL);
+	omap2_init_common_hw(NULL, NULL, NULL, NULL);
 	omap_init_irq();
 	omap_gpio_init();
 	omap2evm_init_smc911x();

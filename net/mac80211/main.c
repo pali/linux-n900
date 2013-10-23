@@ -342,9 +342,12 @@ void ieee80211_bss_info_change_notify(struct ieee80211_sub_if_data *sdata,
 
 u32 ieee80211_reset_erp_info(struct ieee80211_sub_if_data *sdata)
 {
-	sdata->bss_conf.use_cts_prot = 0;
-	sdata->bss_conf.use_short_preamble = 0;
-	return BSS_CHANGED_ERP_CTS_PROT | BSS_CHANGED_ERP_PREAMBLE;
+	sdata->bss_conf.use_cts_prot = false;
+	sdata->bss_conf.use_short_preamble = false;
+	sdata->bss_conf.use_short_slot = false;
+	return BSS_CHANGED_ERP_CTS_PROT |
+	       BSS_CHANGED_ERP_PREAMBLE |
+	       BSS_CHANGED_ERP_SLOT;
 }
 
 void ieee80211_tx_status_irqsafe(struct ieee80211_hw *hw,
@@ -765,7 +768,16 @@ struct ieee80211_hw *ieee80211_alloc_hw(size_t priv_data_len,
 
 	spin_lock_init(&local->key_lock);
 
+	spin_lock_init(&local->queue_stop_reason_lock);
+
 	INIT_DELAYED_WORK(&local->scan_work, ieee80211_scan_work);
+
+	INIT_WORK(&local->dynamic_ps_enable_work,
+		  ieee80211_dynamic_ps_enable_work);
+	INIT_WORK(&local->dynamic_ps_disable_work,
+		  ieee80211_dynamic_ps_disable_work);
+	setup_timer(&local->dynamic_ps_timer,
+		    ieee80211_dynamic_ps_timer, (unsigned long) local);
 
 	sta_info_init(local);
 

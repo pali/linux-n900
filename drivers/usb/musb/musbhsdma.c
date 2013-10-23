@@ -90,9 +90,9 @@ static struct dma_channel *dma_channel_allocate(struct dma_controller *c,
 			channel = &(musb_channel->channel);
 			channel->private_data = musb_channel;
 			channel->status = MUSB_DMA_STATUS_FREE;
-			channel->max_len = 0x10000;
-			/* Tx => mode 1; Rx => mode 0 */
-			channel->desired_mode = transmit;
+			channel->max_len = 0x7fffffff;
+			/* always use mode1 */
+			channel->desired_mode = true;
 			channel->actual_len = 0;
 			break;
 		}
@@ -183,8 +183,9 @@ static int dma_channel_abort(struct dma_channel *channel)
 	struct musb_dma_channel *musb_channel = channel->private_data;
 	void __iomem *mbase = musb_channel->controller->base;
 
-	u8 bchannel = musb_channel->idx;
+	u32 addr = 0;
 	u16 csr;
+	u8 bchannel = musb_channel->idx;
 
 	if (channel->status == MUSB_DMA_STATUS_BUSY) {
 		if (musb_channel->transmit) {
@@ -208,6 +209,8 @@ static int dma_channel_abort(struct dma_channel *channel)
 			musb_writew(mbase,
 				MUSB_EP_OFFSET(musb_channel->epnum, MUSB_RXCSR),
 				csr);
+			addr = musb_read_hsdma_addr(mbase, bchannel);
+			channel->actual_len = addr - musb_channel->start_addr;
 		}
 
 		musb_writew(mbase,
@@ -357,7 +360,7 @@ dma_controller_create(struct musb *musb, void __iomem *base)
 	controller->controller.channel_abort = dma_channel_abort;
 
 	if (request_irq(irq, dma_controller_irq, IRQF_DISABLED,
-			musb->controller->bus_id, &controller->controller)) {
+			dev_name(musb->controller), &controller->controller)) {
 		dev_err(dev, "request_irq %d failed!\n", irq);
 		dma_controller_destroy(&controller->controller);
 

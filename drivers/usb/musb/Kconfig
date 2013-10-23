@@ -11,6 +11,8 @@ config USB_MUSB_HDRC
 	depends on (USB || USB_GADGET) && HAVE_CLK
 	depends on !SUPERH
 	select TWL4030_USB if MACH_OMAP_3430SDP
+	select TWL4030_USB if MACH_NOKIA_RX51
+	select USB_OTG_UTILS
 	tristate 'Inventra Highspeed Dual Role Controller (TI, ADI, ...)'
 	help
 	  Say Y here if your system has a dual role high speed USB
@@ -178,3 +180,11 @@ config	USB_MUSB_DEBUG
 	  This enables musb debugging. To set the logging level use the debug
 	  module parameter. Starting at level 3, per-transfer (urb, usb_request,
 	  packet, or dma transfer) tracing may kick in.
+
+config MUSB_PROC_FS
+	depends on USB_MUSB_HDRC && PROC_FS
+	bool "Enabled old musb procfs interface"
+	default n
+	help
+	  This enables the old musb procfs entry. Ideally this would move to a userland application
+	  talking to musb via usbfs and issueing the correct control messages.

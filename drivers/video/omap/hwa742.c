@@ -25,9 +25,9 @@
 #include <linux/fb.h>
 #include <linux/delay.h>
 #include <linux/clk.h>
+#include <linux/omapfb.h>
 
 #include <mach/dma.h>
-#include <mach/omapfb.h>
 #include <mach/hwa742.h>
 
 #define HWA742_REV_CODE_REG       0x0

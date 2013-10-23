@@ -591,8 +591,8 @@ u32 omap2_clksel_round_rate_div(struct clk *clk, unsigned long target_rate,
 	const struct clksel_rate *clkr;
 	u32 last_div = 0;
 
-	printk(KERN_INFO "clock: clksel_round_rate_div: %s target_rate %ld\n",
-	       clk->name, target_rate);
+	pr_debug("clock: clksel_round_rate_div: %s target_rate %ld\n",
+		 clk->name, target_rate);
 
 	*new_div = 1;
 
@@ -606,7 +606,7 @@ u32 omap2_clksel_round_rate_div(struct clk *clk, unsigned long target_rate,
 
 		/* Sanity check */
 		if (clkr->div <= last_div)
-			printk(KERN_ERR "clock: clksel_rate table not sorted "
+			pr_err("clock: clksel_rate table not sorted "
 			       "for clock %s", clk->name);
 
 		last_div = clkr->div;
@@ -618,7 +618,7 @@ u32 omap2_clksel_round_rate_div(struct clk *clk, unsigned long target_rate,
 	}
 
 	if (!clkr->div) {
-		printk(KERN_ERR "clock: Could not find divisor for target "
+		pr_err("clock: Could not find divisor for target "
 		       "rate %ld for clock %s parent %s\n", target_rate,
 		       clk->name, clk->parent->name);
 		return ~0;
@@ -626,8 +626,8 @@ u32 omap2_clksel_round_rate_div(struct clk *clk, unsigned long target_rate,
 
 	*new_div = clkr->div;
 
-	printk(KERN_INFO "clock: new_div = %d, new_rate = %ld\n", *new_div,
-	       (clk->parent->rate / clkr->div));
+	pr_debug("clock: new_div = %d, new_rate = %ld\n", *new_div,
+		 (clk->parent->rate / clkr->div));
 
 	return (clk->parent->rate / clkr->div);
 }
@@ -871,6 +871,36 @@ struct clk *omap2_clk_get_parent(struct clk *clk)
 	return clk->parent;
 }
 
+/**
+ * omap2_clk_round_rate_parent - return the rate for @clk if parent were changed
+ * @clk: struct clk that may change parents
+ * @new_parent: the struct clk that @clk may be reparented under
+ *
+ * Given a struct clk @clk and a new parent struct clk @new_parent,
+ * determine what @clk's rate would be after the reparent operation.
+ * Returns the new clock rate or -EINVAL upon error.
+ */
+long omap2_clk_round_rate_parent(struct clk *clk, struct clk *new_parent)
+{
+	u32 field_val, parent_div;
+	long rate;
+
+	if (!clk->clksel || !new_parent)
+		return -EINVAL;
+
+	parent_div = _omap2_clksel_get_src_field(new_parent, clk, &field_val);
+	if (!parent_div)
+		return -EINVAL;
+
+	/* CLKSEL clocks follow their parents' rates, divided by a divisor */
+	rate = new_parent->rate;
+	if (parent_div > 0)
+		rate /= parent_div;
+
+	return rate;
+}
+
+
 /* DPLL rate rounding code */
 
 /**
@@ -1082,6 +1112,8 @@ void omap2_clk_disable_unused(struct clk *clk)
 		omap2_clk_disable(clk);
 	} else
 		_omap2_clk_disable(clk);
+	if (clk->clkdm.ptr != NULL)
+		pwrdm_clkdm_state_switch(clk->clkdm.ptr);
 }
 #endif
 

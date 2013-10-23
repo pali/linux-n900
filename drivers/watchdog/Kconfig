@@ -233,6 +233,13 @@ config ORION5X_WATCHDOG
 	  To compile this driver as a module, choose M here: the
 	  module will be called orion5x_wdt.
 
+config TWL4030_WATCHDOG
+       tristate "TWL4030 Watchdog"
+       depends on TWL4030_CORE
+       help
+         Support for TI TWL4030 watchdog.  Say 'Y' here to enable the
+         watchdog timer support for TWL4030 chips.
+
 # ARM26 Architecture
 
 # AVR32 Architecture

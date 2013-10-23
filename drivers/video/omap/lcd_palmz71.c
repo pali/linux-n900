@@ -23,8 +23,7 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/io.h>
-
-#include <mach/omapfb.h>
+#include <linux/omapfb.h>
 
 static int palmz71_panel_init(struct lcd_panel *panel,
 			      struct omapfb_device *fbdev)

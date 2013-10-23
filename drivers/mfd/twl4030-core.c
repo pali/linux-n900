@@ -104,6 +104,19 @@
 #define twl_has_usb()	false
 #endif
 
+#if defined(CONFIG_LEDS_TWL4030_VIBRA) || \
+	defined(CONFIG_LEDS_TWL4030_VIBRA_MODULE)
+#define twl_has_vibra()        true
+#else
+#define twl_has_vibra()        false
+#endif
+
+#if defined(CONFIG_TWL4030_WATCHDOG) || \
+	defined(CONFIG_TWL4030_WATCHDOG_MODULE)
+#define twl_has_watchdog()        true
+#else
+#define twl_has_watchdog()        false
+#endif
 
 /* Triton Core internal information (BEGIN) */
 
@@ -529,6 +542,18 @@ add_children(struct twl4030_platform_data *pdata, unsigned long features)
 
 		/* we need to connect regulators to this transceiver */
 		usb_transceiver = child;
+	}
+
+	if (twl_has_vibra()) {
+		child = add_child(0, "twl4030_vibra", NULL, 0, true, 0, 0);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
+	}
+
+	if (twl_has_watchdog()) {
+		child = add_child(0, "twl4030_wdt", NULL, 0, false, 0, 0);
+		if (IS_ERR(child))
+			return PTR_ERR(child);
 	}
 
 	if (twl_has_regulator()) {

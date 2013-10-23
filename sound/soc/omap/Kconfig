@@ -14,6 +14,16 @@ config SND_OMAP_SOC_N810
 	help
 	  Say Y if you want to add support for SoC audio on Nokia N810.
 
+config SND_OMAP_SOC_RX51
+	tristate "SoC Audio support for Nokia RX51"
+	depends on SND_OMAP_SOC && MACH_NOKIA_RX51
+	select OMAP_MCBSP
+	select SND_OMAP_SOC_MCBSP
+	select SND_SOC_TLV320AIC3X
+	select TPA6130A2
+	help
+	  Say Y if you want to add support for SoC audio on Nokia RX51.
+
 config SND_OMAP_SOC_OMAP3_BEAGLE
 	tristate "SoC Audio support for OMAP3 Beagle"
 	depends on SND_OMAP_SOC && MACH_OMAP3_BEAGLE

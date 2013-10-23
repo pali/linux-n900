@@ -35,6 +35,8 @@
 #ifndef __MUSB_REGS_H__
 #define __MUSB_REGS_H__
 
+#include "isp1704.h"
+
 #define MUSB_EP0_FIFOSIZE	64	/* This is non-configurable */
 
 /*
@@ -71,6 +73,11 @@
 #define MUSB_DEVCTL_HM		0x04
 #define MUSB_DEVCTL_HR		0x02
 #define MUSB_DEVCTL_SESSION	0x01
+
+/* ULPI_REG_CONTROL */
+#define ULPI_REG_REQ		(1 << 0)
+#define ULPI_REG_CMPLT		(1 << 1)
+#define ULPI_RDN_WR		(1 << 2)
 
 /* TESTMODE */
 #define MUSB_TEST_FORCE_HOST	0x80
@@ -224,6 +231,7 @@
 #define MUSB_FRAME		0x0C
 #define MUSB_INDEX		0x0E	/* 8 bit */
 #define MUSB_TESTMODE		0x0F	/* 8 bit */
+#define MUSB_MISC		0x61	/* 8 bit */
 
 /* Get offset for a given FIFO from musb->mregs */
 #ifdef	CONFIG_USB_TUSB6010
@@ -246,6 +254,16 @@
 
 /* REVISIT: vctrl/vstatus: optional vendor utmi+phy register at 0x68 */
 #define MUSB_HWVERS		0x6C	/* 8 bit */
+
+/* ULPI Registers */
+#define ULPI_VBUS_CONTROL	0x70	/* 8 bit */
+#define ULPI_CARKIT_CONTROL	0x71	/* 8 bit */
+#define ULPI_INT_MASK		0x72	/* 8 bit */
+#define ULPI_INT_SRC		0x73	/* 8 bit */
+#define ULPI_REG_DATA		0x74	/* 8 bit */
+#define ULPI_REG_ADDR		0x75	/* 8 bit */
+#define ULPI_REG_CONTROL	0x76	/* 8 bit */
+#define ULPI_RAW_DATA		0x77	/* 8 bit */
 
 #define MUSB_EPINFO		0x78	/* 8 bit */
 #define MUSB_RAMINFO		0x79	/* 8 bit */
@@ -300,6 +318,52 @@
 
 #define MUSB_BUSCTL_OFFSET(_epnum, _offset) \
 	(0x80 + (8*(_epnum)) + (_offset))
+
+static inline u8 musb_ulpi_readb(void __iomem *addr, u8 offset)
+{
+	int	i = 0;
+	u8	r;
+
+	musb_writeb(addr, ULPI_REG_ADDR, offset);
+	musb_writeb(addr, ULPI_REG_CONTROL, ULPI_REG_REQ | ULPI_RDN_WR);
+
+	while (!(musb_readb(addr, ULPI_REG_CONTROL) & ULPI_REG_CMPLT)) {
+		i++;
+		if (i == 10000) {
+			DBG(3, "ULPI read timed out\n");
+			return 0;
+		}
+
+	}
+	r = musb_readb(addr, ULPI_REG_CONTROL);
+	r &= ~ULPI_REG_CMPLT;
+	musb_writeb(addr, ULPI_REG_CONTROL, r);
+
+	return musb_readb(addr, ULPI_REG_DATA);
+}
+
+static inline void musb_ulpi_writeb(void __iomem *addr,
+	u8 offset, u8 data)
+{
+	int	i = 0;
+	u8	r = 0;
+
+	musb_writeb(addr, ULPI_REG_ADDR, offset);
+	musb_writeb(addr, ULPI_REG_DATA, data);
+	musb_writeb(addr, ULPI_REG_CONTROL, ULPI_REG_REQ);
+
+	while(!(musb_readb(addr, ULPI_REG_CONTROL) & ULPI_REG_CMPLT)) {
+		i++;
+		if (i == 10000) {
+			DBG(3, "ULPI write timed out\n");
+			return;
+		}
+	}
+
+	r = musb_readb(addr, ULPI_REG_CONTROL);
+	r &= ~ULPI_REG_CMPLT;
+	musb_writeb(addr, ULPI_REG_CONTROL, r);
+}
 
 static inline void musb_write_txfifosz(void __iomem *mbase, u8 c_size)
 {
@@ -446,6 +510,16 @@ static inline void  musb_write_txhubport(void __iomem *mbase, u8 epnum,
 #define clk_put(clock)		do {} while (0)
 #define clk_enable(clock)	do {} while (0)
 #define clk_disable(clock)	do {} while (0)
+
+static inline u8 musb_ulpi_readb(void __iomem *addr, u8 offset)
+{
+	return 0
+}
+
+static inline void musb_ulpi_writeb(void __iomem *addr,
+	u8 offset, u8 data)
+{
+}
 
 static inline void musb_write_txfifosz(void __iomem *mbase, u8 c_size)
 {

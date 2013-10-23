@@ -31,12 +31,12 @@
 
 inline void hci_h4p_outb(struct hci_h4p_info *info, unsigned int offset, u8 val)
 {
-	outb(val, info->uart_base + (offset << 2));
+	__raw_writeb(val, info->uart_base + (offset << 2));
 }
 
 inline u8 hci_h4p_inb(struct hci_h4p_info *info, unsigned int offset)
 {
-	return inb(info->uart_base + (offset << 2));
+	return __raw_readb(info->uart_base + (offset << 2));
 }
 
 void hci_h4p_set_rts(struct hci_h4p_info *info, int active)
@@ -54,14 +54,11 @@ void hci_h4p_set_rts(struct hci_h4p_info *info, int active)
 int hci_h4p_wait_for_cts(struct hci_h4p_info *info, int active,
 			 int timeout_ms)
 {
-	int okay;
 	unsigned long timeout;
+	int state;
 
-	okay = 0;
 	timeout = jiffies + msecs_to_jiffies(timeout_ms);
 	for (;;) {
-		int state;
-
 		state = hci_h4p_inb(info, UART_MSR) & UART_MSR_CTS;
 		if (active) {
 			if (state)
@@ -72,6 +69,7 @@ int hci_h4p_wait_for_cts(struct hci_h4p_info *info, int active,
 		}
 		if (time_after(jiffies, timeout))
 			return -ETIMEDOUT;
+		msleep(1);
 	}
 }
 
@@ -143,22 +141,32 @@ int hci_h4p_reset_uart(struct hci_h4p_info *info)
 int hci_h4p_init_uart(struct hci_h4p_info *info)
 {
 	int err;
+	u8 mcr, efr;
 
 	err = hci_h4p_reset_uart(info);
 	if (err < 0)
 		return err;
 
 	/* Enable and setup FIFO */
-	hci_h4p_outb(info, UART_LCR, UART_LCR_WLEN8);
 	hci_h4p_outb(info, UART_OMAP_MDR1, 0x00); /* Make sure UART mode is enabled */
-	hci_h4p_outb(info, UART_OMAP_SCR, 0x80);
+
+	hci_h4p_outb(info, UART_LCR, 0xbf);
+	efr = hci_h4p_inb(info, UART_EFR);
 	hci_h4p_outb(info, UART_EFR, UART_EFR_ECB);
+	hci_h4p_outb(info, UART_LCR, UART_LCR_DLAB);
+	mcr = hci_h4p_inb(info, UART_MCR);
 	hci_h4p_outb(info, UART_MCR, UART_MCR_TCRTLR);
-	hci_h4p_outb(info, UART_TI752_TLR, 0x1f);
-	hci_h4p_outb(info, UART_TI752_TCR, 0xef);
 	hci_h4p_outb(info, UART_FCR, UART_FCR_ENABLE_FIFO | UART_FCR_CLEAR_RCVR |
-		     UART_FCR_CLEAR_XMIT | UART_FCR_R_TRIG_00);
+			UART_FCR_CLEAR_XMIT | (3 << 6) | (0 << 4));
+	hci_h4p_outb(info, UART_LCR, 0xbf);
+	hci_h4p_outb(info, UART_TI752_TLR, 0xe1);
+	hci_h4p_outb(info, UART_TI752_TCR, 0xef);
+	hci_h4p_outb(info, UART_EFR, efr);
+	hci_h4p_outb(info, UART_LCR, UART_LCR_DLAB);
+	hci_h4p_outb(info, UART_MCR, 0x00);
+	hci_h4p_outb(info, UART_LCR, UART_LCR_WLEN8);
 	hci_h4p_outb(info, UART_IER, UART_IER_RDI);
+	hci_h4p_outb(info, UART_OMAP_SYSC, (1 << 0) | (1 << 2) | (2 << 3));
 
 	return 0;
 }

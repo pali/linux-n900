@@ -48,6 +48,7 @@ struct twl4030_madc_data {
 };
 
 static struct twl4030_madc_data *the_madc;
+static int twl4030_madc_set_current_generator(struct twl4030_madc_data *madc, int chan, int on);
 
 static
 const struct twl4030_madc_conversion_method twl4030_conversion_methods[] = {
@@ -246,39 +247,53 @@ static inline void twl4030_madc_start_conversion(struct twl4030_madc_data *madc,
 	}
 }
 
-static void twl4030_madc_wait_conversion_ready_ms(
+static int twl4030_madc_wait_conversion_ready(
 		struct twl4030_madc_data *madc,
-		u8 *time, u8 status_reg)
+		unsigned int timeout_ms, u8 status_reg)
 {
-	u8 reg = 0;
+	unsigned long timeout;
 
+	timeout = jiffies + msecs_to_jiffies(timeout_ms);
 	do {
-		msleep(1);
-		(*time)--;
+		u8 reg;
+
 		reg = twl4030_madc_read(madc, status_reg);
-	} while (((reg & TWL4030_MADC_BUSY) && !(reg & TWL4030_MADC_EOC_SW)) &&
-		  (*time != 0));
+		if (!(reg & TWL4030_MADC_BUSY) && (reg & TWL4030_MADC_EOC_SW))
+			return 0;
+	} while (!time_after(jiffies, timeout));
+
+	return -EAGAIN;
 }
 
 int twl4030_madc_conversion(struct twl4030_madc_request *req)
 {
 	const struct twl4030_madc_conversion_method *method;
-	u8 wait_time, ch_msb, ch_lsb;
+	u8 ch_msb, ch_lsb;
 	int ret;
 
 	if (unlikely(!req))
 		return -EINVAL;
 
+	mutex_lock(&the_madc->lock);
+
 	/* Do we have a conversion request ongoing */
-	if (the_madc->requests[req->method].active)
-		return -EBUSY;
+	if (the_madc->requests[req->method].active) {
+		ret = -EBUSY;
+		goto out;
+	}
+
+	/*
+	 * Due to an HW bug which TI did not explain yet, the current generator
+	 * seems to be disabled, while it reports that it is ebabled (e.g.,
+	 * when inserting a USB cable while the HFOSC is disabled.
+	 */
+	twl4030_madc_set_current_generator(the_madc, 0, 0);
+	twl4030_madc_set_current_generator(the_madc, 0, 1);
 
 	ch_msb = (req->channels >> 8) & 0xff;
 	ch_lsb = req->channels & 0xff;
 
 	method = &twl4030_conversion_methods[req->method];
-
-	mutex_lock(&the_madc->lock);
 
 	/* Select channels to be converted */
 	twl4030_madc_write(the_madc, method->sel + 1, ch_msb);
@@ -308,12 +323,10 @@ int twl4030_madc_conversion(struct twl4030_madc_request *req)
 	the_madc->requests[req->method].active = 1;
 
 	/* Wait until conversion is ready (ctrl register returns EOC) */
-	wait_time = 50;
-	twl4030_madc_wait_conversion_ready_ms(the_madc,
-			&wait_time, method->ctrl);
-	if (wait_time == 0) {
+	ret = twl4030_madc_wait_conversion_ready(the_madc, 5, method->ctrl);
+	if (ret) {
 		dev_dbg(the_madc->dev, "conversion timeout!\n");
-		ret = -EAGAIN;
+		the_madc->requests[req->method].active = 0;
 		goto out;
 	}
 
@@ -366,8 +379,8 @@ static int twl4030_madc_set_power(struct twl4030_madc_data *madc, int on)
 	return 0;
 }
 
-static int twl4030_madc_ioctl(struct inode *inode, struct file *filp,
-			      unsigned int cmd, unsigned long arg)
+static long twl4030_madc_ioctl(struct file *filp, unsigned int cmd,
+			       unsigned long arg)
 {
 	struct twl4030_madc_user_parms par;
 	int val, ret;
@@ -413,12 +426,12 @@ static int twl4030_madc_ioctl(struct inode *inode, struct file *filp,
 
 static struct file_operations twl4030_madc_fileops = {
 	.owner = THIS_MODULE,
-	.ioctl = twl4030_madc_ioctl
+	.unlocked_ioctl = twl4030_madc_ioctl
 };
 
 static struct miscdevice twl4030_madc_device = {
 	.minor = MISC_DYNAMIC_MINOR,
-	.name = "twl4030-madc",
+	.name = "twl4030-adc",
 	.fops = &twl4030_madc_fileops
 };
 

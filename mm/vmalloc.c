@@ -1085,6 +1085,7 @@ struct vm_struct *get_vm_area(unsigned long size, unsigned long flags)
 	return __get_vm_area_node(size, flags, VMALLOC_START, VMALLOC_END,
 				-1, GFP_KERNEL, __builtin_return_address(0));
 }
+EXPORT_SYMBOL_GPL(get_vm_area);
 
 struct vm_struct *get_vm_area_caller(unsigned long size, unsigned long flags,
 				void *caller)

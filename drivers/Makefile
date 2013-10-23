@@ -18,6 +18,9 @@ obj-$(CONFIG_ARM_AMBA)		+= amba/
 
 obj-$(CONFIG_XEN)		+= xen/
 
+# regulators early, since some subsystems rely on them to initialize
+obj-$(CONFIG_REGULATOR)		+= regulator/
+
 # char/ comes before serial/ etc so that the VT console is the boot-time
 # default.
 obj-y				+= char/
@@ -36,10 +39,11 @@ obj-$(CONFIG_FB_INTEL)          += video/intelfb/
 obj-$(CONFIG_SERIO)		+= input/serio/
 obj-y				+= serial/
 obj-$(CONFIG_PARPORT)		+= parport/
-obj-y				+= base/ block/ misc/ mfd/ net/ media/ cbus/
+obj-y				+= base/ block/ misc/ mfd/ net/ media/
 obj-y				+= i2c/
 obj-y				+= cbus/
 obj-$(CONFIG_ARCH_OMAP)		+= dsp/dspgateway/
+obj-$(CONFIG_MPU_BRIDGE)	+= dsp/bridge/
 obj-$(CONFIG_NUBUS)		+= nubus/
 obj-$(CONFIG_ATM)		+= atm/
 obj-y				+= macintosh/
@@ -105,5 +109,4 @@ obj-$(CONFIG_PPC_PS3)		+= ps3/
 obj-$(CONFIG_OF)		+= of/
 obj-$(CONFIG_SSB)		+= ssb/
 obj-$(CONFIG_VIRTIO)		+= virtio/
-obj-$(CONFIG_REGULATOR)		+= regulator/
 obj-$(CONFIG_STAGING)		+= staging/

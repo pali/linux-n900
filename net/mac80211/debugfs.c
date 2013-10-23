@@ -190,6 +190,64 @@ DEBUGFS_DEVSTATS_FILE(dot11FCSErrorCount);
 DEBUGFS_DEVSTATS_FILE(dot11RTSSuccessCount);
 
 
+static ssize_t rssisignal_read(struct file *file, char __user *user_buf,
+			    size_t count, loff_t *ppos)
+{
+	struct ieee80211_local *local = file->private_data;
+	char buf[100];
+	int res;
+
+	res = scnprintf(buf, sizeof(buf), "empty\n");
+	return simple_read_from_buffer(user_buf, count, ppos, buf, res);
+}
+
+static ssize_t rssisignal_write(struct file *file, const char __user *user_buf,
+				size_t count, loff_t *ppos)
+{
+	struct ieee80211_local *local = file->private_data;
+	struct ieee80211_sub_if_data *sdata;
+	union iwreq_data wrqu;
+	char buf[100], *endp;
+	size_t buf_len;
+	int val;
+
+	memset(buf, 0, sizeof(buf));
+	buf_len = min(count, sizeof(buf) - 1);
+
+	if (copy_from_user(buf, user_buf, buf_len))
+		return -EFAULT;
+
+	val = strict_strtoul(buf, &endp, 10);
+	if (endp == buf)
+		return -EFAULT;
+
+	switch (val) {
+	case 0:
+		buf_len = snprintf(buf, sizeof(buf), "LOWSIGNAL");
+		break;
+	case 1:
+	default:
+		buf_len = snprintf(buf, sizeof(buf), "HIGHSIGNAL");
+		break;
+	}
+
+	/* we should hold the RTNL here so can safely walk the list */
+	sdata = list_first_entry(&local->interfaces,
+				 struct ieee80211_sub_if_data, list);
+
+	memset(&wrqu, 0, sizeof(wrqu));
+	wrqu.data.length = buf_len;
+	wireless_send_event(sdata->dev, IWEVCUSTOM, &wrqu, buf);
+
+	return count;
+}
+
+static const struct file_operations rssisignal_ops = {
+	.read = rssisignal_read,
+	.write = rssisignal_write,
+	.open = mac80211_open_file_generic,
+};
+
 void debugfs_hw_add(struct ieee80211_local *local)
 {
 	struct dentry *phyd = local->hw.wiphy->debugfsdir;
@@ -210,6 +268,10 @@ void debugfs_hw_add(struct ieee80211_local *local)
 	DEBUGFS_ADD(long_retry_limit);
 	DEBUGFS_ADD(total_ps_buffered);
 	DEBUGFS_ADD(wep_iv);
+
+	local->debugfs.rssisignal = debugfs_create_file("rssisignal", 0600,
+							phyd,
+							local, &rssisignal_ops);
 
 	statsd = debugfs_create_dir("statistics", phyd);
 	local->debugfs.statistics = statsd;

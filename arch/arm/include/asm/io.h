@@ -75,6 +75,12 @@ extern void __iomem * __arm_ioremap(unsigned long, size_t, unsigned int);
 extern void __iounmap(volatile void __iomem *addr);
 
 /*
+ * external interface to remap single page with appropriate type
+ */
+extern int ioremap_page(unsigned long virt, unsigned long phys,
+			unsigned int mtype);
+
+/*
  * Bad read/write accesses...
  */
 extern void __readwrite_bug(const char *fn);

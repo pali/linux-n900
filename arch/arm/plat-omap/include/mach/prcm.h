@@ -30,6 +30,11 @@ void cm_write_mod_reg(u32 val, s16 module, u16 idx);
 u32 cm_read_mod_reg(s16 module, u16 idx);
 u32 cm_rmw_mod_reg_bits(u32 mask, u32 bits, s16 module, s16 idx);
 
+#define START_PADCONF_SAVE 0x2
+#define PADCONF_SAVE_DONE  0x1
+
+void omap3_prcm_save_context(void);
+void omap3_prcm_restore_context(void);
 #endif
 
 

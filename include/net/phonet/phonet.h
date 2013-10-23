@@ -46,7 +46,7 @@ static inline struct pn_sock *pn_sk(struct sock *sk)
 
 extern const struct proto_ops phonet_dgram_ops;
 
-struct sock *pn_find_sock_by_sa(const struct sockaddr_pn *sa);
+struct sock *pn_find_sock_by_sa(struct net *net, const struct sockaddr_pn *sa);
 void phonet_get_local_port_range(int *min, int *max);
 void pn_sock_hash(struct sock *sk);
 void pn_sock_unhash(struct sock *sk);
@@ -105,7 +105,6 @@ void phonet_proto_unregister(int protocol, struct phonet_protocol *pp);
 
 int phonet_sysctl_init(void);
 void phonet_sysctl_exit(void);
-void phonet_netlink_register(void);
 int isi_register(void);
 void isi_unregister(void);
 

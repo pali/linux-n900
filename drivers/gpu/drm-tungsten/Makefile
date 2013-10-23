@@ -1,0 +1,76 @@
+#
+# Makefile for the drm device driver.  This driver provides support for the
+# Direct Rendering Infrastructure (DRI) in XFree86 4.1.0 and higher.
+#
+# Based on David Woodhouse's mtd build.
+#
+# $XFree86: xc/programs/Xserver/hw/xfree86/os-support/linux/drm/kernel/Makefile.kernel,v 1.18 2003/08/16 17:59:17 dawes Exp $
+#
+
+EXTRA_CFLAGS += -D__linux__
+
+drm-objs    := drm_auth.o drm_bufs.o drm_context.o drm_dma.o drm_drawable.o \
+		drm_drv.o drm_fops.o drm_ioctl.o drm_irq.o \
+		drm_lock.o drm_memory.o drm_proc.o drm_stub.o drm_vm.o \
+		drm_sysfs.o drm_pci.o drm_agpsupport.o drm_scatter.o \
+		drm_memory_debug.o ati_pcigart.o drm_sman.o \
+		drm_hashtab.o drm_mm.o drm_object.o drm_compat.o \
+	        drm_fence.o drm_ttm.o drm_bo.o drm_bo_move.o drm_bo_lock.o \
+		drm_regman.o drm_vm_nopage_compat.o drm_gem.o
+pvr2d-objs  := pvr2d_drv.o
+tdfx-objs   := tdfx_drv.o
+r128-objs   := r128_drv.o r128_cce.o r128_state.o r128_irq.o
+mga-objs    := mga_drv.o mga_dma.o mga_state.o mga_warp.o mga_irq.o
+i810-objs   := i810_drv.o i810_dma.o
+i915-objs   := i915_drv.o i915_dma.o i915_irq.o i915_mem.o i915_fence.o \
+		i915_buffer.o i915_compat.o i915_execbuf.o i915_suspend.o \
+		i915_opregion.o \
+		i915_gem.o i915_gem_debug.o i915_gem_proc.o i915_gem_tiling.o
+nouveau-objs := nouveau_drv.o nouveau_state.o nouveau_fifo.o nouveau_mem.o \
+		nouveau_object.o nouveau_irq.o nouveau_notifier.o nouveau_swmthd.o \
+		nouveau_sgdma.o nouveau_dma.o nouveau_bo.o nouveau_fence.o \
+		nv04_timer.o \
+		nv04_mc.o nv40_mc.o nv50_mc.o \
+		nv04_fb.o nv10_fb.o nv40_fb.o \
+		nv04_fifo.o nv10_fifo.o nv40_fifo.o nv50_fifo.o \
+		nv04_graph.o nv10_graph.o nv20_graph.o \
+		nv40_graph.o nv50_graph.o \
+		nv04_instmem.o nv50_instmem.o
+radeon-objs := radeon_drv.o radeon_cp.o radeon_state.o radeon_mem.o radeon_irq.o r300_cmdbuf.o
+sis-objs    := sis_drv.o sis_mm.o
+ffb-objs    := ffb_drv.o ffb_context.o
+savage-objs := savage_drv.o savage_bci.o savage_state.o
+via-objs    := via_irq.o via_drv.o via_map.o via_mm.o via_dma.o via_verifier.o \
+		via_video.o via_dmablit.o via_fence.o via_buffer.o
+mach64-objs := mach64_drv.o mach64_dma.o mach64_irq.o mach64_state.o
+nv-objs := nv_drv.o
+xgi-objs    := xgi_cmdlist.o xgi_drv.o xgi_fb.o xgi_misc.o xgi_pcie.o \
+		xgi_fence.o
+
+ifeq ($(CONFIG_COMPAT),y)
+drm-objs    += drm_ioc32.o
+radeon-objs += radeon_ioc32.o
+mga-objs    += mga_ioc32.o
+r128-objs   += r128_ioc32.o
+i915-objs   += i915_ioc32.o
+nouveau-objs += nouveau_ioc32.o
+xgi-objs    += xgi_ioc32.o
+endif
+
+obj-m					+= drm.o
+obj-$(CONFIG_DRM_TUNGSTEN_PVR2D)	+= pvr2d.o
+obj-$(CONFIG_DRM_TUNGSTEN_TDFX)		+= tdfx.o
+obj-$(CONFIG_DRM_TUNGSTEN_R128)		+= r128.o
+obj-$(CONFIG_DRM_TUNGSTEN_RADEON)	+= radeon.o
+obj-$(CONFIG_DRM_TUNGSTEN_MGA)		+= mga.o
+obj-$(CONFIG_DRM_TUNGSTEN_I810)		+= i810.o
+obj-$(CONFIG_DRM_TUNGSTEN_I915)		+= i915.o
+obj-$(CONFIG_DRM_TUNGSTEN_SIS)		+= sis.o
+obj-$(CONFIG_DRM_TUNGSTEN_FFB)		+= ffb.o
+obj-$(CONFIG_DRM_TUNGSTEN_SAVAGE)	+= savage.o
+obj-$(CONFIG_DRM_TUNGSTEN_VIA)		+= via.o
+obj-$(CONFIG_DRM_TUNGSTEN_MACH64)	+= mach64.o
+obj-$(CONFIG_DRM_TUNGSTEN_NV)		+= nv.o
+obj-$(CONFIG_DRM_TUNGSTEN_NOUVEAU)	+= nouveau.o
+obj-$(CONFIG_DRM_TUNGSTEN_XGI)		+= xgi.o
+

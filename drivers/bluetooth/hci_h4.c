@@ -46,11 +46,6 @@
 
 #include "hci_uart.h"
 
-#ifndef CONFIG_BT_HCIUART_DEBUG
-#undef  BT_DBG
-#define BT_DBG( A... )
-#endif
-
 #define VERSION "1.2"
 
 struct h4_struct {
@@ -107,8 +102,7 @@ static int h4_close(struct hci_uart *hu)
 
 	skb_queue_purge(&h4->txq);
 
-	if (h4->rx_skb)
-		kfree_skb(h4->rx_skb);
+	kfree_skb(h4->rx_skb);
 
 	hu->priv = NULL;
 	kfree(h4);

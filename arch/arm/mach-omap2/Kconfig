@@ -53,6 +53,27 @@ config MACH_NOKIA_N810_WIMAX
 	depends on MACH_NOKIA_N800
 	select MACH_NOKIA_N810
 
+config MACH_NOKIA_RX51
+	bool "Nokia RX-51 board"
+	depends on ARCH_OMAP3 && ARCH_OMAP34XX
+	select VIDEO_ET8EK8 if VIDEO_OMAP3 && VIDEO_HELPER_CHIPS_AUTO
+	select VIDEO_AD5820 if VIDEO_OMAP3 && VIDEO_HELPER_CHIPS_AUTO
+	select VIDEO_ADP1653 if VIDEO_OMAP3 && VIDEO_HELPER_CHIPS_AUTO
+	select VIDEO_SMIA_SENSOR if VIDEO_OMAP3 && VIDEO_HELPER_CHIPS_AUTO
+	select VIDEO_MACH_RX51 if VIDEO_OMAP3 && VIDEO_HELPER_CHIPS_AUTO
+
+config VIDEO_MACH_RX51
+	tristate "Nokia RX-51 board camera"
+	depends on MACH_NOKIA_RX51 && VIDEO_DEV && TWL4030_CORE
+
+config VIDEO_MACH_RX51_OLD_I2C
+	bool "Camera related devices on I2C bus 2 instead of 3"
+	default n
+
+config MACH_NOKIA_RX71
+	bool "Nokia RX-71 board"
+	depends on MACH_NOKIA_RX51
+
 config MACH_OMAP2_TUSB6010
 	bool
 	depends on ARCH_OMAP2 && ARCH_OMAP2420
@@ -132,3 +153,9 @@ config MACH_OVERO
 config MACH_OMAP3_PANDORA
 	bool "OMAP3 Pandora"
 	depends on ARCH_OMAP3 && ARCH_OMAP34XX
+
+config RX51_CAMERA_BUTTON
+	tristate "RX51 Camera Button"
+	depends on MACH_NOKIA_RX51
+	help
+	  Say Y here if you want to support the rx51 camera button

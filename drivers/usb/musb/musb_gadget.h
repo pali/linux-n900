@@ -77,6 +77,9 @@ struct musb_ep {
 
 	/* true if lock must be dropped but req_list may not be advanced */
 	u8				busy;
+
+	/* true if endpoint is stalled */
+	unsigned			stalled:1;
 };
 
 static inline struct musb_ep *to_musb_ep(struct usb_ep *ep)

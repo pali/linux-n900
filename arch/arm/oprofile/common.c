@@ -133,6 +133,11 @@ int __init oprofile_arch_init(struct oprofile_operations *ops)
 
 	ops->backtrace = arm_backtrace;
 
+/* comes first, so that it can be overrided by a better implementation */
+#ifdef CONFIG_OPROFILE_OMAP_GPTIMER
+	spec = &op_omap_gptimer_spec;
+#endif
+
 #ifdef CONFIG_CPU_XSCALE
 	spec = &op_xscale_spec;
 #endif
@@ -144,11 +149,11 @@ int __init oprofile_arch_init(struct oprofile_operations *ops)
 #ifdef CONFIG_OPROFILE_MPCORE
 	spec = &op_mpcore_spec;
 #endif
-
+/*
 #ifdef CONFIG_OPROFILE_ARMV7
 	spec = &op_armv7_spec;
 #endif
-
+*/
 	if (spec) {
 		ret = spec->init();
 		if (ret < 0)

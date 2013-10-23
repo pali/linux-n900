@@ -188,12 +188,16 @@
 #define omap_writel(v,a)	__raw_writel(v, IO_ADDRESS(a))
 
 struct omap_sdrc_params;
+struct omap_opp;
 
 extern void omap1_map_common_io(void);
 extern void omap1_init_common_hw(void);
 
 extern void omap2_map_common_io(void);
-extern void omap2_init_common_hw(struct omap_sdrc_params *sp);
+extern void omap2_init_common_hw(struct omap_sdrc_params *sp,
+				 struct omap_opp *mpu_opps,
+				 struct omap_opp *dsp_opps,
+				 struct omap_opp *l3_opps);
 
 #define __arch_ioremap(p,s,t)	omap_ioremap(p,s,t)
 #define __arch_iounmap(v)	omap_iounmap(v)

@@ -1,0 +1,36 @@
+#
+# DSP Bridge Driver Support
+#
+
+menuconfig MPU_BRIDGE
+	tristate "DSP Bridge driver"
+	default n
+	help
+	  DSP/BIOS Bridge is designed for platforms that contain a GPP and
+	  one or more attached DSPs.  The GPP is considered the master or
+	  "host" processor, and the attached DSPs are processing resources
+	  that can be utilized by applications and drivers running on the GPP.
+
+config BRIDGE_DVFS
+	bool "Enable Bridge Dynamic Voltage and Frequency Scaling (DVFS)"
+	depends on MPU_BRIDGE && OMAP_PM_SRF
+	default n
+	help
+	  DVFS allows DSP Bridge to initiate the operating point change to
+	  scale the chip voltage and frequency in order to match the
+	  performance and power consumption to the current processing
+	  requirements.
+
+config BRIDGE_MEMPOOL_SIZE
+	hex "Physical memory pool size (Byte)"
+	depends on MPU_BRIDGE
+	default 0x600000
+	help
+	  Allocate specified size of memory at booting time to avoid allocation
+	  failure under heavy memory fragmentation after some use time.
+
+config BRIDGE_DEBUG
+	bool "DSP Bridge Debug Support"
+	depends on MPU_BRIDGE
+	help
+	  Say Y to enable Bridge debugging capabilities

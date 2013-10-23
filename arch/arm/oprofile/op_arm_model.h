@@ -24,6 +24,8 @@ struct op_arm_model_spec {
 extern struct op_arm_model_spec op_xscale_spec;
 #endif
 
+extern struct op_arm_model_spec op_omap_gptimer_spec;
+
 extern struct op_arm_model_spec op_armv6_spec;
 extern struct op_arm_model_spec op_mpcore_spec;
 extern struct op_arm_model_spec op_armv7_spec;

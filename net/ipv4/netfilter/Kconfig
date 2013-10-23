@@ -407,5 +407,29 @@ config IP_NF_ARP_MANGLE
 
 endif # IP_NF_ARPTABLES
 
+config IP_NF_HB
+	tristate "IP heartbeat support (EXPERIMENTAL)"
+	depends on NETFILTER_ADVANCED
+	---help---
+	  IP heartbeat support will let you queue TCP keepalive messages.
+	  The idea is to delay outgoing TCP keepalive (heartbeat) messages
+	  until they are sent when triggered by user space daemon (iphbd).
+	  The keepalives are also sent if we receive packets from the network
+	  or if the keepalive queue is full. The feature is used in wireless
+	  networks so that we do not wake up radio all the time and also save
+	  battery when keepalives are synchronized. The keepalive queueing
+	  is only activated if iphbd is running and active, default behaviour
+	  is to pass keepalives as is.
+
+if IP_NF_HB
+
+config	IP_NF_HB_DEBUG
+	bool "IP heartbeat debugging"
+	---help---
+	  Say Y here if you want to get additional messages useful in
+	  debugging the IP heartbeat code.
+
+endif # IP_HB
+
 endmenu
 

@@ -44,11 +44,6 @@
 
 #include "cmtp.h"
 
-#ifndef CONFIG_BT_CMTP_DEBUG
-#undef  BT_DBG
-#define BT_DBG(D...)
-#endif
-
 #define VERSION "1.0"
 
 static DECLARE_RWSEM(cmtp_session_sem);
@@ -131,8 +126,7 @@ static inline void cmtp_add_msgpart(struct cmtp_session *session, int id, const 
 
 	session->reassembly[id] = nskb;
 
-	if (skb)
-		kfree_skb(skb);
+	kfree_skb(skb);
 }
 
 static inline int cmtp_recv_frame(struct cmtp_session *session, struct sk_buff *skb)

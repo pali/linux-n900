@@ -3,6 +3,7 @@ unifdef-y += i810_drm.h
 unifdef-y += i830_drm.h
 unifdef-y += i915_drm.h
 unifdef-y += mga_drm.h
+unifdef-y += pvr2d_drm.h
 unifdef-y += r128_drm.h
 unifdef-y += radeon_drm.h
 unifdef-y += sis_drm.h

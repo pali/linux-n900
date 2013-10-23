@@ -43,10 +43,13 @@
 #include <mach/gpmc.h>
 #include <mach/nand.h>
 #include <mach/mux.h>
+#include <mach/omap-pm.h>
+#include <mach/clock.h>
 
 #include "twl4030-generic-scripts.h"
 #include "mmc-twl4030.h"
-
+#include "pm.h"
+#include "omap3-opp.h"
 
 #define GPMC_CS0_BASE  0x60
 #define GPMC_CS_SIZE   0x30
@@ -233,7 +236,8 @@ static int __init omap3_beagle_i2c_init(void)
 
 static void __init omap3_beagle_init_irq(void)
 {
-	omap2_init_common_hw(mt46h32m32lf6_sdrc_params);
+	omap2_init_common_hw(mt46h32m32lf6_sdrc_params, omap3_mpu_rate_table,
+			     omap3_dsp_rate_table, omap3_l3_rate_table);
 	omap_init_irq();
 	omap_gpio_init();
 }

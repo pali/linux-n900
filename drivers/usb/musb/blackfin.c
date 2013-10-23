@@ -143,7 +143,7 @@ static void musb_conn_timer_handler(unsigned long _musb)
 	u16 val;
 
 	spin_lock_irqsave(&musb->lock, flags);
-	switch (musb->xceiv.state) {
+	switch (musb->xceiv->state) {
 	case OTG_STATE_A_IDLE:
 	case OTG_STATE_A_WAIT_BCON:
 		/* Start a new session */
@@ -154,7 +154,7 @@ static void musb_conn_timer_handler(unsigned long _musb)
 		val = musb_readw(musb->mregs, MUSB_DEVCTL);
 		if (!(val & MUSB_DEVCTL_BDEVICE)) {
 			gpio_set_value(musb->config->gpio_vrsel, 1);
-			musb->xceiv.state = OTG_STATE_A_WAIT_BCON;
+			musb->xceiv->state = OTG_STATE_A_WAIT_BCON;
 		} else {
 			gpio_set_value(musb->config->gpio_vrsel, 0);
 
@@ -232,6 +232,7 @@ void musb_platform_set_mode(struct musb *musb, u8 musb_mode)
 
 int __init musb_platform_init(struct musb *musb)
 {
+	struct otg_transceiver xceiv;
 
 	/*
 	 * Rev 1.0 BF549 EZ-KITs require PE7 to be high for both DEVICE
@@ -285,15 +286,23 @@ int __init musb_platform_init(struct musb *musb)
 				EP5_RX_ENA | EP6_RX_ENA | EP7_RX_ENA);
 	SSYNC();
 
+	memset(&xceiv, 0, sizeof(xceiv));
+	xceiv.label = "blackfin";
+	xceiv.dev = musb->controller;
+
 	if (is_host_enabled(musb)) {
 		musb->board_set_vbus = bfin_set_vbus;
 		setup_timer(&musb_conn_timer,
 			musb_conn_timer_handler, (unsigned long) musb);
 	}
 	if (is_peripheral_enabled(musb))
-		musb->xceiv.set_power = bfin_set_power;
+		xceiv.set_power = bfin_set_power;
+
+	otg_set_transceiver(&xceiv);
+	musb->xceiv = &xceiv;
 
 	musb->isr = blackfin_interrupt;
+	musb->suspendm = true;
 
 	return 0;
 }

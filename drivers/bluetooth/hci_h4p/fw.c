@@ -46,6 +46,9 @@ static int hci_h4p_open_firmware(struct hci_h4p_info *info,
 	case BT_CHIP_CSR:
 		err = request_firmware(fw_entry, "bc4fw.bin", info->dev);
 		break;
+	case BT_CHIP_BCM:
+		err = request_firmware(fw_entry, "bcmfw.bin", info->dev);
+		break;
 	default:
 		dev_err(info->dev, "Invalid chip type\n");
 		*fw_entry = NULL;
@@ -72,12 +75,18 @@ static int hci_h4p_read_fw_cmd(struct hci_h4p_info *info, struct sk_buff **skb,
 		return 0;
 	}
 
+	if (fw_pos + 2 > fw_entry->size) {
+		dev_err(info->dev, "Corrupted firmware image 1\n");
+		return -EMSGSIZE;
+	}
+
 	cmd_len = fw_entry->data[fw_pos++];
-	if (!cmd_len)
+	cmd_len += fw_entry->data[fw_pos++] << 8;
+	if (cmd_len == 0)
 		return 0;
 
 	if (fw_pos + cmd_len > fw_entry->size) {
-		dev_err(info->dev, "Corrupted firmware image\n");
+		dev_err(info->dev, "Corrupted firmware image 2\n");
 		return -EMSGSIZE;
 	}
 
@@ -126,6 +135,9 @@ int hci_h4p_send_fw(struct hci_h4p_info *info, struct sk_buff_head *fw_queue)
 	case BT_CHIP_TI:
 		err = hci_h4p_brf6150_send_fw(info, fw_queue);
 		break;
+	case BT_CHIP_BCM:
+		err = hci_h4p_bcm_send_fw(info, fw_queue);
+		break;
 	default:
 		dev_err(info->dev, "Don't know how to send firmware\n");
 		err = -EINVAL;
@@ -142,6 +154,9 @@ void hci_h4p_parse_fw_event(struct hci_h4p_info *info, struct sk_buff *skb)
 		break;
 	case BT_CHIP_TI:
 		hci_h4p_brf6150_parse_fw_event(info, skb);
+		break;
+	case BT_CHIP_BCM:
+		hci_h4p_bcm_parse_fw_event(info, skb);
 		break;
 	default:
 		dev_err(info->dev, "Don't know how to parse fw event\n");

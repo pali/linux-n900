@@ -4,4 +4,4 @@
 
 obj-$(CONFIG_BT_HCIH4P)		+= hci_h4p.o
 
-hci_h4p-objs := core.o fw.o uart.o sysfs.o fw-ti.o fw-csr.o
+hci_h4p-objs := core.o fw.o uart.o fw-ti.o fw-csr.o fw-bcm.o

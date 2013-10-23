@@ -1,0 +1,84 @@
+#
+# Copyright(c) 2008 Imagination Technologies Ltd. All rights reserved.
+# 
+# This program is free software; you can redistribute it and/or modify it
+# under the terms and conditions of the GNU General Public License,
+# version 2, as published by the Free Software Foundation.
+# 
+# This program is distributed in the hope it will be useful but, except 
+# as otherwise stated in writing, without any warranty; without even the 
+# implied warranty of merchantability or fitness for a particular purpose. 
+# See the GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License along with
+# this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
+# 
+# The full GNU General Public License is included in this distribution in
+# the file called "COPYING".
+#
+# Contact Information:
+# Imagination Technologies Ltd. <gpl-support@imgtec.com>
+# Home Park Estate, Kings Langley, Herts, WD4 8LZ, UK 
+# 
+#
+#
+
+export EURASIAROOT ?= $(shell cd ../../../../../;echo $$PWD)
+
+# Determine PVR_BUILD_DIR automatically from the directory from which we're
+# invoked.  The use of $(notdir ..) here actually strips away the leading
+# components of the current directory here.  We export this so it's passed to
+# sub-makes automatically.
+#
+export PVR_BUILD_DIR = $(notdir $(shell cd ../; echo $$PWD))
+
+
+# Include target specific variables.
+#
+include $(EURASIAROOT)/eurasiacon/build/linux/$(PVR_BUILD_DIR)/makefile.shared_conf
+
+# Include target core specific variables here - this expands on the above settings.
+#
+include $(EURASIAROOT)/eurasiacon/build/linux/$(PVR_BUILD_DIR)/makefile.core
+
+# Include and setup generic build variables.
+#
+include $(EURASIAROOT)/eurasiacon/build/linux/makefile.shared_conf
+
+
+KBUILD_SUBDIRS = \
+	$(EURASIAROOT)/services4/srvkm/env/linux \
+	$(EXTRA_SUBDIRS)
+
+ifeq ($(PDUMP),1)
+KBUILD_SUBDIRS += $(EURASIAROOT)/tools/intern/debug/dbgdriv/linux
+endif
+
+
+ifeq ($(SILENT),)
+all %:
+	set -x; \
+	for dir in $(KBUILD_SUBDIRS); \
+	do \
+	if test -e $$dir;\
+	then \
+		$(MAKE) $(MAKE_OPT) -C $$dir/kbuild \
+			-f $(EURASIAROOT)/eurasiacon/build/linux/kbuild/Makefile.kbuild_subdir $@ || \
+		exit 1; \
+	fi \
+	done
+else
+all %:
+	$(SILENT)for dir in $(KBUILD_SUBDIRS); \
+	do \
+	if test -e $$dir;\
+	then \
+		echo +$$dir; \
+		$(MAKE) $(MAKE_OPT) -C $$dir/kbuild \
+			-f $(EURASIAROOT)/eurasiacon/build/linux/kbuild/Makefile.kbuild_subdir $@ || \
+		exit 1; \
+	fi \
+	done
+endif
+

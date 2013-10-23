@@ -448,6 +448,7 @@ static struct clk_functions omap2_clk_functions = {
 	.clk_enable		= omap2_clk_enable,
 	.clk_disable		= omap2_clk_disable,
 	.clk_round_rate		= omap2_clk_round_rate,
+	.clk_round_rate_parent	= omap2_clk_round_rate_parent,
 	.clk_set_rate		= omap2_clk_set_rate,
 	.clk_set_parent		= omap2_clk_set_parent,
 	.clk_get_parent		= omap2_clk_get_parent,

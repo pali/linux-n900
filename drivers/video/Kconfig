@@ -7,7 +7,7 @@ menu "Graphics support"
 
 source "drivers/char/agp/Kconfig"
 
-source "drivers/gpu/drm/Kconfig"
+source "drivers/gpu/Kconfig"
 
 config VGASTATE
        tristate
@@ -2116,6 +2116,7 @@ config FB_PRE_INIT_FB
 	  the bootloader.
 
 source "drivers/video/omap/Kconfig"
+source "drivers/video/omap2/Kconfig"
 
 source "drivers/video/backlight/Kconfig"
 source "drivers/video/display/Kconfig"

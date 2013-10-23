@@ -432,11 +432,11 @@ static ssize_t tsl2563_adc0_show(struct device *dev,
 
 	ret = tsl2563_get_adc(chip);
 	if (ret)
-		return ret;
+		goto out;
 
 	ret = snprintf(buf, PAGE_SIZE, "%d\n", chip->data0);
+out:
 	mutex_unlock(&chip->lock);
-
 	return ret;
 }
 
@@ -450,11 +450,11 @@ static ssize_t tsl2563_adc1_show(struct device *dev,
 
 	ret = tsl2563_get_adc(chip);
 	if (ret)
-		return ret;
+		goto out;
 
 	ret = snprintf(buf, PAGE_SIZE, "%d\n", chip->data1);
+out:
 	mutex_unlock(&chip->lock);
-
 	return ret;
 }
 

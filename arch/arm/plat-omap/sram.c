@@ -122,9 +122,15 @@ void __init omap_detect_sram(void)
 	if (cpu_class_is_omap2()) {
 		if (is_sram_locked()) {
 			if (cpu_is_omap34xx()) {
-				omap_sram_base = OMAP3_SRAM_PUB_VA;
-				omap_sram_start = OMAP3_SRAM_PUB_PA;
-				omap_sram_size = 0x8000; /* 32K */
+				if (omap_type() == OMAP2_DEVICE_TYPE_GP) {
+					omap_sram_base = OMAP3_SRAM_PUB_VA;
+					omap_sram_start = OMAP3_SRAM_PUB_PA;
+					omap_sram_size = 0x8000; /* 32K */
+				} else {
+					omap_sram_base = OMAP3_SRAM_PUB_VA;
+					omap_sram_start = OMAP3_SRAM_PUB_PA;
+					omap_sram_size = 0x7000; /* 28K */
+				}
 			} else {
 				omap_sram_base = OMAP2_SRAM_PUB_VA;
 				omap_sram_start = OMAP2_SRAM_PUB_PA;
@@ -201,6 +207,15 @@ void __init omap_map_sram(void)
 		base = OMAP3_SRAM_PA;
 		base = ROUND_DOWN(base, PAGE_SIZE);
 		omap_sram_io_desc[0].pfn = __phys_to_pfn(base);
+
+		/*
+		 * SRAM must be marked as non-cached on OMAP3 since the
+		 * CORE DPLL M2 divider change code (in SRAM) runs with the
+		 * SDRAM controller disabled, and if it is marked cached,
+		 * the ARM may attempt to write cache lines back to SDRAM
+		 * which will cause the system to hang.
+		 */
+		omap_sram_io_desc[0].type = MT_MEMORY_NONCACHED;
 	}
 
 	omap_sram_io_desc[0].length = 1024 * 1024;	/* Use section desc */
@@ -356,34 +371,39 @@ static inline int omap243x_sram_init(void)
 static u32 (*_omap3_sram_configure_core_dpll)(u32 sdrc_rfr_ctrl,
 					      u32 sdrc_actim_ctrla,
 					      u32 sdrc_actim_ctrlb,
-					      u32 m2);
+					      u32 m2, u32 unlock_dll,
+					      u32 f, u32 sdrc_mr, u32 inc);
 u32 omap3_configure_core_dpll(u32 sdrc_rfr_ctrl, u32 sdrc_actim_ctrla,
-			      u32 sdrc_actim_ctrlb, u32 m2)
+			      u32 sdrc_actim_ctrlb, u32 m2, u32 unlock_dll,
+			      u32 f, u32 sdrc_mr, u32 inc)
  {
 	if (!_omap3_sram_configure_core_dpll)
 		omap_sram_error();
 
 	return _omap3_sram_configure_core_dpll(sdrc_rfr_ctrl,
 					       sdrc_actim_ctrla,
-					       sdrc_actim_ctrlb, m2);
+					       sdrc_actim_ctrlb, m2,
+					       unlock_dll, f, sdrc_mr, inc);
  }
 
-/* REVISIT: Should this be same as omap34xx_sram_init() after off-idle? */
-void restore_sram_functions(void)
+#ifdef CONFIG_PM
+void omap3_sram_restore_context(void)
 {
 	omap_sram_ceil = omap_sram_base + omap_sram_size;
 
 	_omap3_sram_configure_core_dpll =
 		omap_sram_push(omap3_sram_configure_core_dpll,
 			       omap3_sram_configure_core_dpll_sz);
+	omap_push_sram_idle();
 }
+#endif /* CONFIG_PM */
 
 int __init omap3_sram_init(void)
 {
 	_omap3_sram_configure_core_dpll =
 		omap_sram_push(omap3_sram_configure_core_dpll,
 			       omap3_sram_configure_core_dpll_sz);
-
+	omap_push_sram_idle();
 	return 0;
 }
 #else

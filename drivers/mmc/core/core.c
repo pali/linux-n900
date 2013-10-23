@@ -663,6 +663,22 @@ void mmc_rescan(struct work_struct *work)
 
 	mmc_bus_get(host);
 
+	/* if there is a card registered */
+	if (host->bus_ops != NULL) {
+
+		if (host->bus_ops->detect && !host->bus_dead) {
+
+			/* check whether the card is still present */
+			host->bus_ops->detect(host);
+
+			/* release the bus and update bus status in case
+			   the card was removed */
+			mmc_bus_put(host);
+			mmc_bus_get(host);
+		}
+	}
+
+	/* if there is no card registered */
 	if (host->bus_ops == NULL) {
 		/*
 		 * Only we can add a new handler, so it's safe to
@@ -712,12 +728,8 @@ void mmc_rescan(struct work_struct *work)
 
 		mmc_release_host(host);
 		mmc_power_off(host);
-	} else {
-		if (host->bus_ops->detect && !host->bus_dead)
-			host->bus_ops->detect(host);
-
+	} else
 		mmc_bus_put(host);
-	}
 out:
 	if (host->caps & MMC_CAP_NEEDS_POLL)
 		mmc_schedule_delayed_work(&host->detect, HZ);
@@ -738,6 +750,7 @@ void mmc_stop_host(struct mmc_host *host)
 	spin_unlock_irqrestore(&host->lock, flags);
 #endif
 
+	cancel_delayed_work(&host->detect);
 	mmc_flush_scheduled_work();
 
 	mmc_bus_get(host);
@@ -765,6 +778,7 @@ void mmc_stop_host(struct mmc_host *host)
  */
 int mmc_suspend_host(struct mmc_host *host, pm_message_t state)
 {
+	cancel_delayed_work(&host->detect);
 	mmc_flush_scheduled_work();
 
 	mmc_bus_get(host);
