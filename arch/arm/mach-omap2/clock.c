@@ -28,9 +28,11 @@
 #include <mach/clockdomain.h>
 #include <mach/sram.h>
 #include <mach/cpu.h>
+#include <mach/prcm.h>
+#include <mach/control.h>
 #include <asm/div64.h>
 
-#include "memory.h"
+#include <mach/sdrc.h>
 #include "sdrc.h"
 #include "clock.h"
 #include "prm.h"
@@ -46,7 +48,7 @@
 #define DPLL_MIN_DIVIDER		1
 
 /* Possible error results from _dpll_test_mult */
-#define DPLL_MULT_UNDERFLOW		(1 << 0)
+#define DPLL_MULT_UNDERFLOW		-1
 
 /*
  * Scale factor to mitigate roundoff errors in DPLL rate rounding.
@@ -59,11 +61,132 @@
 #define DPLL_ROUNDING_VAL		((DPLL_SCALE_BASE / 2) * \
 					 (DPLL_SCALE_FACTOR / DPLL_SCALE_BASE))
 
+/* DPLL valid Fint frequency band limits - from 34xx TRM Section 4.7.6.2 */
+#define DPLL_FINT_BAND1_MIN		750000
+#define DPLL_FINT_BAND1_MAX		2100000
+#define DPLL_FINT_BAND2_MIN		7500000
+#define DPLL_FINT_BAND2_MAX		21000000
+
+/* _dpll_test_fint() return codes */
+#define DPLL_FINT_UNDERFLOW		-1
+#define DPLL_FINT_INVALID		-2
+
+/* Bitmask to isolate the register type of clk.enable_reg */
+#define PRCM_REGTYPE_MASK		0xf0
+/* various CM register type options */
+#define CM_FCLKEN_REGTYPE		0x00
+#define CM_ICLKEN_REGTYPE		0x10
+#define CM_IDLEST_REGTYPE		0x20
+
 u8 cpu_mask;
 
 /*-------------------------------------------------------------------------
  * OMAP2/3 specific clock functions
  *-------------------------------------------------------------------------*/
+
+/*
+ * _omap2_clk_read_reg - read a clock register
+ * @clk: struct clk *
+ *
+ * Given a struct clk *, returns the value of the clock's register.
+ */
+static u32 _omap2_clk_read_reg(u16 reg_offset, struct clk *clk)
+{
+	if (clk->prcm_mod & CLK_REG_IN_SCM)
+		return omap_ctrl_readl(reg_offset);
+	else if (clk->prcm_mod & CLK_REG_IN_PRM)
+		return prm_read_mod_reg(clk->prcm_mod & PRCM_MOD_ADDR_MASK,
+					reg_offset);
+	else
+		return cm_read_mod_reg(clk->prcm_mod, reg_offset);
+}
+
+/*
+ * _omap2_clk_write_reg - write a clock's register
+ * @v: value to write to the clock's enable_reg
+ * @clk: struct clk *
+ *
+ * Given a register value @v and struct clk * @clk, writes the value of @v to
+ * the clock's enable register.  No return value.
+ */
+static void _omap2_clk_write_reg(u32 v, u16 reg_offset, struct clk *clk)
+{
+	if (clk->prcm_mod & CLK_REG_IN_SCM)
+		omap_ctrl_writel(v, reg_offset);
+	else if (clk->prcm_mod & CLK_REG_IN_PRM)
+		prm_write_mod_reg(v, clk->prcm_mod & PRCM_MOD_ADDR_MASK,
+				  reg_offset);
+	else
+		cm_write_mod_reg(v, clk->prcm_mod, reg_offset);
+}
+
+/**
+ * _omap2xxx_clk_commit - commit clock parent/rate changes in hardware
+ * @clk: struct clk *
+ *
+ * If @clk has the DELAYED_APP flag set, meaning that parent/rate changes
+ * don't take effect until the VALID_CONFIG bit is written, write the
+ * VALID_CONFIG bit and wait for the write to complete.  No return value.
+ */
+static void _omap2xxx_clk_commit(struct clk *clk)
+{
+	if (!cpu_is_omap24xx())
+		return;
+
+	if (!(clk->flags & DELAYED_APP))
+		return;
+
+	prm_write_mod_reg(OMAP24XX_VALID_CONFIG, OMAP24XX_GR_MOD,
+			  OMAP24XX_PRCM_CLKCFG_CTRL_OFFSET);
+	/* OCP barrier */
+	prm_read_mod_reg(OMAP24XX_GR_MOD, OMAP24XX_PRCM_CLKCFG_CTRL_OFFSET);
+}
+
+/*
+ * _dpll_test_fint - test whether an Fint value is valid for the DPLL
+ * @clk: DPLL struct clk to test
+ * @n: divider value (N) to test
+ *
+ * Tests whether a particular divider @n will result in a valid DPLL
+ * internal clock frequency Fint. See the 34xx TRM 4.7.6.2 "DPLL Jitter
+ * Correction".  Returns 0 if OK, -1 if the enclosing loop can terminate
+ * (assuming that it is counting N upwards), or -2 if the enclosing loop
+ * should skip to the next iteration (again assuming N is increasing).
+ */
+static int _dpll_test_fint(struct clk *clk, u8 n)
+{
+	struct dpll_data *dd;
+	long fint;
+	int ret = 0;
+
+	dd = clk->dpll_data;
+
+	/* DPLL divider must result in a valid jitter correction val */
+	fint = clk->parent->rate / (n + 1);
+	if (fint < DPLL_FINT_BAND1_MIN) {
+
+		pr_debug("rejecting n=%d due to Fint failure, "
+			 "lowering max_divider\n", n);
+		dd->max_divider = n;
+		ret = DPLL_FINT_UNDERFLOW;
+
+	} else if (fint > DPLL_FINT_BAND1_MAX &&
+		   fint < DPLL_FINT_BAND2_MIN) {
+
+		pr_debug("rejecting n=%d due to Fint failure\n", n);
+		ret = DPLL_FINT_INVALID;
+
+	} else if (fint > DPLL_FINT_BAND2_MAX) {
+
+		pr_debug("rejecting n=%d due to Fint failure, "
+			 "boosting min_divider\n", n);
+		dd->min_divider = n;
+		ret = DPLL_FINT_INVALID;
+
+	}
+
+	return ret;
+}
 
 /**
  * omap2_init_clk_clkdm - look up a clockdomain name, store pointer in clk
@@ -77,17 +200,14 @@ void omap2_init_clk_clkdm(struct clk *clk)
 {
 	struct clockdomain *clkdm;
 
-	if (!clk->clkdm_name)
-		return;
-
-	clkdm = clkdm_lookup(clk->clkdm_name);
+	clkdm = clkdm_lookup(clk->clkdm.name);
 	if (clkdm) {
 		pr_debug("clock: associated clk %s to clkdm %s\n",
-			 clk->name, clk->clkdm_name);
-		clk->clkdm = clkdm;
+			 clk->name, clk->clkdm.name);
+		clk->clkdm.ptr = clkdm;
 	} else {
-		pr_debug("clock: could not associate clk %s to "
-			 "clkdm %s\n", clk->name, clk->clkdm_name);
+		pr_err("clock: %s: could not associate to clkdm %s\n",
+		       clk->name, clk->clkdm.name);
 	}
 }
 
@@ -108,7 +228,8 @@ void omap2_init_clksel_parent(struct clk *clk)
 	if (!clk->clksel)
 		return;
 
-	r = __raw_readl(clk->clksel_reg) & clk->clksel_mask;
+	r = _omap2_clk_read_reg(clk->clksel_reg, clk);
+	r &= clk->clksel_mask;
 	r >>= __ffs(clk->clksel_mask);
 
 	for (clks = clk->clksel; clks->parent && !found; clks++) {
@@ -120,7 +241,11 @@ void omap2_init_clksel_parent(struct clk *clk)
 						 clk->name, clks->parent->name,
 						 ((clk->parent) ?
 						  clk->parent->name : "NULL"));
+					if (clk->parent)
+						omap_clk_del_child(clk->parent,
+								   clk);
 					clk->parent = clks->parent;
+					omap_clk_add_child(clk->parent, clk);
 				};
 				found = 1;
 			}
@@ -134,25 +259,57 @@ void omap2_init_clksel_parent(struct clk *clk)
 	return;
 }
 
-/* Returns the DPLL rate */
-u32 omap2_get_dpll_rate(struct clk *clk)
+/**
+ * omap2_get_dpll_rate - returns the current DPLL CLKOUT rate
+ * @clk: struct clk * of a DPLL
+ * @parent_rate: rate of the parent of the DPLL clock
+ *
+ * DPLLs can be locked or bypassed - basically, enabled or disabled.
+ * When locked, the DPLL output depends on the M and N values.  When
+ * bypassed, on OMAP2xxx, the output rate is either the 32KiHz clock
+ * or sys_clk.  Bypass rates on OMAP3 depend on the DPLL: DPLLs 1 and
+ * 2 are bypassed with dpll1_fclk and dpll2_fclk respectively
+ * (generated by DPLL3), while DPLL 3, 4, and 5 bypass rates are sys_clk.
+ * Returns the current DPLL CLKOUT rate (*not* CLKOUTX2) if the DPLL is
+ * locked, or the appropriate bypass rate if the DPLL is bypassed, or 0
+ * if the clock @clk is not a DPLL.
+ */
+u32 omap2_get_dpll_rate(struct clk *clk, unsigned long parent_rate)
 {
 	long long dpll_clk;
-	u32 dpll_mult, dpll_div, dpll;
+	u32 dpll_mult, dpll_div, v;
 	struct dpll_data *dd;
 
 	dd = clk->dpll_data;
-	/* REVISIT: What do we return on error? */
 	if (!dd)
 		return 0;
 
-	dpll = __raw_readl(dd->mult_div1_reg);
-	dpll_mult = dpll & dd->mult_mask;
+	/* Return bypass rate if DPLL is bypassed */
+	v = cm_read_mod_reg(clk->prcm_mod, dd->control_reg);
+	v &= dd->enable_mask;
+	v >>= __ffs(dd->enable_mask);
+
+	if (cpu_is_omap24xx()) {
+
+		if (v == OMAP2XXX_EN_DPLL_LPBYPASS ||
+		    v == OMAP2XXX_EN_DPLL_FRBYPASS)
+			return parent_rate;
+
+	} else if (cpu_is_omap34xx()) {
+
+		if (v == OMAP3XXX_EN_DPLL_LPBYPASS ||
+		    v == OMAP3XXX_EN_DPLL_FRBYPASS)
+			return dd->bypass_clk->rate;
+
+	}
+
+	v = cm_read_mod_reg(clk->prcm_mod, dd->mult_div1_reg);
+	dpll_mult = v & dd->mult_mask;
 	dpll_mult >>= __ffs(dd->mult_mask);
-	dpll_div = dpll & dd->div1_mask;
+	dpll_div = v & dd->div1_mask;
 	dpll_div >>= __ffs(dd->div1_mask);
 
-	dpll_clk = (long long)clk->parent->rate * dpll_mult;
+	dpll_clk = (long long)parent_rate * dpll_mult;
 	do_div(dpll_clk, dpll_div + 1);
 
 	return dpll_clk;
@@ -162,42 +319,47 @@ u32 omap2_get_dpll_rate(struct clk *clk)
  * Used for clocks that have the same value as the parent clock,
  * divided by some factor
  */
-void omap2_fixed_divisor_recalc(struct clk *clk)
+void omap2_fixed_divisor_recalc(struct clk *clk, unsigned long parent_rate,
+				u8 rate_storage)
 {
-	WARN_ON(!clk->fixed_div);
+	unsigned long rate;
 
-	clk->rate = clk->parent->rate / clk->fixed_div;
+	WARN_ON(!clk->fixed_div); /* XXX move this to init */
 
-	if (clk->flags & RATE_PROPAGATES)
-		propagate_rate(clk);
+	rate = parent_rate / clk->fixed_div;
+
+	if (rate_storage == CURRENT_RATE)
+		clk->rate = rate;
+	else if (rate_storage == TEMP_RATE)
+		clk->temp_rate = rate;
 }
 
 /**
  * omap2_wait_clock_ready - wait for clock to enable
- * @reg: physical address of clock IDLEST register
+ * @prcm_mod: CM submodule offset from CM_BASE (e.g., "MPU_MOD")
+ * @reg_index: offset of CM register address from prcm_mod
  * @mask: value to mask against to determine if the clock is active
  * @name: name of the clock (for printk)
  *
  * Returns 1 if the clock enabled in time, or 0 if it failed to enable
  * in roughly MAX_CLOCK_ENABLE_WAIT microseconds.
  */
-int omap2_wait_clock_ready(void __iomem *reg, u32 mask, const char *name)
+int omap2_wait_clock_ready(s16 prcm_mod, u16 reg_index, u32 mask,
+			   const char *name)
 {
-	int i = 0;
-	int ena = 0;
+	int i = 0, ena = 0;
 
 	/*
 	 * 24xx uses 0 to indicate not ready, and 1 to indicate ready.
 	 * 34xx reverses this, just to keep us on our toes
 	 */
-	if (cpu_mask & (RATE_IN_242X | RATE_IN_243X)) {
+	if (cpu_mask & (RATE_IN_242X | RATE_IN_243X))
 		ena = mask;
-	} else if (cpu_mask & RATE_IN_343X) {
+	else if (cpu_mask & RATE_IN_343X)
 		ena = 0;
-	}
 
 	/* Wait for lock */
-	while (((__raw_readl(reg) & mask) != ena) &&
+	while (((cm_read_mod_reg(prcm_mod, reg_index) & mask) != ena) &&
 	       (i++ < MAX_CLOCK_ENABLE_WAIT)) {
 		udelay(1);
 	}
@@ -208,68 +370,64 @@ int omap2_wait_clock_ready(void __iomem *reg, u32 mask, const char *name)
 		printk(KERN_ERR "Clock %s didn't enable in %d tries\n",
 		       name, MAX_CLOCK_ENABLE_WAIT);
 
-
 	return (i < MAX_CLOCK_ENABLE_WAIT) ? 1 : 0;
 };
 
 
 /*
- * Note: We don't need special code here for INVERT_ENABLE
- * for the time being since INVERT_ENABLE only applies to clocks enabled by
- * CM_CLKEN_PLL
+ * omap2_clk_wait_ready - wait for a OMAP module to come out of target idle
+ * @clk: struct clk * recently enabled to indicate the module to test
+ *
+ * Wait for an OMAP module with a target idle state bit to come out of
+ * idle once both its interface clock and primary functional clock are
+ * both enabled.  Any register read or write to the device before it
+ * returns from idle will cause an abort.  Not all modules have target
+ * idle state bits (for example, DSS and CAM on OMAP24xx); so we don't
+ * wait for those.  No return value.
+ *
+ * We don't need special code here for INVERT_ENABLE for the time
+ * being since INVERT_ENABLE only applies to clocks enabled by
+ * CM_CLKEN_PLL.
+ *
+ * REVISIT: This function is misnamed: it should be something like
+ * "omap2_module_wait_ready", and in the long-term, it does not belong
+ * in the clock framework. It also shouldn't be doing register
+ * arithmetic to determine the companion clock.
  */
 static void omap2_clk_wait_ready(struct clk *clk)
 {
-	void __iomem *reg, *other_reg, *st_reg;
-	u32 bit;
+	u16 other_reg, idlest_reg;
+	u32 other_bit;
 
-	/*
-	 * REVISIT: This code is pretty ugly.  It would be nice to generalize
-	 * it and pull it into struct clk itself somehow.
-	 */
-	reg = clk->enable_reg;
-	if ((((u32)reg & 0xff) >= CM_FCLKEN1) &&
-	    (((u32)reg & 0xff) <= OMAP24XX_CM_FCLKEN2))
-		other_reg = (void __iomem *)(((u32)reg & ~0xf0) | 0x10); /* CM_ICLKEN* */
-	else if ((((u32)reg & 0xff) >= CM_ICLKEN1) &&
-		 (((u32)reg & 0xff) <= OMAP24XX_CM_ICLKEN4))
-		other_reg = (void __iomem *)(((u32)reg & ~0xf0) | 0x00); /* CM_FCLKEN* */
+	if (!(clk->flags & WAIT_READY))
+		return;
+
+	/* If we are enabling an iclk, also test the fclk; and vice versa */
+	other_bit = 1 << clk->enable_bit;
+	other_reg = clk->enable_reg & ~PRCM_REGTYPE_MASK;
+
+	if (clk->enable_reg & CM_ICLKEN_REGTYPE)
+		other_reg |= CM_FCLKEN_REGTYPE;
 	else
+		other_reg |= CM_ICLKEN_REGTYPE;
+
+	/* Ensure functional and interface clocks are running. */
+	if (!(cm_read_mod_reg(clk->prcm_mod, other_reg) & other_bit))
 		return;
 
-	/* REVISIT: What are the appropriate exclusions for 34XX? */
-	/* No check for DSS or cam clocks */
-	if (cpu_is_omap24xx() && ((u32)reg & 0x0f) == 0) { /* CM_{F,I}CLKEN1 */
-		if (clk->enable_bit == OMAP24XX_EN_DSS2_SHIFT ||
-		    clk->enable_bit == OMAP24XX_EN_DSS1_SHIFT ||
-		    clk->enable_bit == OMAP24XX_EN_CAM_SHIFT)
-			return;
-	}
+	idlest_reg = other_reg & ~PRCM_REGTYPE_MASK;
+	idlest_reg |= CM_IDLEST_REGTYPE;
 
-	/* REVISIT: What are the appropriate exclusions for 34XX? */
-	/* OMAP3: ignore DSS-mod clocks */
-	if (cpu_is_omap34xx() &&
-	    (((u32)reg & ~0xff) == (u32)OMAP_CM_REGADDR(OMAP3430_DSS_MOD, 0) ||
-	     ((((u32)reg & ~0xff) == (u32)OMAP_CM_REGADDR(CORE_MOD, 0)) &&
-	     clk->enable_bit == OMAP3430_EN_SSI_SHIFT)))
-		return;
-
-	/* Check if both functional and interface clocks
-	 * are running. */
-	bit = 1 << clk->enable_bit;
-	if (!(__raw_readl(other_reg) & bit))
-		return;
-	st_reg = (void __iomem *)(((u32)other_reg & ~0xf0) | 0x20); /* CM_IDLEST* */
-
-	omap2_wait_clock_ready(st_reg, bit, clk->name);
+	omap2_wait_clock_ready(clk->prcm_mod, idlest_reg, 1 << clk->idlest_bit,
+			       clk->name);
 }
 
 /* Enables clock without considering parent dependencies or use count
  * REVISIT: Maybe change this to use clk->enable like on omap1?
  */
-int _omap2_clk_enable(struct clk *clk)
+static int _omap2_clk_enable(struct clk *clk)
 {
-	u32 regval32;
+	u32 v;
 
 	if (clk->flags & (ALWAYS_ENABLED | PARENT_CONTROLS_CLOCK))
 		return 0;
@@ -277,19 +435,13 @@ int _omap2_clk_enable(struct clk *clk)
 	if (clk->enable)
 		return clk->enable(clk);
 
-	if (unlikely(clk->enable_reg == NULL)) {
-		printk(KERN_ERR "clock.c: Enable for %s without enable code\n",
-		       clk->name);
-		return 0; /* REVISIT: -EINVAL */
-	}
-
-	regval32 = __raw_readl(clk->enable_reg);
+	v = _omap2_clk_read_reg(clk->enable_reg, clk);
 	if (clk->flags & INVERT_ENABLE)
-		regval32 &= ~(1 << clk->enable_bit);
+		v &= ~(1 << clk->enable_bit);
 	else
-		regval32 |= (1 << clk->enable_bit);
-	__raw_writel(regval32, clk->enable_reg);
-	wmb();
+		v |= (1 << clk->enable_bit);
+	_omap2_clk_write_reg(v, clk->enable_reg, clk);
+	v = _omap2_clk_read_reg(clk->enable_reg, clk); /* OCP barrier */
 
 	omap2_clk_wait_ready(clk);
 
@@ -297,9 +449,9 @@ int _omap2_clk_enable(struct clk *clk)
 }
 
 /* Disables clock without considering parent dependencies or use count */
-void _omap2_clk_disable(struct clk *clk)
+static void _omap2_clk_disable(struct clk *clk)
 {
-	u32 regval32;
+	u32 v;
 
 	if (clk->flags & (ALWAYS_ENABLED | PARENT_CONTROLS_CLOCK))
 		return;
@@ -309,64 +461,54 @@ void _omap2_clk_disable(struct clk *clk)
 		return;
 	}
 
-	if (clk->enable_reg == NULL) {
-		/*
-		 * 'Independent' here refers to a clock which is not
-		 * controlled by its parent.
-		 */
-		printk(KERN_ERR "clock: clk_disable called on independent "
-		       "clock %s which has no enable_reg\n", clk->name);
-		return;
-	}
-
-	regval32 = __raw_readl(clk->enable_reg);
+	v = _omap2_clk_read_reg(clk->enable_reg, clk);
 	if (clk->flags & INVERT_ENABLE)
-		regval32 |= (1 << clk->enable_bit);
+		v |= (1 << clk->enable_bit);
 	else
-		regval32 &= ~(1 << clk->enable_bit);
-	__raw_writel(regval32, clk->enable_reg);
-	wmb();
+		v &= ~(1 << clk->enable_bit);
+	_omap2_clk_write_reg(v, clk->enable_reg, clk);
+	/* No OCP barrier needed here since it is a disable operation */
 }
 
 void omap2_clk_disable(struct clk *clk)
 {
 	if (clk->usecount > 0 && !(--clk->usecount)) {
 		_omap2_clk_disable(clk);
-		if (likely((u32)clk->parent))
+		if (clk->parent)
 			omap2_clk_disable(clk->parent);
-		if (clk->clkdm)
-			omap2_clkdm_clk_disable(clk->clkdm, clk);
+		omap2_clkdm_clk_disable(clk->clkdm.ptr, clk);
 
 	}
 }
 
 int omap2_clk_enable(struct clk *clk)
 {
-	int ret = 0;
+	int ret;
 
-	if (clk->usecount++ == 0) {
-		if (likely((u32)clk->parent))
-			ret = omap2_clk_enable(clk->parent);
+	if (++clk->usecount > 1)
+		return 0;
 
-		if (unlikely(ret != 0)) {
+	omap2_clkdm_clk_enable(clk->clkdm.ptr, clk);
+
+	if (clk->parent) {
+		int parent_ret;
+
+		parent_ret = omap2_clk_enable(clk->parent);
+
+		if (parent_ret != 0) {
 			clk->usecount--;
-			return ret;
+			omap2_clkdm_clk_disable(clk->clkdm.ptr, clk);
+			return parent_ret;
 		}
+	}
 
-		if (clk->clkdm)
-			omap2_clkdm_clk_enable(clk->clkdm, clk);
+	ret = _omap2_clk_enable(clk);
 
-		ret = _omap2_clk_enable(clk);
-
-		if (unlikely(ret != 0)) {
-			if (clk->clkdm)
-				omap2_clkdm_clk_disable(clk->clkdm, clk);
-
-			if (clk->parent) {
-				omap2_clk_disable(clk->parent);
-				clk->usecount--;
-			}
-		}
+	if (ret != 0) {
+		clk->usecount--;
+		omap2_clkdm_clk_disable(clk->clkdm.ptr, clk);
+		if (clk->parent)
+			omap2_clk_disable(clk->parent);
 	}
 
 	return ret;
@@ -376,9 +518,11 @@ int omap2_clk_enable(struct clk *clk)
  * Used for clocks that are part of CLKSEL_xyz governed clocks.
  * REVISIT: Maybe change to use clk->enable() functions like on omap1?
  */
-void omap2_clksel_recalc(struct clk *clk)
+void omap2_clksel_recalc(struct clk *clk, unsigned long parent_rate,
+			 u8 rate_storage)
 {
 	u32 div = 0;
+	unsigned long rate;
 
 	pr_debug("clock: recalc'ing clksel clk %s\n", clk->name);
 
@@ -386,14 +530,14 @@ void omap2_clksel_recalc(struct clk *clk)
 	if (div == 0)
 		return;
 
-	if (unlikely(clk->rate == clk->parent->rate / div))
-		return;
-	clk->rate = clk->parent->rate / div;
+	rate = parent_rate / div;
+
+	if (rate_storage == CURRENT_RATE)
+		clk->rate = rate;
+	else if (rate_storage == TEMP_RATE)
+		clk->temp_rate = rate;
 
 	pr_debug("clock: new clock rate is %ld (div %d)\n", clk->rate, div);
-
-	if (unlikely(clk->flags & RATE_PROPAGATES))
-		propagate_rate(clk);
 }
 
 /**
@@ -405,8 +549,8 @@ void omap2_clksel_recalc(struct clk *clk)
  * the element associated with the supplied parent clock address.
  * Returns a pointer to the struct clksel on success or NULL on error.
  */
-const struct clksel *omap2_get_clksel_by_parent(struct clk *clk,
-						struct clk *src_clk)
+static const struct clksel *omap2_get_clksel_by_parent(struct clk *clk,
+						       struct clk *src_clk)
 {
 	const struct clksel *clks;
 
@@ -436,8 +580,6 @@ const struct clksel *omap2_get_clksel_by_parent(struct clk *clk,
  *
  * Finds 'best' divider value in an array based on the source and target
  * rates.  The divider array must be sorted with smallest divider first.
- * Note that this will not work for clocks which are part of CONFIG_PARTICIPANT,
- * they are only settable as part of virtual_prcm set.
  *
  * Returns the rounded clock rate or returns 0xffffffff on error.
  */
@@ -455,7 +597,7 @@ u32 omap2_clksel_round_rate_div(struct clk *clk, unsigned long target_rate,
 	*new_div = 1;
 
 	clks = omap2_get_clksel_by_parent(clk, clk->parent);
-	if (clks == NULL)
+	if (!clks)
 		return ~0;
 
 	for (clkr = clks->rates; clkr->div; clkr++) {
@@ -498,8 +640,6 @@ u32 omap2_clksel_round_rate_div(struct clk *clk, unsigned long target_rate,
  * Compatibility wrapper for OMAP clock framework
  * Finds best target rate based on the source clock and possible dividers.
  * rates. The divider array must be sorted with smallest divider first.
- * Note that this will not work for clocks which are part of CONFIG_PARTICIPANT,
- * they are only settable as part of virtual_prcm set.
  *
  * Returns the rounded clock rate or returns 0xffffffff on error.
  */
@@ -516,10 +656,6 @@ long omap2_clk_round_rate(struct clk *clk, unsigned long rate)
 {
 	if (clk->round_rate != NULL)
 		return clk->round_rate(clk, rate);
-
-	if (clk->flags & RATE_FIXED)
-		printk(KERN_ERR "clock: generic omap2_clk_round_rate called "
-		       "on fixed-rate clock %s\n", clk->name);
 
 	return clk->rate;
 }
@@ -540,7 +676,7 @@ u32 omap2_clksel_to_divisor(struct clk *clk, u32 field_val)
 	const struct clksel_rate *clkr;
 
 	clks = omap2_get_clksel_by_parent(clk, clk->parent);
-	if (clks == NULL)
+	if (!clks)
 		return 0;
 
 	for (clkr = clks->rates; clkr->div; clkr++) {
@@ -576,7 +712,7 @@ u32 omap2_divisor_to_clksel(struct clk *clk, u32 div)
 	WARN_ON(div == 0);
 
 	clks = omap2_get_clksel_by_parent(clk, clk->parent);
-	if (clks == NULL)
+	if (!clks)
 		return 0;
 
 	for (clkr = clks->rates; clkr->div; clkr++) {
@@ -595,23 +731,6 @@ u32 omap2_divisor_to_clksel(struct clk *clk, u32 div)
 }
 
 /**
- * omap2_get_clksel - find clksel register addr & field mask for a clk
- * @clk: struct clk to use
- * @field_mask: ptr to u32 to store the register field mask
- *
- * Returns the address of the clksel register upon success or NULL on error.
- */
-void __iomem *omap2_get_clksel(struct clk *clk, u32 *field_mask)
-{
-	if (unlikely((clk->clksel_reg == NULL) || (clk->clksel_mask == NULL)))
-		return NULL;
-
-	*field_mask = clk->clksel_mask;
-
-	return clk->clksel_reg;
-}
-
-/**
  * omap2_clksel_get_divisor - get current divider applied to parent clock.
  * @clk: OMAP struct clk to use.
  *
@@ -619,49 +738,42 @@ void __iomem *omap2_get_clksel(struct clk *clk, u32 *field_mask)
  */
 u32 omap2_clksel_get_divisor(struct clk *clk)
 {
-	u32 field_mask, field_val;
-	void __iomem *div_addr;
+	u32 v;
 
-	div_addr = omap2_get_clksel(clk, &field_mask);
-	if (div_addr == NULL)
+	if (!clk->clksel_mask)
 		return 0;
 
-	field_val = __raw_readl(div_addr) & field_mask;
-	field_val >>= __ffs(field_mask);
+	v = _omap2_clk_read_reg(clk->clksel_reg, clk);
+	v &= clk->clksel_mask;
+	v >>= __ffs(clk->clksel_mask);
 
-	return omap2_clksel_to_divisor(clk, field_val);
+	return omap2_clksel_to_divisor(clk, v);
 }
 
 int omap2_clksel_set_rate(struct clk *clk, unsigned long rate)
 {
-	u32 field_mask, field_val, reg_val, validrate, new_div = 0;
-	void __iomem *div_addr;
+	u32 v, field_val, validrate, new_div = 0;
+
+	if (!clk->clksel_mask)
+		return -EINVAL;
 
 	validrate = omap2_clksel_round_rate_div(clk, rate, &new_div);
 	if (validrate != rate)
-		return -EINVAL;
-
-	div_addr = omap2_get_clksel(clk, &field_mask);
-	if (div_addr == NULL)
-		return -EINVAL;
+	       return -EINVAL;
 
 	field_val = omap2_divisor_to_clksel(clk, new_div);
 	if (field_val == ~0)
 		return -EINVAL;
 
-	reg_val = __raw_readl(div_addr);
-	reg_val &= ~field_mask;
-	reg_val |= (field_val << __ffs(field_mask));
-	__raw_writel(reg_val, div_addr);
-	wmb();
+	v = _omap2_clk_read_reg(clk->clksel_reg, clk);
+	v &= ~clk->clksel_mask;
+	v |= field_val << __ffs(clk->clksel_mask);
+	_omap2_clk_write_reg(v, clk->clksel_reg, clk);
+	v = _omap2_clk_read_reg(clk->clksel_reg, clk); /* OCP barrier */
 
 	clk->rate = clk->parent->rate / new_div;
 
-	if (clk->flags & DELAYED_APP && cpu_is_omap24xx()) {
-		prm_write_mod_reg(OMAP24XX_VALID_CONFIG,
-			OMAP24XX_GR_MOD, OMAP24XX_PRCM_CLKCFG_CTRL_OFFSET);
-		wmb();
-	}
+	_omap2xxx_clk_commit(clk);
 
 	return 0;
 }
@@ -674,37 +786,24 @@ int omap2_clk_set_rate(struct clk *clk, unsigned long rate)
 
 	pr_debug("clock: set_rate for clock %s to rate %ld\n", clk->name, rate);
 
-	/* CONFIG_PARTICIPANT clocks are changed only in sets via the
-	   rate table mechanism, driven by mpu_speed  */
-	if (clk->flags & CONFIG_PARTICIPANT)
-		return -EINVAL;
-
-	/* dpll_ck, core_ck, virt_prcm_set; plus all clksel clocks */
 	if (clk->set_rate != NULL)
 		ret = clk->set_rate(clk, rate);
-
-	if (unlikely(ret == 0 && (clk->flags & RATE_PROPAGATES)))
-		propagate_rate(clk);
 
 	return ret;
 }
 
 /*
  * Converts encoded control register address into a full address
- * On error, *src_addr will be returned as 0.
+ * On error, the return value (parent_div) will be 0.
  */
-static u32 omap2_clksel_get_src_field(void __iomem **src_addr,
-				      struct clk *src_clk, u32 *field_mask,
-				      struct clk *clk, u32 *parent_div)
+static u32 _omap2_clksel_get_src_field(struct clk *src_clk, struct clk *clk,
+				       u32 *field_val)
 {
 	const struct clksel *clks;
 	const struct clksel_rate *clkr;
 
-	*parent_div = 0;
-	*src_addr = NULL;
-
 	clks = omap2_get_clksel_by_parent(clk, src_clk);
-	if (clks == NULL)
+	if (!clks)
 		return 0;
 
 	for (clkr = clks->rates; clkr->div; clkr++) {
@@ -722,42 +821,33 @@ static u32 omap2_clksel_get_src_field(void __iomem **src_addr,
 	/* Should never happen.  Add a clksel mask to the struct clk. */
 	WARN_ON(clk->clksel_mask == 0);
 
-	*field_mask = clk->clksel_mask;
-	*src_addr = clk->clksel_reg;
-	*parent_div = clkr->div;
+	*field_val = clkr->val;
 
-	return clkr->val;
+	return clkr->div;
 }
 
 int omap2_clk_set_parent(struct clk *clk, struct clk *new_parent)
 {
-	void __iomem *src_addr;
-	u32 field_val, field_mask, reg_val, parent_div;
-
-	if (unlikely(clk->flags & CONFIG_PARTICIPANT))
-		return -EINVAL;
+	u32 field_val, v, parent_div;
 
 	if (!clk->clksel)
 		return -EINVAL;
 
-	field_val = omap2_clksel_get_src_field(&src_addr, new_parent,
-					       &field_mask, clk, &parent_div);
-	if (src_addr == NULL)
+	parent_div = _omap2_clksel_get_src_field(new_parent, clk, &field_val);
+	if (!parent_div)
 		return -EINVAL;
 
 	if (clk->usecount > 0)
 		_omap2_clk_disable(clk);
 
 	/* Set new source value (previous dividers if any in effect) */
-	reg_val = __raw_readl(src_addr) & ~field_mask;
-	reg_val |= (field_val << __ffs(field_mask));
-	__raw_writel(reg_val, src_addr);
-	wmb();
+	v = _omap2_clk_read_reg(clk->clksel_reg, clk);
+	v &= ~clk->clksel_mask;
+	v |= field_val << __ffs(clk->clksel_mask);
+	_omap2_clk_write_reg(v, clk->clksel_reg, clk);
+	v = _omap2_clk_read_reg(clk->clksel_reg, clk);    /* OCP barrier */
 
-	if (clk->flags & DELAYED_APP && cpu_is_omap24xx()) {
-		__raw_writel(OMAP24XX_VALID_CONFIG, OMAP24XX_PRCM_CLKCFG_CTRL);
-		wmb();
-	}
+	_omap2xxx_clk_commit(clk);
 
 	if (clk->usecount > 0)
 		_omap2_clk_enable(clk);
@@ -773,10 +863,12 @@ int omap2_clk_set_parent(struct clk *clk, struct clk *new_parent)
 	pr_debug("clock: set parent of %s to %s (new rate %ld)\n",
 		 clk->name, clk->parent->name, clk->rate);
 
-	if (unlikely(clk->flags & RATE_PROPAGATES))
-		propagate_rate(clk);
-
 	return 0;
+}
+
+struct clk *omap2_clk_get_parent(struct clk *clk)
+{
+	return clk->parent;
 }
 
 /* DPLL rate rounding code */
@@ -805,7 +897,8 @@ int omap2_dpll_set_rate_tolerance(struct clk *clk, unsigned int tolerance)
 	return 0;
 }
 
-static unsigned long _dpll_compute_new_rate(unsigned long parent_rate, unsigned int m, unsigned int n)
+static unsigned long _dpll_compute_new_rate(unsigned long parent_rate,
+					    unsigned int m, unsigned int n)
 {
 	unsigned long long num;
 
@@ -838,7 +931,7 @@ static int _dpll_test_mult(int *m, int n, unsigned long *new_rate,
 			   unsigned long target_rate,
 			   unsigned long parent_rate)
 {
-	int flags = 0, carry = 0;
+	int r = 0, carry = 0;
 
 	/* Unscale m and round if necessary */
 	if (*m % DPLL_SCALE_FACTOR >= DPLL_ROUNDING_VAL)
@@ -859,13 +952,13 @@ static int _dpll_test_mult(int *m, int n, unsigned long *new_rate,
 	if (*m < DPLL_MIN_MULTIPLIER) {
 		*m = DPLL_MIN_MULTIPLIER;
 		*new_rate = 0;
-		flags = DPLL_MULT_UNDERFLOW;
+		r = DPLL_MULT_UNDERFLOW;
 	}
 
 	if (*new_rate == 0)
 		*new_rate = _dpll_compute_new_rate(parent_rate, *m, n);
 
-	return flags;
+	return r;
 }
 
 /**
@@ -889,54 +982,65 @@ long omap2_dpll_round_rate(struct clk *clk, unsigned long target_rate)
 	int m, n, r, e, scaled_max_m;
 	unsigned long scaled_rt_rp, new_rate;
 	int min_e = -1, min_e_m = -1, min_e_n = -1;
+	struct dpll_data *dd;
 
 	if (!clk || !clk->dpll_data)
 		return ~0;
+
+	dd = clk->dpll_data;
 
 	pr_debug("clock: starting DPLL round_rate for clock %s, target rate "
 		 "%ld\n", clk->name, target_rate);
 
 	scaled_rt_rp = target_rate / (clk->parent->rate / DPLL_SCALE_FACTOR);
-	scaled_max_m = clk->dpll_data->max_multiplier * DPLL_SCALE_FACTOR;
+	scaled_max_m = dd->max_multiplier * DPLL_SCALE_FACTOR;
 
-	clk->dpll_data->last_rounded_rate = 0;
+	dd->last_rounded_rate = 0;
 
-	for (n = clk->dpll_data->max_divider; n >= DPLL_MIN_DIVIDER; n--) {
+	for (n = dd->min_divider; n <= dd->max_divider; n++) {
+
+		/* Is the (input clk, divider) pair valid for the DPLL? */
+		r = _dpll_test_fint(clk, n);
+		if (r == DPLL_FINT_UNDERFLOW)
+			break;
+		else if (r == DPLL_FINT_INVALID)
+			continue;
 
 		/* Compute the scaled DPLL multiplier, based on the divider */
 		m = scaled_rt_rp * n;
 
 		/*
-		 * Since we're counting n down, a m overflow means we can
-		 * can immediately skip to the next n
+		 * Since we're counting n up, a m overflow means we
+		 * can bail out completely (since as n increases in
+		 * the next iteration, there's no way that m can
+		 * increase beyond the current m)
 		 */
 		if (m > scaled_max_m)
-			continue;
+			break;
 
 		r = _dpll_test_mult(&m, n, &new_rate, target_rate,
 				    clk->parent->rate);
+
+		/* m can't be set low enough for this n - try with a larger n */
+		if (r == DPLL_MULT_UNDERFLOW)
+			continue;
 
 		e = target_rate - new_rate;
 		pr_debug("clock: n = %d: m = %d: rate error is %d "
 			 "(new_rate = %ld)\n", n, m, e, new_rate);
 
 		if (min_e == -1 ||
-		    min_e >= (int)(abs(e) - clk->dpll_data->rate_tolerance)) {
+		    min_e >= (int)(abs(e) - dd->rate_tolerance)) {
 			min_e = e;
 			min_e_m = m;
 			min_e_n = n;
 
 			pr_debug("clock: found new least error %d\n", min_e);
-		}
 
-		/*
-		 * Since we're counting n down, a m underflow means we
-		 * can bail out completely (since as n decreases in
-		 * the next iteration, there's no way that m can
-		 * increase beyond the current m)
-		 */
-		if (r & DPLL_MULT_UNDERFLOW)
-			break;
+			/* We found good settings -- bail out now */
+			if (min_e <= dd->rate_tolerance)
+				break;
+		}
 	}
 
 	if (min_e < 0) {
@@ -944,17 +1048,17 @@ long omap2_dpll_round_rate(struct clk *clk, unsigned long target_rate)
 		return ~0;
 	}
 
-	clk->dpll_data->last_rounded_m = min_e_m;
-	clk->dpll_data->last_rounded_n = min_e_n;
-	clk->dpll_data->last_rounded_rate =
-		_dpll_compute_new_rate(clk->parent->rate, min_e_m,  min_e_n);
+	dd->last_rounded_m = min_e_m;
+	dd->last_rounded_n = min_e_n;
+	dd->last_rounded_rate = _dpll_compute_new_rate(clk->parent->rate,
+						       min_e_m,  min_e_n);
 
 	pr_debug("clock: final least error: e = %d, m = %d, n = %d\n",
 		 min_e, min_e_m, min_e_n);
 	pr_debug("clock: final rate: %ld  (target rate: %ld)\n",
-		 clk->dpll_data->last_rounded_rate, target_rate);
+		 dd->last_rounded_rate, target_rate);
 
-	return clk->dpll_data->last_rounded_rate;
+	return dd->last_rounded_rate;
 }
 
 /*-------------------------------------------------------------------------
@@ -968,11 +1072,27 @@ void omap2_clk_disable_unused(struct clk *clk)
 
 	v = (clk->flags & INVERT_ENABLE) ? (1 << clk->enable_bit) : 0;
 
-	regval32 = __raw_readl(clk->enable_reg);
+	regval32 = _omap2_clk_read_reg(clk->enable_reg, clk);
 	if ((regval32 & (1 << clk->enable_bit)) == v)
 		return;
 
 	printk(KERN_INFO "Disabling unused clock \"%s\"\n", clk->name);
-	_omap2_clk_disable(clk);
+	if (cpu_is_omap34xx()) {
+		omap2_clk_enable(clk);
+		omap2_clk_disable(clk);
+	} else
+		_omap2_clk_disable(clk);
 }
 #endif
+
+int omap2_clk_register(struct clk *clk)
+{
+	if (!clk->clkdm.name) {
+		pr_debug("clock: %s: missing clockdomain", clk->name);
+		WARN_ON(1);
+		return -EINVAL;
+	}
+
+	omap2_init_clk_clkdm(clk);
+	return 0;
+}

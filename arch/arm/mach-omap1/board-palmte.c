@@ -42,8 +42,7 @@
 #include <mach/irda.h>
 #include <mach/keypad.h>
 #include <mach/common.h>
-#include <mach/mcbsp.h>
-#include <mach/omap-alsa.h>
+#include <mach/gpio-switch.h>
 
 static void __init omap_palmte_init_irq(void)
 {
@@ -195,39 +194,12 @@ static struct omap_usb_config palmte_usb_config __initdata = {
 	.pins[0]	= 2,
 };
 
-static struct omap_mmc_config palmte_mmc_config __initdata = {
-	.mmc[0]		= {
-		.enabled 	= 1,
-		.wp_pin		= PALMTE_MMC_WP_GPIO,
-		.power_pin	= PALMTE_MMC_POWER_GPIO,
-		.switch_pin	= PALMTE_MMC_SWITCH_GPIO,
-	},
-};
-
 static struct omap_lcd_config palmte_lcd_config __initdata = {
 	.ctrl_name	= "internal",
 };
 
 static struct omap_uart_config palmte_uart_config __initdata = {
 	.enabled_uarts = (1 << 0) | (1 << 1) | (0 << 2),
-};
-
-static struct omap_mcbsp_reg_cfg palmte_mcbsp1_regs = {
-	.spcr2	= FRST | GRST | XRST | XINTM(3),
-	.xcr2	= XDATDLY(1) | XFIG,
-	.xcr1	= XWDLEN1(OMAP_MCBSP_WORD_32),
-	.pcr0	= SCLKME | FSXP | CLKXP,
-};
-
-static struct omap_alsa_codec_config palmte_alsa_config = {
-	.name			= "TSC2102 audio",
-	.mcbsp_regs_alsa	= &palmte_mcbsp1_regs,
-	.codec_configure_dev	= NULL,	/* tsc2102_configure, */
-	.codec_set_samplerate	= NULL,	/* tsc2102_set_samplerate, */
-	.codec_clock_setup	= NULL,	/* tsc2102_clock_setup, */
-	.codec_clock_on		= NULL,	/* tsc2102_clock_on, */
-	.codec_clock_off	= NULL,	/* tsc2102_clock_off, */
-	.get_default_samplerate	= NULL,	/* tsc2102_get_default_samplerate, */
 };
 
 #ifdef CONFIG_APM
@@ -255,7 +227,7 @@ static void palmte_get_power_status(struct apm_power_info *info, int *battery)
 {
 	int charging, batt, hi, lo, mid;
 
-	charging = !omap_get_gpio_datain(PALMTE_DC_GPIO);
+	charging = !gpio_get_value(PALMTE_DC_GPIO);
 	batt = battery[0];
 	if (charging)
 		batt -= 60;
@@ -316,7 +288,6 @@ static void palmte_get_power_status(struct apm_power_info *info, int *battery)
 
 static struct omap_board_config_kernel palmte_config[] __initdata = {
 	{ OMAP_TAG_USB,		&palmte_usb_config },
-	{ OMAP_TAG_MMC,		&palmte_mmc_config },
 	{ OMAP_TAG_LCD,		&palmte_lcd_config },
 	{ OMAP_TAG_UART,	&palmte_uart_config },
 };
@@ -335,30 +306,61 @@ static void palmte_headphones_detect(void *data, int state)
 {
 	if (state) {
 		/* Headphones connected, disable speaker */
-		omap_set_gpio_dataout(PALMTE_SPEAKER_GPIO, 0);
+		gpio_set_value(PALMTE_SPEAKER_GPIO, 0);
 		printk(KERN_INFO "PM: speaker off\n");
 	} else {
 		/* Headphones unplugged, re-enable speaker */
-		omap_set_gpio_dataout(PALMTE_SPEAKER_GPIO, 1);
+		gpio_set_value(PALMTE_SPEAKER_GPIO, 1);
 		printk(KERN_INFO "PM: speaker on\n");
 	}
 }
 
+static struct omap_gpio_switch palmte_switches[] __initdata = {
+	/* Speaker-enable pin is an output */
+	{
+		.name	= "speaker-enable",
+		.gpio	= PALMTE_SPEAKER_GPIO,
+		.type	= OMAP_GPIO_SWITCH_TYPE_ACTIVITY,
+		.flags	= OMAP_GPIO_SWITCH_FLAG_OUTPUT |
+			OMAP_GPIO_SWITCH_FLAG_INVERTED,
+	},
+	/* Indicates whether power is from DC-IN or battery */
+	{
+		.name	= "dc-in",
+		.gpio	= PALMTE_DC_GPIO,
+		.type	= OMAP_GPIO_SWITCH_TYPE_CONNECTION,
+		.flags	= OMAP_GPIO_SWITCH_FLAG_INVERTED,
+	},
+	/* Indicates whether a USB host is on the other end of the cable */
+	{
+		.name	= "usb",
+		.gpio	= PALMTE_USBDETECT_GPIO,
+		.type	= OMAP_GPIO_SWITCH_TYPE_CONNECTION,
+	},
+	/* High when headphones jack is plugged in */
+	{
+		.name	= "headphones",
+		.gpio	= PALMTE_HEADPHONES_GPIO,
+		.type	= OMAP_GPIO_SWITCH_TYPE_CONNECTION,
+		.notify	= palmte_headphones_detect,
+	},
+};
+
 static void __init palmte_misc_gpio_setup(void)
 {
 	/* Set TSC2102 PINTDAV pin as input (used by TSC2102 driver) */
-	if (omap_request_gpio(PALMTE_PINTDAV_GPIO)) {
+	if (gpio_request(PALMTE_PINTDAV_GPIO, "TSC2102 PINTDAV") < 0) {
 		printk(KERN_ERR "Could not reserve PINTDAV GPIO!\n");
 		return;
 	}
-	omap_set_gpio_direction(PALMTE_PINTDAV_GPIO, 1);
+	gpio_direction_input(PALMTE_PINTDAV_GPIO);
 
 	/* Set USB-or-DC-IN pin as input (unused) */
-	if (omap_request_gpio(PALMTE_USB_OR_DC_GPIO)) {
+	if (gpio_request(PALMTE_USB_OR_DC_GPIO, "USB/DC-IN") < 0) {
 		printk(KERN_ERR "Could not reserve cable signal GPIO!\n");
 		return;
 	}
-	omap_set_gpio_direction(PALMTE_USB_OR_DC_GPIO, 1);
+	gpio_direction_input(PALMTE_USB_OR_DC_GPIO);
 }
 
 static void __init omap_palmte_init(void)
@@ -369,6 +371,10 @@ static void __init omap_palmte_init(void)
 	platform_add_devices(palmte_devices, ARRAY_SIZE(palmte_devices));
 
 	spi_register_board_info(palmte_spi_info, ARRAY_SIZE(palmte_spi_info));
+
+	omap_register_gpio_switches(palmte_switches,
+			ARRAY_SIZE(palmte_switches));
+
 	palmte_misc_gpio_setup();
 	omap_serial_init();
 	omap_register_i2c_bus(1, 100, NULL, 0);

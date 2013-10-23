@@ -1,3 +1,4 @@
+
 /*
  * Copyright (C) 2004 Texas Instruments, Inc.
  *
@@ -40,92 +41,15 @@
 #include <linux/delay.h>
 #include <linux/rtc.h>
 #include <linux/bcd.h>
+#include <linux/i2c/menelaus.h>
 
+#include <asm/mach-types.h>
 #include <asm/mach/irq.h>
 
 #include <mach/gpio.h>
-#include <mach/menelaus.h>
 
 #define DRIVER_NAME			"menelaus"
 
-#define MENELAUS_I2C_ADDRESS		0x72
-
-#define MENELAUS_REV			0x01
-#define MENELAUS_VCORE_CTRL1		0x02
-#define MENELAUS_VCORE_CTRL2		0x03
-#define MENELAUS_VCORE_CTRL3		0x04
-#define MENELAUS_VCORE_CTRL4		0x05
-#define MENELAUS_VCORE_CTRL5		0x06
-#define MENELAUS_DCDC_CTRL1		0x07
-#define MENELAUS_DCDC_CTRL2		0x08
-#define MENELAUS_DCDC_CTRL3		0x09
-#define MENELAUS_LDO_CTRL1		0x0A
-#define MENELAUS_LDO_CTRL2		0x0B
-#define MENELAUS_LDO_CTRL3		0x0C
-#define MENELAUS_LDO_CTRL4		0x0D
-#define MENELAUS_LDO_CTRL5		0x0E
-#define MENELAUS_LDO_CTRL6		0x0F
-#define MENELAUS_LDO_CTRL7		0x10
-#define MENELAUS_LDO_CTRL8		0x11
-#define MENELAUS_SLEEP_CTRL1		0x12
-#define MENELAUS_SLEEP_CTRL2		0x13
-#define MENELAUS_DEVICE_OFF		0x14
-#define MENELAUS_OSC_CTRL		0x15
-#define MENELAUS_DETECT_CTRL		0x16
-#define MENELAUS_INT_MASK1		0x17
-#define MENELAUS_INT_MASK2		0x18
-#define MENELAUS_INT_STATUS1		0x19
-#define MENELAUS_INT_STATUS2		0x1A
-#define MENELAUS_INT_ACK1		0x1B
-#define MENELAUS_INT_ACK2		0x1C
-#define MENELAUS_GPIO_CTRL		0x1D
-#define MENELAUS_GPIO_IN		0x1E
-#define MENELAUS_GPIO_OUT		0x1F
-#define MENELAUS_BBSMS			0x20
-#define MENELAUS_RTC_CTRL		0x21
-#define MENELAUS_RTC_UPDATE		0x22
-#define MENELAUS_RTC_SEC		0x23
-#define MENELAUS_RTC_MIN		0x24
-#define MENELAUS_RTC_HR			0x25
-#define MENELAUS_RTC_DAY		0x26
-#define MENELAUS_RTC_MON		0x27
-#define MENELAUS_RTC_YR			0x28
-#define MENELAUS_RTC_WKDAY		0x29
-#define MENELAUS_RTC_AL_SEC		0x2A
-#define MENELAUS_RTC_AL_MIN		0x2B
-#define MENELAUS_RTC_AL_HR		0x2C
-#define MENELAUS_RTC_AL_DAY		0x2D
-#define MENELAUS_RTC_AL_MON		0x2E
-#define MENELAUS_RTC_AL_YR		0x2F
-#define MENELAUS_RTC_COMP_MSB		0x30
-#define MENELAUS_RTC_COMP_LSB		0x31
-#define MENELAUS_S1_PULL_EN		0x32
-#define MENELAUS_S1_PULL_DIR		0x33
-#define MENELAUS_S2_PULL_EN		0x34
-#define MENELAUS_S2_PULL_DIR		0x35
-#define MENELAUS_MCT_CTRL1		0x36
-#define MENELAUS_MCT_CTRL2		0x37
-#define MENELAUS_MCT_CTRL3		0x38
-#define MENELAUS_MCT_PIN_ST		0x39
-#define MENELAUS_DEBOUNCE1		0x3A
-
-#define IH_MENELAUS_IRQS		12
-#define MENELAUS_MMC_S1CD_IRQ		0	/* MMC slot 1 card change */
-#define MENELAUS_MMC_S2CD_IRQ		1	/* MMC slot 2 card change */
-#define MENELAUS_MMC_S1D1_IRQ		2	/* MMC DAT1 low in slot 1 */
-#define MENELAUS_MMC_S2D1_IRQ		3	/* MMC DAT1 low in slot 2 */
-#define MENELAUS_LOWBAT_IRQ		4	/* Low battery */
-#define MENELAUS_HOTDIE_IRQ		5	/* Hot die detect */
-#define MENELAUS_UVLO_IRQ		6	/* UVLO detect */
-#define MENELAUS_TSHUT_IRQ		7	/* Thermal shutdown */
-#define MENELAUS_RTCTMR_IRQ		8	/* RTC timer */
-#define MENELAUS_RTCALM_IRQ		9	/* RTC alarm */
-#define MENELAUS_RTCERR_IRQ		10	/* RTC error */
-#define MENELAUS_PSHBTN_IRQ		11	/* Push button */
-#define MENELAUS_RESERVED12_IRQ		12	/* Reserved */
-#define MENELAUS_RESERVED13_IRQ		13	/* Reserved */
-#define MENELAUS_RESERVED14_IRQ		14	/* Reserved */
-#define MENELAUS_RESERVED15_IRQ		15	/* Reserved */
 
 static void menelaus_work(struct work_struct *_menelaus);
 
@@ -152,7 +76,7 @@ static int menelaus_write_reg(int reg, u8 value)
 	int val = i2c_smbus_write_byte_data(the_menelaus->client, reg, value);
 
 	if (val < 0) {
-		pr_err(DRIVER_NAME ": write error");
+		dev_err(&the_menelaus->client->dev, "write error");
 		return val;
 	}
 
@@ -164,7 +88,7 @@ static int menelaus_read_reg(int reg)
 	int val = i2c_smbus_read_byte_data(the_menelaus->client, reg);
 
 	if (val < 0)
-		pr_err(DRIVER_NAME ": read error");
+		dev_err(&the_menelaus->client->dev, "read error");
 
 	return val;
 }
@@ -248,10 +172,10 @@ static void menelaus_mmc_cd_work(struct menelaus_chip *menelaus_hw)
 		return;
 
 	if (!(reg & 0x1))
-		card_mask |= (1 << 0);
+		card_mask |= MCT_PIN_ST_S1_CD_ST;
 
 	if (!(reg & 0x2))
-		card_mask |= (1 << 1);
+		card_mask |= MCT_PIN_ST_S2_CD_ST;
 
 	if (menelaus_hw->mmc_callback)
 		menelaus_hw->mmc_callback(menelaus_hw->mmc_callback_data,
@@ -276,14 +200,14 @@ int menelaus_set_mmc_opendrain(int slot, int enable)
 	val = ret;
 	if (slot == 1) {
 		if (enable)
-			val |= 1 << 2;
+			val |= MCT_CTRL1_S1_CMD_OD;
 		else
-			val &= ~(1 << 2);
+			val &= ~MCT_CTRL1_S1_CMD_OD;
 	} else {
 		if (enable)
-			val |= 1 << 3;
+			val |= MCT_CTRL1_S2_CMD_OD;
 		else
-			val &= ~(1 << 3);
+			val &= ~MCT_CTRL1_S2_CMD_OD;
 	}
 	ret = menelaus_write_reg(MENELAUS_MCT_CTRL1, val);
 	mutex_unlock(&the_menelaus->lock);
@@ -300,17 +224,45 @@ int menelaus_set_slot_sel(int enable)
 	ret = menelaus_read_reg(MENELAUS_GPIO_CTRL);
 	if (ret < 0)
 		goto out;
-	ret |= 0x02;
+	ret |= GPIO2_DIR_INPUT;
 	if (enable)
-		ret |= 1 << 5;
+		ret |= GPIO_CTRL_SLOTSELEN;
 	else
-		ret &= ~(1 << 5);
+		ret &= ~GPIO_CTRL_SLOTSELEN;
 	ret = menelaus_write_reg(MENELAUS_GPIO_CTRL, ret);
 out:
 	mutex_unlock(&the_menelaus->lock);
 	return ret;
 }
 EXPORT_SYMBOL(menelaus_set_slot_sel);
+
+int menelaus_enable_slot(int slot, int enable)
+{
+	int ret, val;
+
+	mutex_lock(&the_menelaus->lock);
+	ret = menelaus_read_reg(MENELAUS_MCT_CTRL3);
+	if (ret < 0)
+		goto out;
+	val = ret;
+	if (slot == 1) {
+		if (enable)
+			val |= MCT_CTRL3_SLOT1_EN;
+		else
+			val &= ~MCT_CTRL3_SLOT1_EN;
+	} else {
+		if (enable)
+			val |= MCT_CTRL3_SLOT2_EN;
+		else
+			val &= MCT_CTRL3_SLOT2_EN;
+	}
+	ret = menelaus_write_reg(MENELAUS_MCT_CTRL3, val);
+
+out:
+	mutex_unlock(&the_menelaus->lock);
+	return ret;
+}
+EXPORT_SYMBOL(menelaus_enable_slot);
 
 int menelaus_set_mmc_slot(int slot, int enable, int power, int cd_en)
 {
@@ -329,14 +281,14 @@ int menelaus_set_mmc_slot(int slot, int enable, int power, int cd_en)
 	val = ret;
 	if (slot == 1) {
 		if (cd_en)
-			val |= (1 << 4) | (1 << 6);
+			val |= MCT_CTRL2_S1CD_BUFEN | MCT_CTRL2_S1CD_DBEN;
 		else
-			val &= ~((1 << 4) | (1 << 6));
+			val &= ~(MCT_CTRL2_S1CD_BUFEN | MCT_CTRL2_S1CD_DBEN);
 	} else {
 		if (cd_en)
-			val |= (1 << 5) | (1 << 7);
+			val |= MCT_CTRL2_S2CD_BUFEN | MCT_CTRL2_S2CD_BEN;
 		else
-			val &= ~((1 << 5) | (1 << 7));
+			val &= ~(MCT_CTRL2_S2CD_BUFEN | MCT_CTRL2_S2CD_BEN);
 	}
 	ret = menelaus_write_reg(MENELAUS_MCT_CTRL2, val);
 	if (ret < 0)
@@ -348,25 +300,25 @@ int menelaus_set_mmc_slot(int slot, int enable, int power, int cd_en)
 	val = ret;
 	if (slot == 1) {
 		if (enable)
-			val |= 1 << 0;
+			val |= MCT_CTRL3_SLOT1_EN;
 		else
-			val &= ~(1 << 0);
+			val &= ~MCT_CTRL3_SLOT1_EN;
 	} else {
 		int b;
 
 		if (enable)
-			ret |= 1 << 1;
+			val |= MCT_CTRL3_SLOT2_EN;
 		else
-			ret &= ~(1 << 1);
+			val &= ~MCT_CTRL3_SLOT2_EN;
 		b = menelaus_read_reg(MENELAUS_MCT_CTRL2);
-		b &= ~0x03;
+		b &= ~(MCT_CTRL2_VS2_SEL_D0 | MCT_CTRL2_VS2_SEL_D1);
 		b |= power;
 		ret = menelaus_write_reg(MENELAUS_MCT_CTRL2, b);
 		if (ret < 0)
 			goto out;
 	}
 	/* Disable autonomous shutdown */
-	val &= ~(0x03 << 2);
+	val &= ~(MCT_CTRL3_S1_AUTO_EN | MCT_CTRL3_S2_AUTO_EN);
 	ret = menelaus_write_reg(MENELAUS_MCT_CTRL3, val);
 out:
 	mutex_unlock(&the_menelaus->lock);
@@ -551,7 +503,7 @@ int menelaus_set_vcore_hw(unsigned int roof_mV, unsigned int floor_mV)
 	if (!the_menelaus->vcore_hw_mode) {
 		val = menelaus_read_reg(MENELAUS_VCORE_CTRL1);
 		/* HW mode, turn OFF byte comparator */
-		val |= ((1 << 7) | (1 << 5));
+		val |= (VCORE_CTRL1_HW_NSW | VCORE_CTRL1_BYP_COMP);
 		ret = menelaus_write_reg(MENELAUS_VCORE_CTRL1, val);
 		the_menelaus->vcore_hw_mode = 1;
 	}
@@ -748,7 +700,7 @@ int menelaus_set_regulator_sleep(int enable, u32 val)
 	ret = menelaus_read_reg(MENELAUS_GPIO_CTRL);
 	if (ret < 0)
 		goto out;
-	t = ((1 << 6) | 0x04);
+	t = (GPIO_CTRL_SLPCTLEN | GPIO3_DIR_INPUT);
 	if (enable)
 		ret |= t;
 	else
@@ -929,7 +881,7 @@ static int menelaus_set_time(struct device *dev, struct rtc_time *t)
 		return status;
 	status = menelaus_write_reg(MENELAUS_RTC_WKDAY, bin2bcd(t->tm_wday));
 	if (status < 0) {
-		dev_err(&the_menelaus->client->dev, "rtc write reg %02x "
+		dev_err(&the_menelaus->client->dev, "rtc write reg %02x"
 				"err %d\n", MENELAUS_RTC_WKDAY, status);
 		return status;
 	}
@@ -1175,7 +1127,7 @@ static int menelaus_probe(struct i2c_client *client,
 	/* If a true probe check the device */
 	rev = menelaus_read_reg(MENELAUS_REV);
 	if (rev < 0) {
-		pr_err(DRIVER_NAME ": device not found");
+		dev_err(&client->dev, "device not found");
 		err = -ENODEV;
 		goto fail1;
 	}
@@ -1195,7 +1147,7 @@ static int menelaus_probe(struct i2c_client *client,
 		err = request_irq(client->irq, menelaus_irq, IRQF_DISABLED,
 				  DRIVER_NAME, menelaus);
 		if (err) {
-			dev_dbg(&client->dev,  "can't get IRQ %d, err %d\n",
+			dev_dbg(&client->dev,  "can't get IRQ %d, err %d",
 					client->irq, err);
 			goto fail1;
 		}
@@ -1204,7 +1156,7 @@ static int menelaus_probe(struct i2c_client *client,
 	mutex_init(&menelaus->lock);
 	INIT_WORK(&menelaus->work, menelaus_work);
 
-	pr_info("Menelaus rev %d.%d\n", rev >> 4, rev & 0x0f);
+	dev_info(&client->dev, "Menelaus rev %d.%d\n", rev >> 4, rev & 0x0f);
 
 	val = menelaus_read_reg(MENELAUS_VCORE_CTRL1);
 	if (val < 0)
@@ -1259,15 +1211,7 @@ static struct i2c_driver menelaus_i2c_driver = {
 
 static int __init menelaus_init(void)
 {
-	int res;
-
-	res = i2c_add_driver(&menelaus_i2c_driver);
-	if (res < 0) {
-		pr_err(DRIVER_NAME ": driver registration failed\n");
-		return res;
-	}
-
-	return 0;
+	return i2c_add_driver(&menelaus_i2c_driver);
 }
 
 static void __exit menelaus_exit(void)

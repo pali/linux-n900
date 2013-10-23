@@ -34,27 +34,50 @@ __u32 arm_idlect1_mask;
  * Omap1 specific clock functions
  *-------------------------------------------------------------------------*/
 
-static void omap1_watchdog_recalc(struct clk * clk)
+static void omap1_watchdog_recalc(struct clk *clk, unsigned long parent_rate,
+				  u8 rate_storage)
 {
-	clk->rate = clk->parent->rate / 14;
+	unsigned long new_rate;
+
+	new_rate = parent_rate / 14;
+
+	if (rate_storage == CURRENT_RATE)
+		clk->rate = new_rate;
+	else if (rate_storage == TEMP_RATE)
+		clk->temp_rate = new_rate;
 }
 
-static void omap1_uart_recalc(struct clk * clk)
+static void omap1_uart_recalc(struct clk *clk, unsigned long parent_rate,
+			      u8 rate_storage)
 {
-	unsigned int val = omap_readl(clk->enable_reg);
+	unsigned long new_rate;
+	unsigned int val = __raw_readl(clk->enable_reg);
+
 	if (val & clk->enable_bit)
-		clk->rate = 48000000;
+		new_rate = 48000000;
 	else
-		clk->rate = 12000000;
+		new_rate = 12000000;
+
+	if (rate_storage == CURRENT_RATE)
+		clk->rate = new_rate;
+	else if (rate_storage == TEMP_RATE)
+		clk->temp_rate = new_rate;
 }
 
-static void omap1_sossi_recalc(struct clk *clk)
+static void omap1_sossi_recalc(struct clk *clk, unsigned long parent_rate,
+			       u8 rate_storage)
 {
+	unsigned long new_rate;
 	u32 div = omap_readl(MOD_CONF_CTRL_1);
 
 	div = (div >> 17) & 0x7;
 	div++;
-	clk->rate = clk->parent->rate / div;
+	new_rate = clk->parent->rate / div;
+
+	if (rate_storage == CURRENT_RATE)
+		clk->rate = new_rate;
+	else if (rate_storage == TEMP_RATE)
+		clk->temp_rate = new_rate;
 }
 
 static int omap1_clk_enable_dsp_domain(struct clk *clk)
@@ -215,24 +238,32 @@ static int calc_dsor_exp(struct clk *clk, unsigned long rate)
 	return dsor_exp;
 }
 
-static void omap1_ckctl_recalc(struct clk * clk)
+static void omap1_ckctl_recalc(struct clk *clk, unsigned long parent_rate,
+			       u8 rate_storage)
 {
 	int dsor;
+	unsigned long new_rate;
 
 	/* Calculate divisor encoded as 2-bit exponent */
 	dsor = 1 << (3 & (omap_readw(ARM_CKCTL) >> clk->rate_offset));
 
-	if (unlikely(clk->rate == clk->parent->rate / dsor))
-		return; /* No change, quick exit */
-	clk->rate = clk->parent->rate / dsor;
+	new_rate = parent_rate / dsor;
 
-	if (unlikely(clk->flags & RATE_PROPAGATES))
-		propagate_rate(clk);
+	if (unlikely(clk->rate == new_rate))
+		return; /* No change, quick exit */
+
+	if (rate_storage == CURRENT_RATE)
+		clk->rate = new_rate;
+	else if (rate_storage == TEMP_RATE)
+		clk->temp_rate = new_rate;
 }
 
-static void omap1_ckctl_recalc_dsp_domain(struct clk * clk)
+static void omap1_ckctl_recalc_dsp_domain(struct clk *clk,
+					  unsigned long parent_rate,
+					  u8 rate_storage)
 {
 	int dsor;
+	unsigned long new_rate;
 
 	/* Calculate divisor encoded as 2-bit exponent
 	 *
@@ -245,12 +276,15 @@ static void omap1_ckctl_recalc_dsp_domain(struct clk * clk)
 	dsor = 1 << (3 & (__raw_readw(DSP_CKCTL) >> clk->rate_offset));
 	omap1_clk_disable(&api_ck.clk);
 
-	if (unlikely(clk->rate == clk->parent->rate / dsor))
-		return; /* No change, quick exit */
-	clk->rate = clk->parent->rate / dsor;
+	new_rate = parent_rate / dsor;
 
-	if (unlikely(clk->flags & RATE_PROPAGATES))
-		propagate_rate(clk);
+	if (unlikely(clk->rate == new_rate))
+		return; /* No change, quick exit */
+
+	if (rate_storage == CURRENT_RATE)
+		clk->rate = new_rate;
+	else if (rate_storage == TEMP_RATE)
+		clk->temp_rate = new_rate;
 }
 
 /* MPU virtual clock functions */
@@ -289,7 +323,7 @@ static int omap1_select_table_rate(struct clk * clk, unsigned long rate)
 		omap_sram_reprogram_clock(ptr->dpllctl_val, ptr->ckctl_val);
 
 	ck_dpll1.rate = ptr->pll_rate;
-	propagate_rate(&ck_dpll1);
+	propagate_rate(&ck_dpll1, CURRENT_RATE);
 	return 0;
 }
 
@@ -313,9 +347,6 @@ static int omap1_clk_set_rate_dsp_domain(struct clk *clk, unsigned long rate)
 		clk->rate = clk->parent->rate / (1 << dsor_exp);
 		ret = 0;
 	}
-
-	if (unlikely(ret == 0 && (clk->flags & RATE_PROPAGATES)))
-		propagate_rate(clk);
 
 	return ret;
 }
@@ -372,14 +403,14 @@ static int omap1_set_uart_rate(struct clk * clk, unsigned long rate)
 {
 	unsigned int val;
 
-	val = omap_readl(clk->enable_reg);
+	val = __raw_readl(clk->enable_reg);
 	if (rate == 12000000)
 		val &= ~(1 << clk->enable_bit);
 	else if (rate == 48000000)
 		val |= (1 << clk->enable_bit);
 	else
 		return -EINVAL;
-	omap_writel(val, clk->enable_reg);
+	__raw_writel(val, clk->enable_reg);
 	clk->rate = rate;
 
 	return 0;
@@ -398,8 +429,8 @@ static int omap1_set_ext_clk_rate(struct clk * clk, unsigned long rate)
 	else
 		ratio_bits = (dsor - 2) << 2;
 
-	ratio_bits |= omap_readw(clk->enable_reg) & ~0xfd;
-	omap_writew(ratio_bits, clk->enable_reg);
+	ratio_bits |= __raw_readw(clk->enable_reg) & ~0xfd;
+	__raw_writew(ratio_bits, clk->enable_reg);
 
 	return 0;
 }
@@ -423,8 +454,6 @@ static int omap1_set_sossi_rate(struct clk *clk, unsigned long rate)
 	omap_writel(l, MOD_CONF_CTRL_1);
 
 	clk->rate = p_rate / (div + 1);
-	if (unlikely(clk->flags & RATE_PROPAGATES))
-		propagate_rate(clk);
 
 	return 0;
 }
@@ -440,8 +469,8 @@ static void omap1_init_ext_clk(struct clk * clk)
 	__u16 ratio_bits;
 
 	/* Determine current rate and ensure clock is based on 96MHz APLL */
-	ratio_bits = omap_readw(clk->enable_reg) & ~1;
-	omap_writew(ratio_bits, clk->enable_reg);
+	ratio_bits = __raw_readw(clk->enable_reg) & ~1;
+	__raw_writew(ratio_bits, clk->enable_reg);
 
 	ratio_bits = (ratio_bits & 0xfc) >> 2;
 	if (ratio_bits > 6)
@@ -506,25 +535,13 @@ static int omap1_clk_enable_generic(struct clk *clk)
 	}
 
 	if (clk->flags & ENABLE_REG_32BIT) {
-		if (clk->flags & VIRTUAL_IO_ADDRESS) {
-			regval32 = __raw_readl(clk->enable_reg);
-			regval32 |= (1 << clk->enable_bit);
-			__raw_writel(regval32, clk->enable_reg);
-		} else {
-			regval32 = omap_readl(clk->enable_reg);
-			regval32 |= (1 << clk->enable_bit);
-			omap_writel(regval32, clk->enable_reg);
-		}
+		regval32 = __raw_readl(clk->enable_reg);
+		regval32 |= (1 << clk->enable_bit);
+		__raw_writel(regval32, clk->enable_reg);
 	} else {
-		if (clk->flags & VIRTUAL_IO_ADDRESS) {
-			regval16 = __raw_readw(clk->enable_reg);
-			regval16 |= (1 << clk->enable_bit);
-			__raw_writew(regval16, clk->enable_reg);
-		} else {
-			regval16 = omap_readw(clk->enable_reg);
-			regval16 |= (1 << clk->enable_bit);
-			omap_writew(regval16, clk->enable_reg);
-		}
+		regval16 = __raw_readw(clk->enable_reg);
+		regval16 |= (1 << clk->enable_bit);
+		__raw_writew(regval16, clk->enable_reg);
 	}
 
 	return 0;
@@ -539,34 +556,19 @@ static void omap1_clk_disable_generic(struct clk *clk)
 		return;
 
 	if (clk->flags & ENABLE_REG_32BIT) {
-		if (clk->flags & VIRTUAL_IO_ADDRESS) {
-			regval32 = __raw_readl(clk->enable_reg);
-			regval32 &= ~(1 << clk->enable_bit);
-			__raw_writel(regval32, clk->enable_reg);
-		} else {
-			regval32 = omap_readl(clk->enable_reg);
-			regval32 &= ~(1 << clk->enable_bit);
-			omap_writel(regval32, clk->enable_reg);
-		}
+		regval32 = __raw_readl(clk->enable_reg);
+		regval32 &= ~(1 << clk->enable_bit);
+		__raw_writel(regval32, clk->enable_reg);
 	} else {
-		if (clk->flags & VIRTUAL_IO_ADDRESS) {
-			regval16 = __raw_readw(clk->enable_reg);
-			regval16 &= ~(1 << clk->enable_bit);
-			__raw_writew(regval16, clk->enable_reg);
-		} else {
-			regval16 = omap_readw(clk->enable_reg);
-			regval16 &= ~(1 << clk->enable_bit);
-			omap_writew(regval16, clk->enable_reg);
-		}
+		regval16 = __raw_readw(clk->enable_reg);
+		regval16 &= ~(1 << clk->enable_bit);
+		__raw_writew(regval16, clk->enable_reg);
 	}
 }
 
 static long omap1_clk_round_rate(struct clk *clk, unsigned long rate)
 {
 	int dsor_exp;
-
-	if (clk->flags & RATE_FIXED)
-		return clk->rate;
 
 	if (clk->flags & RATE_CKCTL) {
 		dsor_exp = calc_dsor_exp(clk, rate);
@@ -607,9 +609,6 @@ static int omap1_clk_set_rate(struct clk *clk, unsigned long rate)
 		ret = 0;
 	}
 
-	if (unlikely(ret == 0 && (clk->flags & RATE_PROPAGATES)))
-		propagate_rate(clk);
-
 	return ret;
 }
 
@@ -632,17 +631,10 @@ static void __init omap1_clk_disable_unused(struct clk *clk)
 	}
 
 	/* Is the clock already disabled? */
-	if (clk->flags & ENABLE_REG_32BIT) {
-		if (clk->flags & VIRTUAL_IO_ADDRESS)
-			regval32 = __raw_readl(clk->enable_reg);
-			else
-				regval32 = omap_readl(clk->enable_reg);
-	} else {
-		if (clk->flags & VIRTUAL_IO_ADDRESS)
-			regval32 = __raw_readw(clk->enable_reg);
-		else
-			regval32 = omap_readw(clk->enable_reg);
-	}
+	if (clk->flags & ENABLE_REG_32BIT)
+		regval32 = __raw_readl(clk->enable_reg);
+	else
+		regval32 = __raw_readw(clk->enable_reg);
 
 	if ((regval32 & (1 << clk->enable_bit)) == 0)
 		return;
@@ -769,7 +761,7 @@ int __init omap1_clk_init(void)
 			}
 		}
 	}
-	propagate_rate(&ck_dpll1);
+	propagate_rate(&ck_dpll1, CURRENT_RATE);
 #else
 	/* Find the highest supported frequency and enable it */
 	if (omap1_select_table_rate(&virtual_ck_mpu, ~0)) {
@@ -778,11 +770,11 @@ int __init omap1_clk_init(void)
 		omap_writew(0x2290, DPLL_CTL);
 		omap_writew(cpu_is_omap730() ? 0x3005 : 0x1005, ARM_CKCTL);
 		ck_dpll1.rate = 60000000;
-		propagate_rate(&ck_dpll1);
+		propagate_rate(&ck_dpll1, CURRENT_RATE);
 	}
 #endif
 	/* Cache rates for clocks connected to ck_ref (not dpll1) */
-	propagate_rate(&ck_ref);
+	propagate_rate(&ck_ref, CURRENT_RATE);
 	printk(KERN_INFO "Clocking rate (xtal/DPLL1/MPU): "
 		"%ld.%01ld/%ld.%01ld/%ld.%01ld MHz\n",
 	       ck_ref.rate / 1000000, (ck_ref.rate / 100000) % 10,

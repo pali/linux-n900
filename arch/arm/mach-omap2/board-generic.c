@@ -33,7 +33,7 @@
 
 static void __init omap_generic_init_irq(void)
 {
-	omap2_init_common_hw();
+	omap2_init_common_hw(NULL);
 	omap_init_irq();
 }
 
@@ -41,19 +41,8 @@ static struct omap_uart_config generic_uart_config __initdata = {
 	.enabled_uarts = ((1 << 0) | (1 << 1) | (1 << 2)),
 };
 
-static struct omap_mmc_config generic_mmc_config __initdata = {
-	.mmc [0] = {
-		.enabled 	= 0,
-		.wire4		= 0,
-		.wp_pin		= -1,
-		.power_pin	= -1,
-		.switch_pin	= -1,
-	},
-};
-
-static struct omap_board_config_kernel generic_config[] = {
+static struct omap_board_config_kernel generic_config[] __initdata = {
 	{ OMAP_TAG_UART,	&generic_uart_config },
-	{ OMAP_TAG_MMC,		&generic_mmc_config },
 };
 
 static void __init omap_generic_init(void)
@@ -61,6 +50,8 @@ static void __init omap_generic_init(void)
 	omap_board_config = generic_config;
 	omap_board_config_size = ARRAY_SIZE(generic_config);
 	omap_serial_init();
+	omap_register_i2c_bus(1, 100, NULL, 0);
+	omap_register_i2c_bus(2, 100, NULL, 0);
 }
 
 static void __init omap_generic_map_io(void)

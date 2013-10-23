@@ -63,6 +63,27 @@ config LEDS_WRAP
 	help
 	  This option enables support for the PCEngines WRAP programmable LEDs.
 
+config LEDS_OMAP_DEBUG
+	boolean "LED Support for OMAP debug board LEDs"
+	depends on LEDS_CLASS=y && ARCH_OMAP
+	help
+	  Enables support for the LEDs on the debug board used with OMAP
+	  reference boards like H2/H3/H4 and Perseus2.  Up to six of these
+	  may be claimed by the original ARM debug LED API.
+
+config LEDS_OMAP
+	tristate "LED Support for OMAP GPIO LEDs"
+	depends on LEDS_CLASS && ARCH_OMAP
+	help
+	  This option enables support for the LEDs on OMAP processors.
+
+config LEDS_OMAP_PWM
+	tristate "LED Support for OMAP PWM-controlled LEDs"
+	depends on LEDS_CLASS && ARCH_OMAP && OMAP_DM_TIMER
+	help
+	  This options enables support for LEDs connected to GPIO lines
+	  controlled by a PWM timer on OMAP CPUs.
+
 config LEDS_H1940
 	tristate "LED Support for iPAQ H1940 device"
 	depends on LEDS_CLASS && ARCH_H1940

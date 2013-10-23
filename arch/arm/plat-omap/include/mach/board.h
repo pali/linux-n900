@@ -16,7 +16,6 @@
 
 /* Different peripheral ids */
 #define OMAP_TAG_CLOCK		0x4f01
-#define OMAP_TAG_MMC		0x4f02
 #define OMAP_TAG_SERIAL_CONSOLE 0x4f03
 #define OMAP_TAG_USB		0x4f04
 #define OMAP_TAG_LCD		0x4f05
@@ -25,35 +24,17 @@
 #define OMAP_TAG_FBMEM		0x4f08
 #define OMAP_TAG_STI_CONSOLE	0x4f09
 #define OMAP_TAG_CAMERA_SENSOR	0x4f0a
+#define OMAP_TAG_PARTITION      0x4f0b
+#define OMAP_TAG_TEA5761	0x4f10
+#define OMAP_TAG_TMP105		0x4f11
 
 #define OMAP_TAG_BOOT_REASON    0x4f80
-#define OMAP_TAG_FLASH_PART	0x4f81
+#define OMAP_TAG_FLASH_PART_STR	0x4f81
 #define OMAP_TAG_VERSION_STR	0x4f82
 
 struct omap_clock_config {
 	/* 0 for 12 MHz, 1 for 13 MHz and 2 for 19.2 MHz */
 	u8 system_clock_type;
-};
-
-struct omap_mmc_conf {
-	unsigned enabled:1;
-	/* nomux means "standard" muxing is wrong on this board, and that
-	 * board-specific code handled it before common init logic.
-	 */
-	unsigned nomux:1;
-	/* switch pin can be for card detect (default) or card cover */
-	unsigned cover:1;
-	/* 4 wire signaling is optional, and is only used for SD/SDIO */
-	unsigned wire4:1;
-	/* use the internal clock */
-	unsigned internal_clock:1;
-	s16 power_pin;
-	s16 switch_pin;
-	s16 wp_pin;
-};
-
-struct omap_mmc_config {
-	struct omap_mmc_conf mmc[2];
 };
 
 struct omap_serial_console_config {
@@ -64,12 +45,6 @@ struct omap_serial_console_config {
 struct omap_sti_console_config {
 	unsigned enable:1;
 	u8 channel;
-};
-
-struct omap_camera_sensor_config {
-	u16 reset_gpio;
-	int (*power_on)(void * data);
-	int (*power_off)(void * data);
 };
 
 struct omap_usb_config {
@@ -131,9 +106,9 @@ struct omap_pwm_led_platform_data {
 struct omap_gpio_switch_config {
 	char name[12];
 	u16 gpio;
-	int flags:4;
-	int type:4;
-	int key_code:24; /* Linux key code */
+	u8 flags:4;
+	u8 type:4;
+	unsigned int key_code:24; /* Linux key code */
 };
 
 struct omap_uart_config {
@@ -141,8 +116,25 @@ struct omap_uart_config {
 	unsigned int enabled_uarts;
 };
 
+struct omap_tea5761_config {
+	u16 enable_gpio;
+};
 
-struct omap_flash_part_config {
+/* This cannot be passed from the bootloader */
+struct omap_tmp105_config {
+	u16 tmp105_irq_pin;
+	int (* set_power)(int enable);
+};
+
+struct omap_partition_config {
+	char name[16];
+	unsigned int size;
+	unsigned int offset;
+	/* same as in include/linux/mtd/partitions.h */
+	unsigned int mask_flags;
+};
+
+struct omap_flash_part_str_config {
 	char part_table[0];
 };
 
@@ -154,9 +146,6 @@ struct omap_version_config {
 	char component[12];
 	char version[12];
 };
-
-
-#include <mach/board-nokia.h>
 
 struct omap_board_config_entry {
 	u16 tag;

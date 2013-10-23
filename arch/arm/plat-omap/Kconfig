@@ -56,6 +56,37 @@ config OMAP_DEBUG_CLOCKDOMAIN
 	  for every clockdomain register write.  However, the
 	  extra detail costs some memory.
 
+config OMAP_SMARTREFLEX
+	bool "SmartReflex support"
+	depends on ARCH_OMAP34XX && TWL4030_CORE
+	help
+	  Say Y if you want to enable SmartReflex.
+
+	  SmartReflex can perform continuous dynamic voltage
+	  scaling around the nominal operating point voltage
+	  according to silicon characteristics and operating
+	  conditions. Enabling SmartReflex reduces power
+	  consumption.
+
+	  Please note, that by default SmartReflex is only
+	  initialized. To enable the automatic voltage
+	  compensation for VDD1 and VDD2, user must write 1 to
+	  /sys/power/sr_vddX_autocomp, where X is 1 or 2.
+
+config OMAP_SMARTREFLEX_TESTING
+	bool "Smartreflex testing support"
+	depends on OMAP_SMARTREFLEX
+	default n
+	help
+	  Say Y if you want to enable SmartReflex testing with SW hardcoded
+	  NVALUES intead of E-fuse NVALUES set in factory silicon testing.
+
+	  In some devices the E-fuse values have not been set, even though
+	  SmartReflex modules are included. Using these hardcoded values set
+	  in software, one can test the SmartReflex features without E-fuse.
+
+	  WARNING: Enabling this option may cause your device to hang!
+
 config OMAP_RESET_CLOCKS
 	bool "Reset unused clocks during boot"
 	depends on ARCH_OMAP
@@ -67,6 +98,39 @@ config OMAP_RESET_CLOCKS
 	  If you are booting from another operating system, you
 	  probably do not want this option enabled until your
 	  device drivers work properly.
+
+config OMAP_BOOT_TAG
+	bool "OMAP bootloader information passing"
+        depends on ARCH_OMAP
+        default n
+        help
+          Say Y, if you have a bootloader which passes information
+          about your board and its peripheral configuration.
+
+config OMAP_BOOT_REASON
+	bool "Support for boot reason"
+        depends on OMAP_BOOT_TAG
+        default n
+        help
+          Say Y, if you want to have a procfs entry for reading the boot
+          reason in user-space.
+
+config OMAP_COMPONENT_VERSION
+	bool "Support for component version display"
+	depends on OMAP_BOOT_TAG && PROC_FS
+	default n
+	help
+	  Say Y, if you want to have a procfs entry for reading component
+	  versions (supplied by the bootloader) in user-space.
+
+config OMAP_GPIO_SWITCH
+	bool "GPIO switch support"
+        default n
+        help
+          Say Y, if you want to have support for reporting of GPIO
+          switches (e.g. cover switches) via sysfs. Your bootloader has
+          to provide information about the switches to the kernel via the
+          ATAG_BOARD mechanism if they're not defined by the board config.
 
 config OMAP_MUX
 	bool "OMAP multiplexing support"
@@ -102,6 +166,22 @@ config OMAP_MCBSP
 	  Say Y here if you want support for the OMAP Multichannel
 	  Buffered Serial Port.
 
+config OMAP_MMU_FWK
+	bool "MMU framework support"
+	depends on ARCH_OMAP
+	default n
+	help
+	  Say Y here if you want to use OMAP MMU framework support for
+	  DSP, IVA1.0 and Camera in OMAP1/2.
+
+config OMAP_MBOX_FWK
+	tristate "Mailbox framework support"
+	depends on ARCH_OMAP
+	default n
+	help
+	  Say Y here if you want to use OMAP Mailbox framework support for
+	  DSP, IVA1.0 and IVA2 in OMAP1/2/3.
+
 choice
         prompt "System timer"
 	default OMAP_MPU_TIMER
@@ -133,6 +213,21 @@ config OMAP_32K_TIMER_HZ
        help
 	  Kernel internal timer frequency should be a divisor of 32768,
 	  such as 64 or 128.
+
+config OMAP_TICK_GPTIMER
+	int "GPTIMER used for system tick timer"
+	depends on ARCH_OMAP2 || ARCH_OMAP3
+	range 1 12
+	default 1
+	help
+	  Linux uses one of the twelve on-board OMAP GPTIMER blocks to generate
+	  system tick interrupts.  The twelve GPTIMERs have slightly
+	  different powerdomain, source clock, and security properties
+	  (mostly documented in the OMAP3 TRMs) that can affect the selection
+	  of which GPTIMER to use.  The historical default is GPTIMER1.
+	  If CONFIG_OMAP_32K_TIMER is selected, Beagle may require GPTIMER12
+	  due to hardware sensitivity to glitches on the OMAP 32kHz clock
+	  input.
 
 config OMAP_DM_TIMER
 	bool "Use dual-mode timer"
