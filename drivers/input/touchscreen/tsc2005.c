@@ -147,6 +147,7 @@ struct tsc2005 {
 
 	unsigned int		x_plate_ohm;
 
+	bool			disabled;
 	bool			opened;
 	bool			suspended;
 
@@ -384,6 +385,48 @@ static void __tsc2005_enable(struct tsc2005 *ts)
 
 }
 
+static ssize_t tsc2005_disable_show(struct device *dev,
+				    struct device_attribute *attr, char *buf)
+{
+	struct spi_device *spi = to_spi_device(dev);
+	struct tsc2005 *ts = spi_get_drvdata(spi);
+
+	return sprintf(buf, "%u\n", ts->disabled);
+}
+
+static ssize_t tsc2005_disable_store(struct device *dev,
+				     struct device_attribute *attr,
+				     const char *buf, size_t count)
+{
+	struct spi_device *spi = to_spi_device(dev);
+	struct tsc2005 *ts = spi_get_drvdata(spi);
+	unsigned long val;
+	int error;
+
+	error = strict_strtoul(buf, 10, &val);
+	if (error)
+		return error;
+
+	mutex_lock(&ts->mutex);
+
+	if (!ts->suspended && ts->opened) {
+		if (val) {
+			if (!ts->disabled)
+				__tsc2005_disable(ts);
+		} else {
+			if (ts->disabled)
+				__tsc2005_enable(ts);
+		}
+	}
+
+	ts->disabled = !!val;
+
+	mutex_unlock(&ts->mutex);
+
+	return count;
+}
+static DEVICE_ATTR(disable, 0664, tsc2005_disable_show, tsc2005_disable_store);
+
 static ssize_t tsc2005_selftest_show(struct device *dev,
 				     struct device_attribute *attr,
 				     char *buf)
@@ -466,6 +509,7 @@ out:
 static DEVICE_ATTR(selftest, S_IRUGO, tsc2005_selftest_show, NULL);
 
 static struct attribute *tsc2005_attrs[] = {
+	&dev_attr_disable.attr,
 	&dev_attr_selftest.attr,
 	NULL
 };
@@ -551,7 +595,7 @@ static int tsc2005_open(struct input_dev *input)
 
 	mutex_lock(&ts->mutex);
 
-	if (!ts->suspended)
+	if (!ts->suspended && !ts->disabled)
 		__tsc2005_enable(ts);
 
 	ts->opened = true;
@@ -567,7 +611,7 @@ static void tsc2005_close(struct input_dev *input)
 
 	mutex_lock(&ts->mutex);
 
-	if (!ts->suspended)
+	if (!ts->suspended && !ts->disabled)
 		__tsc2005_disable(ts);
 
 	ts->opened = false;
@@ -780,7 +824,7 @@ static int __maybe_unused tsc2005_suspend(struct device *dev)
 
 	mutex_lock(&ts->mutex);
 
-	if (!ts->suspended && ts->opened)
+	if (!ts->suspended && !ts->disabled && ts->opened)
 		__tsc2005_disable(ts);
 
 	ts->suspended = true;
@@ -797,7 +841,7 @@ static int __maybe_unused tsc2005_resume(struct device *dev)
 
 	mutex_lock(&ts->mutex);
 
-	if (ts->suspended && ts->opened)
+	if (ts->suspended && !ts->disabled && ts->opened)
 		__tsc2005_enable(ts);
 
 	ts->suspended = false;
