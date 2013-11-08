@@ -188,7 +188,15 @@ static void lp5523_load_engine_and_select_page(struct lp55xx_chip *chip)
 
 static void lp5523_stop_engine(struct lp55xx_chip *chip)
 {
-	lp55xx_write(chip, LP5523_REG_OP_MODE, 0);
+	enum lp55xx_engine_index idx = chip->engine_idx;
+	u8 mask[] = {
+		[LP55XX_ENGINE_1] = LP5523_MODE_ENG1_M,
+		[LP55XX_ENGINE_2] = LP5523_MODE_ENG2_M,
+		[LP55XX_ENGINE_3] = LP5523_MODE_ENG3_M,
+	};
+
+	lp55xx_update_bits(chip, LP5523_REG_OP_MODE, mask[idx], 0);
+
 	lp5523_wait_opmode_done();
 }
 
@@ -336,8 +344,6 @@ static int lp5523_update_program_memory(struct lp55xx_chip *chip,
 	if (i % 2)
 		goto err;
 
-	mutex_lock(&chip->lock);
-
 	for (i = 0; i < LP5523_PROGRAM_LENGTH; i++) {
 		ret = lp55xx_write(chip, LP5523_REG_PROG_MEM + i, pattern[i]);
 		if (ret) {
@@ -345,8 +351,6 @@ static int lp5523_update_program_memory(struct lp55xx_chip *chip,
 			return -EINVAL;
 		}
 	}
-
-	mutex_unlock(&chip->lock);
 
 	return size;
 
