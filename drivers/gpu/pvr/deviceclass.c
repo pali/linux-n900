@@ -1209,7 +1209,7 @@ void PVRSRVSetDCState(u32 ui32State)
 	}
 }
 
-static IMG_BOOL PVRGetDisplayClassJTable(
+IMG_BOOL PVRGetDisplayClassJTable(
 				struct PVRSRV_DC_DISP2SRV_KMJTABLE *psJTable)
 {
 	psJTable->ui32TableSize = sizeof(struct PVRSRV_DC_DISP2SRV_KMJTABLE);
