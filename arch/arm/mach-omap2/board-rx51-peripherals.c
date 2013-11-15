@@ -27,6 +27,7 @@
 #include <linux/omap-gpmc.h>
 #include <linux/mmc/host.h>
 #include <linux/power/isp1704_charger.h>
+#include <linux/power/bq2415x_charger.h>
 #include <linux/platform_data/spi-omap2-mcspi.h>
 #include <linux/platform_data/mtd-onenand-omap2.h>
 #include <linux/hsi/hsi.h>
@@ -1123,6 +1124,16 @@ static struct si4713_platform_data rx51_si4713_platform_data = {
 };
 #endif
 
+static struct bq2415x_platform_data rx51_bq24150a_platform_data = {
+	.current_limit = 100,			/* mA */
+	.weak_battery_voltage = 3400,		/* mV */
+	.battery_regulation_voltage = 4200,	/* mV */
+	.charge_current = 650,			/* mA */
+	.termination_current = 100,		/* mA */
+	.resistor_sense = 68,			/* m ohm */
+	.notify_device = "isp1704",
+};
+
 static struct i2c_board_info __initdata rx51_peripherals_i2c_board_info_2[] = {
 #if IS_ENABLED(CONFIG_I2C_SI4713) && IS_ENABLED(CONFIG_PLATFORM_SI4713)
 	{
@@ -1156,7 +1167,11 @@ static struct i2c_board_info __initdata rx51_peripherals_i2c_board_info_2[] = {
 	{
 		I2C_BOARD_INFO("tpa6130a2", 0x60),
 		.platform_data = &rx51_tpa6130a2_data,
-	}
+	},
+	{
+		I2C_BOARD_INFO("bq24150a", 0x6b),
+		.platform_data = &rx51_bq24150a_platform_data,
+	},
 };
 
 static struct i2c_board_info __initdata rx51_peripherals_i2c_board_info_3[] = {
