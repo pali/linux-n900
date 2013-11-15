@@ -25,7 +25,6 @@
 #include <linux/gpio_keys.h>
 #include <linux/mmc/host.h>
 #include <linux/power/isp1704_charger.h>
-#include <linux/power/bq2415x_charger.h>
 #include <linux/platform_data/spi-omap2-mcspi.h>
 #include <linux/platform_data/mtd-onenand-omap2.h>
 #include <linux/hsi/hsi.h>
@@ -308,44 +307,6 @@ static struct platform_device rx51_battery_device = {
 	.id	= -1,
 };
 
-static enum bq2415x_mode rx51_charger_mode = BQ2415X_MODE_OFF;
-static void *rx51_charger_hook_data;
-static void (*rx51_charger_hook)(enum bq2415x_mode mode, void *data);
-
-static int rx51_charger_set_hook(
-		void (*hook)(enum bq2415x_mode mode, void *data), void *data)
-{
-	rx51_charger_hook = hook;
-	rx51_charger_hook_data = data;
-	if (rx51_charger_hook)
-		rx51_charger_hook(rx51_charger_mode, rx51_charger_hook_data);
-	return 1;
-}
-
-static void rx51_charger_set_current(int mA)
-{
-	enum bq2415x_mode mode;
-
-	pr_info("RX-51: Charger current limit is %d mA\n", mA);
-
-	if (mA == 0)
-		mode = BQ2415X_MODE_OFF;
-	else if (mA < 500)
-		mode = BQ2415X_MODE_NONE;
-	else if (mA < 1800)
-		mode = BQ2415X_MODE_HOST_CHARGER;
-	else
-		mode = BQ2415X_MODE_DEDICATED_CHARGER;
-
-	if (rx51_charger_mode == mode)
-		return;
-
-	rx51_charger_mode = mode;
-
-	if (rx51_charger_hook)
-		rx51_charger_hook(rx51_charger_mode, rx51_charger_hook_data);
-}
-
 static void rx51_charger_set_power(bool on)
 {
 	gpio_set_value(RX51_USB_TRANSCEIVER_RST_GPIO, on);
@@ -353,7 +314,6 @@ static void rx51_charger_set_power(bool on)
 
 static struct isp1704_charger_data rx51_charger_data = {
 	.set_power	= rx51_charger_set_power,
-	.set_current	= rx51_charger_set_current,
 };
 
 static struct platform_device rx51_charger_device = {
@@ -1315,16 +1275,6 @@ static struct aic3x_pdata rx51_aic3x_data2 = {
 	.gpio_reset = 60,
 };
 
-static struct bq2415x_platform_data rx51_bq24150a_platform_data = {
-	.current_limit = 100,			/* mA */
-	.weak_battery_voltage = 3400,		/* mV */
-	.battery_regulation_voltage = 4200,	/* mV */
-	.charge_current = 650,			/* mA */
-	.termination_current = 100,		/* mA */
-	.resistor_sense = 68,			/* m ohm */
-	.set_mode_hook = &rx51_charger_set_hook,
-};
-
 static struct i2c_board_info __initdata rx51_peripherals_i2c_board_info_2[] = {
 	{
 		I2C_BOARD_INFO("tlv320aic3x", 0x18),
@@ -1352,11 +1302,7 @@ static struct i2c_board_info __initdata rx51_peripherals_i2c_board_info_2[] = {
 	{
 		I2C_BOARD_INFO("tpa6130a2", 0x60),
 		.platform_data = &rx51_tpa6130a2_data,
-	},
-	{
-		I2C_BOARD_INFO("bq24150a", 0x6b),
-		.platform_data = &rx51_bq24150a_platform_data,
-	},
+	}
 };
 
 static struct i2c_board_info __initdata rx51_peripherals_i2c_board_info_3[] = {
