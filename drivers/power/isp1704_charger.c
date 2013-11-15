@@ -91,18 +91,6 @@ static void isp1704_charger_set_power(struct isp1704_charger *isp, bool on)
 }
 
 /*
- * Set charger current from isp1704 if a function for it
- * has been provided with platform data.
- */
-static void isp1704_charger_set_current(struct isp1704_charger *isp, int mA)
-{
-	struct isp1704_charger_data *board = isp->dev->platform_data;
-
-	if (board && board->set_current)
-		board->set_current(mA);
-}
-
-/*
  * Determine is the charging port DCP (dedicated charger) or CDP (Host/HUB
  * chargers).
  *
@@ -269,7 +257,6 @@ static void isp1704_charger_work(struct work_struct *data)
 			if (isp1704_charger_detect_dcp(isp)) {
 				isp->psy.type = POWER_SUPPLY_TYPE_USB_DCP;
 				isp->current_max = 1800;
-				isp1704_charger_set_current(isp, 1800);
 			} else {
 				isp->psy.type = POWER_SUPPLY_TYPE_USB;
 				isp->current_max = 500;
@@ -290,8 +277,6 @@ static void isp1704_charger_work(struct work_struct *data)
 
 			if (isp->current_max > 100)
 				isp->psy.type = POWER_SUPPLY_TYPE_USB_CDP;
-
-			isp1704_charger_set_current(isp, isp->current_max);
 		}
 		break;
 	case USB_EVENT_NONE:
@@ -312,7 +297,6 @@ static void isp1704_charger_work(struct work_struct *data)
 			usb_gadget_disconnect(isp->phy->otg->gadget);
 
 		isp1704_charger_set_power(isp, 0);
-		isp1704_charger_set_current(isp, 0);
 		break;
 	default:
 		goto out;
