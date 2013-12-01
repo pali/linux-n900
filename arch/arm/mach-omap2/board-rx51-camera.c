@@ -31,6 +31,7 @@
 
 #include <asm/gpio.h>
 
+#ifdef CONFIG_MEDIA_CAMERA_SUPPORT
 #include "../../../drivers/media/platform/omap3isp/isp.h"
 #include "../../../drivers/media/platform/omap3isp/ispreg.h"
 
@@ -375,9 +376,11 @@ static struct isp_platform_data rx51_isp_platform_data = {
 		{ .dev_id = "2-0010"},
 	.subdevs = rx51_camera_subdevs,
 };
+#endif
 
 void __init rx51_camera_init(void)
 {
+#ifdef CONFIG_MEDIA_CAMERA_SUPPORT
 	if (rx51_camera_hw_init()) {
 		printk(KERN_WARNING "%s: Unable to initialize camera\n",
 		       __func__);
@@ -387,4 +390,5 @@ void __init rx51_camera_init(void)
 	if (omap3_init_camera(&rx51_isp_platform_data) < 0)
 		printk(KERN_WARNING "%s: Unable to register camera platform "
 		       "device\n", __func__);
+#endif
 }
