@@ -345,6 +345,9 @@ static const struct region_info region_configs[] = {
 
 /*
  *	I2C Interface read / write
+ *
+ * Note: callers use | operation to combine errors from multiple
+ * calls. So this has to return just single error value.
  */
 static int bcm2048_send_command(struct bcm2048_device *bdev, unsigned int reg,
 				unsigned int value)
@@ -624,10 +627,7 @@ static int bcm2048_get_fm_frequency(struct bcm2048_device *bdev)
 	if (err)
 		return err;
 
-	err = compose_u16(msb, lsb);
-	err += BCM2048_FREQUENCY_BASE;
-
-	return err;
+	return compose_u16(msb, lsb) + BCM2048_FREQUENCY_BASE;
 }
 
 static int bcm2048_set_fm_af_frequency(struct bcm2048_device *bdev,
@@ -669,10 +669,7 @@ static int bcm2048_get_fm_af_frequency(struct bcm2048_device *bdev)
 	if (err)
 		return err;
 
-	err = compose_u16(msb, lsb);
-	err += BCM2048_FREQUENCY_BASE;
-
-	return err;
+	return compose_u16(msb, lsb) + BCM2048_FREQUENCY_BASE;
 }
 
 static int bcm2048_set_fm_deemphasis(struct bcm2048_device *bdev, int d)
