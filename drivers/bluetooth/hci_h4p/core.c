@@ -37,12 +37,11 @@
 #include <linux/timer.h>
 #include <linux/kthread.h>
 
-#include <mach/hardware.h>
-#include <mach/irqs.h>
-
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
 #include <net/bluetooth/hci.h>
+
+#include <linux/bluetooth/hci_h4p.h>
 
 #include "hci_h4p.h"
 
@@ -56,11 +55,8 @@ static void hci_h4p_set_clk(struct hci_h4p_info *info, int *clock, int enable)
 	spin_lock_irqsave(&info->clocks_lock, flags);
 	if (enable && !*clock) {
 		NBT_DBG_POWER("Enabling %p\n", clock);
-		clk_enable(info->uart_fclk);
-#if defined(CONFIG_ARCH_OMAP2) || defined(CONFIG_ARCH_OMAP3)
-		if (cpu_is_omap24xx() || cpu_is_omap34xx())
-			clk_enable(info->uart_iclk);
-#endif
+		clk_prepare_enable(info->uart_fclk);
+		clk_prepare_enable(info->uart_iclk);
 		if (atomic_read(&info->clk_users) == 0)
 			hci_h4p_restore_regs(info);
 		atomic_inc(&info->clk_users);
@@ -70,11 +66,8 @@ static void hci_h4p_set_clk(struct hci_h4p_info *info, int *clock, int enable)
 		NBT_DBG_POWER("Disabling %p\n", clock);
 		if (atomic_dec_and_test(&info->clk_users))
 			hci_h4p_store_regs(info);
-		clk_disable(info->uart_fclk);
-#if defined(CONFIG_ARCH_OMAP2) || defined(CONFIG_ARCH_OMAP3)
-		if (cpu_is_omap24xx() || cpu_is_omap34xx())
-			clk_disable(info->uart_iclk);
-#endif
+		clk_disable_unprepare(info->uart_fclk);
+		clk_disable_unprepare(info->uart_iclk);
 	}
 
 	*clock = enable;
@@ -266,10 +259,10 @@ static int hci_h4p_send_negotiation(struct hci_h4p_info *info)
 	NBT_DBG("Sending negotiation..\n");
 
 	switch (info->bt_sysclk) {
-	case BT_SYSCLK_12:
+	case 1:
 		sysclk = 12000;
 		break;
-	case BT_SYSCLK_38_4:
+	case 2:
 		sysclk = 38400;
 		break;
 	default:
@@ -711,13 +704,13 @@ static irqreturn_t hci_h4p_wakeup_interrupt(int irq, void *dev_inst)
 
 static inline void hci_h4p_set_pm_limits(struct hci_h4p_info *info, bool set)
 {
-	struct omap_bluetooth_config *bt_config = info->dev->platform_data;
+	struct hci_h4p_platform_data *bt_plat_data = info->dev->platform_data;
 
-	if (unlikely(!bt_config || !bt_config->set_pm_limits))
+	if (unlikely(!bt_plat_data || !bt_plat_data->set_pm_limits))
 		return;
 
 	if (set && !test_bit(H4P_ACTIVE_MODE, &info->pm_flags)) {
-		bt_config->set_pm_limits(info->dev, set);
+		bt_plat_data->set_pm_limits(info->dev, set);
 		set_bit(H4P_ACTIVE_MODE, &info->pm_flags);
 		BT_DBG("Change pm constraints to: %s", set ?
 				"set" : "clear");
@@ -725,7 +718,7 @@ static inline void hci_h4p_set_pm_limits(struct hci_h4p_info *info, bool set)
 	}
 
 	if (!set && test_bit(H4P_ACTIVE_MODE, &info->pm_flags)) {
-		bt_config->set_pm_limits(info->dev, set);
+		bt_plat_data->set_pm_limits(info->dev, set);
 		clear_bit(H4P_ACTIVE_MODE, &info->pm_flags);
 		BT_DBG("Change pm constraints to: %s",
 				set ? "set" : "clear");
@@ -851,7 +844,7 @@ static int hci_h4p_reset(struct hci_h4p_info *info)
 static int hci_h4p_hci_flush(struct hci_dev *hdev)
 {
 	struct hci_h4p_info *info;
-	info = hdev->driver_data;
+	info = hci_get_drvdata(hdev);
 
 	skb_queue_purge(&info->txq);
 
@@ -919,7 +912,7 @@ static int hci_h4p_hci_open(struct hci_dev *hdev)
 	struct sk_buff_head fw_queue;
 	unsigned long flags;
 
-	info = hdev->driver_data;
+	info = hci_get_drvdata(hdev);
 
 	if (test_bit(HCI_RUNNING, &hdev->flags))
 		return 0;
@@ -1005,7 +998,7 @@ err_clean:
 
 static int hci_h4p_hci_close(struct hci_dev *hdev)
 {
-	struct hci_h4p_info *info = hdev->driver_data;
+	struct hci_h4p_info *info = hci_get_drvdata(hdev);
 
 	if (!test_and_clear_bit(HCI_RUNNING, &hdev->flags))
 		return 0;
@@ -1027,10 +1020,6 @@ static int hci_h4p_hci_close(struct hci_dev *hdev)
 	return 0;
 }
 
-static void hci_h4p_hci_destruct(struct hci_dev *hdev)
-{
-}
-
 static int hci_h4p_hci_send_frame(struct sk_buff *skb)
 {
 	struct hci_h4p_info *info;
@@ -1044,7 +1033,7 @@ static int hci_h4p_hci_send_frame(struct sk_buff *skb)
 
 	NBT_DBG("dev %p, skb %p\n", hdev, skb);
 
-	info = hdev->driver_data;
+	info = hci_get_drvdata(hdev);
 
 	if (!test_bit(HCI_RUNNING, &hdev->flags)) {
 		dev_warn(info->dev, "Frame for non-running device\n");
@@ -1086,6 +1075,50 @@ static int hci_h4p_hci_ioctl(struct hci_dev *hdev, unsigned int cmd,
 	return -ENOIOCTLCMD;
 }
 
+static ssize_t hci_h4p_store_bdaddr(struct device *dev,
+				    struct device_attribute *attr,
+				    const char *buf, size_t count)
+{
+	struct hci_h4p_info *info = dev_get_drvdata(dev);
+	unsigned int bdaddr[6];
+	int ret, i;
+
+	ret = sscanf(buf, "%2x:%2x:%2x:%2x:%2x:%2x\n",
+			&bdaddr[0], &bdaddr[1], &bdaddr[2],
+			&bdaddr[3], &bdaddr[4], &bdaddr[5]);
+
+	if (ret != 6)
+		return -EINVAL;
+
+	for (i = 0; i < 6; i++)
+		info->bd_addr[i] = bdaddr[i] & 0xff;
+
+	return count;
+}
+
+static ssize_t hci_h4p_show_bdaddr(struct device *dev,
+				   struct device_attribute *attr, char *buf)
+{
+	struct hci_h4p_info *info = dev_get_drvdata(dev);
+
+	return sprintf(buf, "%.2x:%.2x:%.2x:%.2x:%.2x:%.2x\n",
+		       info->bd_addr[0], info->bd_addr[1], info->bd_addr[2],
+		       info->bd_addr[3], info->bd_addr[4], info->bd_addr[5]);
+}
+
+static DEVICE_ATTR(bdaddr, S_IRUGO | S_IWUSR, hci_h4p_show_bdaddr,
+		   hci_h4p_store_bdaddr);
+
+static int hci_h4p_sysfs_create_files(struct device *dev)
+{
+	return device_create_file(dev, &dev_attr_bdaddr);
+}
+
+static void hci_h4p_sysfs_remove_files(struct device *dev)
+{
+	device_remove_file(dev, &dev_attr_bdaddr);
+}
+
 static int hci_h4p_register_hdev(struct hci_h4p_info *info)
 {
 	struct hci_dev *hdev;
@@ -1099,21 +1132,26 @@ static int hci_h4p_register_hdev(struct hci_h4p_info *info)
 	}
 	info->hdev = hdev;
 
-	hdev->type = HCI_UART;
-	hdev->driver_data = info;
+	hdev->bus = HCI_UART;
+	hci_set_drvdata(hdev, info);
 
 	hdev->open = hci_h4p_hci_open;
 	hdev->close = hci_h4p_hci_close;
 	hdev->flush = hci_h4p_hci_flush;
 	hdev->send = hci_h4p_hci_send_frame;
-	hdev->destruct = hci_h4p_hci_destruct;
 	hdev->ioctl = hci_h4p_hci_ioctl;
-	set_bit(HCI_QUIRK_NO_RESET, &hdev->quirks);
+	set_bit(HCI_QUIRK_RESET_ON_CLOSE, &hdev->quirks);
 
-	hdev->owner = THIS_MODULE;
+	SET_HCIDEV_DEV(hdev, info->dev);
+
+	if (hci_h4p_sysfs_create_files(info->dev) < 0) {
+		dev_err(info->dev, "failed to create sysfs files\n");
+		return -ENODEV;
+	}
 
 	if (hci_register_dev(hdev) < 0) {
 		dev_err(info->dev, "hci_register failed %s.\n", hdev->name);
+		hci_h4p_sysfs_remove_files(info->dev);
 		return -ENODEV;
 	}
 
@@ -1122,9 +1160,9 @@ static int hci_h4p_register_hdev(struct hci_h4p_info *info)
 
 static int hci_h4p_probe(struct platform_device *pdev)
 {
-	struct omap_bluetooth_config *bt_config;
+	struct hci_h4p_platform_data *bt_plat_data;
 	struct hci_h4p_info *info;
-	int irq, err;
+	int err;
 
 	dev_info(&pdev->dev, "Registering HCI H4P device\n");
 	info = kzalloc(sizeof(struct hci_h4p_info), GFP_KERNEL);
@@ -1134,7 +1172,6 @@ static int hci_h4p_probe(struct platform_device *pdev)
 	info->dev = &pdev->dev;
 	info->tx_enabled = 1;
 	info->rx_enabled = 1;
-	irq = 0;
 	spin_lock_init(&info->lock);
 	spin_lock_init(&info->clocks_lock);
 	skb_queue_head_init(&info->txq);
@@ -1145,18 +1182,17 @@ static int hci_h4p_probe(struct platform_device *pdev)
 		return -ENODATA;
 	}
 
-	bt_config = pdev->dev.platform_data;
-	info->chip_type = bt_config->chip_type;
-	info->bt_wakeup_gpio = bt_config->bt_wakeup_gpio;
-	info->host_wakeup_gpio = bt_config->host_wakeup_gpio;
-	info->reset_gpio = bt_config->reset_gpio;
-	info->reset_gpio_shared = bt_config->reset_gpio_shared;
-	info->bt_sysclk = bt_config->bt_sysclk;
+	bt_plat_data = pdev->dev.platform_data;
+	info->chip_type = bt_plat_data->chip_type;
+	info->bt_wakeup_gpio = bt_plat_data->bt_wakeup_gpio;
+	info->host_wakeup_gpio = bt_plat_data->host_wakeup_gpio;
+	info->reset_gpio = bt_plat_data->reset_gpio;
+	info->reset_gpio_shared = bt_plat_data->reset_gpio_shared;
+	info->bt_sysclk = bt_plat_data->bt_sysclk;
 
 	NBT_DBG("RESET gpio: %d\n", info->reset_gpio);
 	NBT_DBG("BTWU gpio: %d\n", info->bt_wakeup_gpio);
 	NBT_DBG("HOSTWU gpio: %d\n", info->host_wakeup_gpio);
-	NBT_DBG("Uart: %d\n", bt_config->bt_uart);
 	NBT_DBG("sysclk: %d\n", info->bt_sysclk);
 
 	init_completion(&info->test_completion);
@@ -1194,50 +1230,15 @@ static int hci_h4p_probe(struct platform_device *pdev)
 	gpio_direction_output(info->bt_wakeup_gpio, 0);
 	gpio_direction_input(info->host_wakeup_gpio);
 
-	switch (bt_config->bt_uart) {
-	case 1:
-		if (cpu_is_omap16xx()) {
-			irq = INT_UART1;
-			info->uart_fclk = clk_get(NULL, "uart1_ck");
-		} else if (cpu_is_omap24xx()) {
-			irq = INT_24XX_UART1_IRQ;
-			info->uart_iclk = clk_get(NULL, "uart1_ick");
-			info->uart_fclk = clk_get(NULL, "uart1_fck");
-		}
-		info->uart_base = ioremap(OMAP_UART1_BASE, SZ_2K);
-		break;
-	case 2:
-		if (cpu_is_omap16xx()) {
-			irq = INT_UART2;
-			info->uart_fclk = clk_get(NULL, "uart2_ck");
-		} else {
-			irq = INT_24XX_UART2_IRQ;
-			info->uart_iclk = clk_get(NULL, "uart2_ick");
-			info->uart_fclk = clk_get(NULL, "uart2_fck");
-		}
-		info->uart_base = ioremap(OMAP_UART2_BASE, SZ_2K);
-		break;
-	case 3:
-		if (cpu_is_omap16xx()) {
-			irq = INT_UART3;
-			info->uart_fclk = clk_get(NULL, "uart3_ck");
-		} else {
-			irq = INT_24XX_UART3_IRQ;
-			info->uart_iclk = clk_get(NULL, "uart3_ick");
-			info->uart_fclk = clk_get(NULL, "uart3_fck");
-		}
-		info->uart_base = ioremap(OMAP_UART3_BASE, SZ_2K);
-		break;
-	default:
-		dev_err(info->dev, "No uart defined\n");
-		goto cleanup;
-	}
+	info->irq = bt_plat_data->uart_irq;
+	info->uart_base = ioremap(bt_plat_data->uart_base, SZ_2K);
+	info->uart_iclk = clk_get(NULL, bt_plat_data->uart_iclk);
+	info->uart_fclk = clk_get(NULL, bt_plat_data->uart_fclk);
 
-	info->irq = irq;
-	err = request_irq(irq, hci_h4p_interrupt, IRQF_DISABLED, "hci_h4p",
+	err = request_irq(info->irq, hci_h4p_interrupt, IRQF_DISABLED, "hci_h4p",
 			  info);
 	if (err < 0) {
-		dev_err(info->dev, "hci_h4p: unable to get IRQ %d\n", irq);
+		dev_err(info->dev, "hci_h4p: unable to get IRQ %d\n", info->irq);
 		goto cleanup;
 	}
 
@@ -1248,15 +1249,15 @@ static int hci_h4p_probe(struct platform_device *pdev)
 	if (err < 0) {
 		dev_err(info->dev, "hci_h4p: unable to get wakeup IRQ %d\n",
 			  gpio_to_irq(info->host_wakeup_gpio));
-		free_irq(irq, info);
+		free_irq(info->irq, info);
 		goto cleanup;
 	}
 
-	err = set_irq_wake(gpio_to_irq(info->host_wakeup_gpio), 1);
+	err = irq_set_irq_wake(gpio_to_irq(info->host_wakeup_gpio), 1);
 	if (err < 0) {
 		dev_err(info->dev, "hci_h4p: unable to set wakeup for IRQ %d\n",
 				gpio_to_irq(info->host_wakeup_gpio));
-		free_irq(irq, info);
+		free_irq(info->irq, info);
 		free_irq(gpio_to_irq(info->host_wakeup_gpio), info);
 		goto cleanup;
 	}
@@ -1287,7 +1288,7 @@ static int hci_h4p_probe(struct platform_device *pdev)
 	return 0;
 
 cleanup_irq:
-	free_irq(irq, (void *)info);
+	free_irq(info->irq, (void *)info);
 	free_irq(gpio_to_irq(info->host_wakeup_gpio), info);
 cleanup:
 	gpio_set_value(info->reset_gpio, 0);
@@ -1311,6 +1312,7 @@ static int hci_h4p_remove(struct platform_device *pdev)
 
 	kthread_stop(h4p_thread);
 
+	hci_h4p_sysfs_remove_files(info->dev);
 	hci_h4p_hci_close(info->hdev);
 	free_irq(gpio_to_irq(info->host_wakeup_gpio), info);
 	hci_unregister_dev(info->hdev);
@@ -1353,6 +1355,12 @@ static void __exit hci_h4p_exit(void)
 module_init(hci_h4p_init);
 module_exit(hci_h4p_exit);
 
-MODULE_DESCRIPTION("h4 driver with nokia extensions");
+MODULE_ALIAS("platform:hci_h4p");
+MODULE_DESCRIPTION("Bluetooth h4 driver with nokia extensions");
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Ville Tervo");
+MODULE_FIRMWARE(FW_NAME_TI1271_PRELE);
+MODULE_FIRMWARE(FW_NAME_TI1271_LE);
+MODULE_FIRMWARE(FW_NAME_TI1271);
+MODULE_FIRMWARE(FW_NAME_BCM2048);
+MODULE_FIRMWARE(FW_NAME_CSR);

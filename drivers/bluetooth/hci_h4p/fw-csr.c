@@ -47,11 +47,11 @@ void hci_h4p_bc4_parse_fw_event(struct hci_h4p_info *info, struct sk_buff *skb)
 int hci_h4p_bc4_send_fw(struct hci_h4p_info *info,
 			struct sk_buff_head *fw_queue)
 {
+	static const u8 nokia_oui[3] = {0x00, 0x19, 0x4F};
 	struct sk_buff *skb;
 	unsigned int offset;
-	int retries, count, i;
+	int retries, count, i, not_valid;
 	unsigned long flags;
-	struct omap_bluetooth_config *config;
 
 	info->fw_error = 0;
 
@@ -61,34 +61,34 @@ int hci_h4p_bc4_send_fw(struct hci_h4p_info *info,
 	if (!skb)
 		return -ENOMSG;
 
-	config = info->dev->platform_data;
-	if (!config) {
-		kfree_skb(skb);
-		return -ENODEV;
-	}
-
 	/* Check if this is bd_address packet */
 	if (skb->data[15] == 0x01 && skb->data[16] == 0x00) {
 		offset = 21;
 		skb->data[offset + 1] = 0x00;
 		skb->data[offset + 5] = 0x00;
-		skb->data[offset + 7] = config->bd_addr[0];
-		skb->data[offset + 6] = config->bd_addr[1];
-		skb->data[offset + 4] = config->bd_addr[2];
-		skb->data[offset + 0] = config->bd_addr[3];
-		skb->data[offset + 3] = config->bd_addr[4];
-		skb->data[offset + 2] = config->bd_addr[5];
-	}
 
-	for (i = 0; i < 6; i++) {
-		if (config->bd_addr[i] != 0x00)
-			break;
-	}
+		not_valid = 1;
+		for (i = 0; i < 6; i++) {
+			if (info->bd_addr[i] != 0x00) {
+				not_valid = 0;
+				break;
+			}
+		}
 
-	if (i > 5) {
-		dev_info(info->dev, "Valid bluetooth address not found.\n");
-		kfree_skb(skb);
-		return -ENODEV;
+		if (not_valid) {
+			dev_info(info->dev, "Valid bluetooth address not found,"
+					" setting some random\n");
+			/* When address is not valid, use some random */
+			memcpy(info->bd_addr, nokia_oui, 3);
+			get_random_bytes(info->bd_addr + 3, 3);
+		}
+
+		skb->data[offset + 7] = info->bd_addr[0];
+		skb->data[offset + 6] = info->bd_addr[1];
+		skb->data[offset + 4] = info->bd_addr[2];
+		skb->data[offset + 0] = info->bd_addr[3];
+		skb->data[offset + 3] = info->bd_addr[4];
+		skb->data[offset + 2] = info->bd_addr[5];
 	}
 
 	for (count = 1; ; count++) {

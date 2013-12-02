@@ -44,24 +44,24 @@ static int hci_h4p_open_firmware(struct hci_h4p_info *info,
 	case H4P_ID_TI1271:
 		switch (info->ver_id) {
 		case 0xe1:
-			err = request_firmware(fw_entry, "ti1273_prele.bin",
+			err = request_firmware(fw_entry, FW_NAME_TI1271_PRELE,
 						info->dev);
 			break;
 		case 0xd1:
 		case 0xf1:
-			err = request_firmware(fw_entry, "ti1273_le.bin",
+			err = request_firmware(fw_entry, FW_NAME_TI1271_LE,
 						info->dev);
 			break;
 		default:
-			err = request_firmware(fw_entry, "ti1273.bin",
+			err = request_firmware(fw_entry, FW_NAME_TI1271,
 						info->dev);
 		}
 		break;
 	case H4P_ID_CSR:
-		err = request_firmware(fw_entry, "bc4fw.bin", info->dev);
+		err = request_firmware(fw_entry, FW_NAME_CSR, info->dev);
 		break;
 	case H4P_ID_BCM2048:
-		err = request_firmware(fw_entry, "bcmfw.bin", info->dev);
+		err = request_firmware(fw_entry, FW_NAME_BCM2048, info->dev);
 		break;
 	default:
 		dev_err(info->dev, "Invalid chip type\n");
