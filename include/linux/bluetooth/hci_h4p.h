@@ -24,18 +24,17 @@
 
 /**
  * struct hci_h4p_platform data - hci_h4p Platform data structure
- * @uart_base:	UART base address
- * @uart_irq:	UART Interrupt number
- * @host_wu:	Function hook determine if Host should wakeup or not.
- * @bt_wu:	Function hook to enable/disable Bluetooth transmission
- * @reset:	Function hook to set/clear reset conditiona
- * @host_wu_gpio:	Gpio used to wakeup host
  */
 struct hci_h4p_platform_data {
-	void *uart_base;
+	int chip_type;
+	int bt_sysclk;
+	unsigned int bt_wakeup_gpio;
+	unsigned int host_wakeup_gpio;
+	unsigned int reset_gpio;
+	int reset_gpio_shared;
 	unsigned int uart_irq;
-	bool (*host_wu)(void);
-	void (*bt_wu)(bool);
-	void (*reset)(bool);
-	unsigned int host_wu_gpio;
+	phys_addr_t uart_base;
+	const char *uart_iclk;
+	const char *uart_fclk;
+	void (*set_pm_limits)(struct device *dev, bool set);
 };

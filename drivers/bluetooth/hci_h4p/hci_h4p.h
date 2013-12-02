@@ -21,15 +21,18 @@
  *
  */
 
-#include <plat/board.h>
-#include <plat/board-nokia.h>
-
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
 #include <net/bluetooth/hci.h>
 
 #ifndef __DRIVERS_BLUETOOTH_HCI_H4P_H
 #define __DRIVERS_BLUETOOTH_HCI_H4P_H
+
+#define FW_NAME_TI1271_PRELE	"ti1273_prele.bin"
+#define FW_NAME_TI1271_LE	"ti1273_le.bin"
+#define FW_NAME_TI1271		"ti1273.bin"
+#define FW_NAME_BCM2048		"bcmfw.bin"
+#define FW_NAME_CSR		"bc4fw.bin"
 
 #define UART_SYSC_OMAP_RESET	0x03
 #define UART_SYSS_RESETDONE	0x01
@@ -99,6 +102,9 @@ struct hci_h4p_info {
 	long rx_count;
 	unsigned long rx_state;
 	unsigned long garbage_bytes;
+
+	u8 bd_addr[6];
+	struct sk_buff_head *fw_q;
 
 	int pm_enabled;
 	int tx_enabled;
@@ -204,11 +210,6 @@ struct hci_fw_event {
 	u8 status;
 } __attribute__ ((packed));
 
-struct hci_bc4_set_bdaddr {
-	u8 type;
-	struct hci_command_hdr cmd_hdr;
-} __attribute__ ((packed));
-
 int hci_h4p_send_alive_packet(struct hci_h4p_info *info);
 
 void hci_h4p_bcm_parse_fw_event(struct hci_h4p_info *info,
@@ -229,9 +230,6 @@ int hci_h4p_ti1273_send_fw(struct hci_h4p_info *info,
 int hci_h4p_read_fw(struct hci_h4p_info *info, struct sk_buff_head *fw_queue);
 int hci_h4p_send_fw(struct hci_h4p_info *info, struct sk_buff_head *fw_queue);
 void hci_h4p_parse_fw_event(struct hci_h4p_info *info, struct sk_buff *skb);
-
-int hci_h4p_sysfs_create_files(struct device *dev);
-void hci_h4p_sysfs_remove_files(struct device *dev);
 
 void hci_h4p_outb(struct hci_h4p_info *info, unsigned int offset, u8 val);
 u8 hci_h4p_inb(struct hci_h4p_info *info, unsigned int offset);
