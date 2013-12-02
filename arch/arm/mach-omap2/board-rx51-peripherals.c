@@ -1563,27 +1563,27 @@ static void __init rx51_init_omap3_rom_rng(void)
 	}
 }
 
-static void rx51_hci_h4p_set_power(bool enable)
-{
-	gpio_set_value(RX51_HCI_H4P_RESET_GPIO, enable);
-}
+/* Allow C6 state {1, 3120, 5788, 10000} */
+#define H4P_WAKEUP_LATENCY	5700
 
-static void rx51_hci_h4p_set_bt_wu(bool enable)
+/* Use wakeup latency only for now */
+static void rx51_bt_set_pm_limits(struct device *dev, bool set)
 {
-	gpio_set_value(RX51_HCI_H4P_BTWU_GPIO, enable);
-}
-
-static bool rx51_hci_h4p_get_host_wu(void)
-{
-	return gpio_get_value(RX51_HCI_H4P_HOSTWU_GPIO);
+	omap_pm_set_max_mpu_wakeup_lat(dev, set ? H4P_WAKEUP_LATENCY : -1);
 }
 
 struct hci_h4p_platform_data bt_plat_data = {
-	.uart_irq	= 73 + OMAP_INTC_START,
-	.host_wu	= rx51_hci_h4p_get_host_wu,
-	.bt_wu		= rx51_hci_h4p_set_bt_wu,
-	.reset		= rx51_hci_h4p_set_power,
-	.host_wu_gpio	= RX51_HCI_H4P_HOSTWU_GPIO,
+	.chip_type		= 3,
+	.bt_sysclk		= 2,
+	.bt_wakeup_gpio		= RX51_HCI_H4P_BTWU_GPIO,
+	.host_wakeup_gpio	= RX51_HCI_H4P_HOSTWU_GPIO,
+	.reset_gpio		= RX51_HCI_H4P_RESET_GPIO,
+	.reset_gpio_shared	= 0,
+	.uart_irq		= 73 + OMAP_INTC_START,
+	.uart_base		= OMAP3_UART2_BASE,
+	.uart_iclk		= "uart2_ick",
+	.uart_fclk		= "uart2_fck",
+	.set_pm_limits		= rx51_bt_set_pm_limits,
 };
 
 static struct platform_device rx51_bt_device = {
@@ -1591,42 +1591,13 @@ static struct platform_device rx51_bt_device = {
 	.id		= -1,
 	.num_resources	= 0,
 	.dev = {
-		.platform_data = (void *)&bt_plat_data,
+		.platform_data = &bt_plat_data,
 	}
 };
 
 void __init rx51_bt_init(void)
 {
-	int err;
-
-	err = gpio_request(RX51_HCI_H4P_RESET_GPIO, "bt_reset");
-	if (err < 0)
-		return;
-
-	err = gpio_request(RX51_HCI_H4P_BTWU_GPIO, "bt_wakeup");
-	if (err < 0)
-		goto fail;
-
-	err = gpio_request(RX51_HCI_H4P_HOSTWU_GPIO, "host_wakeup");
-	if (err < 0)
-		goto fail2;
-
-	gpio_direction_output(RX51_HCI_H4P_RESET_GPIO, 0);
-	gpio_direction_output(RX51_HCI_H4P_BTWU_GPIO, 0);
-	gpio_direction_input(RX51_HCI_H4P_HOSTWU_GPIO);
-
-	bt_plat_data.uart_base = ioremap(OMAP3_UART2_BASE, SZ_2K);
-
-	err = platform_device_register(&rx51_bt_device);
-	if (!err)
-		return;
-
-	gpio_free(RX51_HCI_H4P_HOSTWU_GPIO);
-fail2:
-	gpio_free(RX51_HCI_H4P_BTWU_GPIO);
-fail:
-	gpio_free(RX51_HCI_H4P_RESET_GPIO);
-	printk(KERN_ERR "Bluetooth device registration failed\n");
+	platform_device_register(&rx51_bt_device);
 }
 
 void __init rx51_peripherals_init(void)
