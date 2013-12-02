@@ -271,7 +271,7 @@ config VIDEO_AD5820
 	depends on I2C && VIDEO_V4L2 && MEDIA_CONTROLLER
 	---help---
 	  This is a driver for the AD5820 camera lens voice coil.
-	  It is used for example in Nokia RX51.
+	  It is used for example in Nokia N900 (RX-51).
 
 config VIDEO_SAA7110
 	tristate "Philips SAA7110 video decoder"
