@@ -14,4 +14,4 @@ config VIDEO_ET8EK8
 	select VIDEO_SMIAREGS
 	---help---
 	  This is a driver for the Toshiba ET8EK8 5 MP camera sensor.
-	  It is used for example in Nokia RX51.
+	  It is used for example in Nokia N900 (RX-51).
