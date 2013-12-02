@@ -1,5 +1,5 @@
 /*
- * drivers/media/video/ad5820.c
+ * drivers/media/i2c/ad5820.c
  *
  * AD5820 DAC driver for camera voice coil focus.
  *
@@ -101,9 +101,11 @@ static int ad5820_read(struct ad5820_device *coil)
 	return be16_to_cpu(data);
 }
 
-/* Calculate status word and write it to the device based on current
+/*
+ * Calculate status word and write it to the device based on current
  * values of V4L2 controls. It is assumed that the stored V4L2 control
- * values are properly limited and rounded. */
+ * values are properly limited and rounded.
+ */
 static int ad5820_update_hw(struct ad5820_device *coil)
 {
 	u16 status;
@@ -119,15 +121,15 @@ static int ad5820_update_hw(struct ad5820_device *coil)
 	return ad5820_write(coil, status);
 }
 
-/* --------------------------------------------------------------------------
+/*
  * Power handling
  */
-
 static int ad5820_power_off(struct ad5820_device *coil, int standby)
 {
 	int ret = 0;
 
-	/* Go to standby first as real power off my be denied by the hardware
+	/*
+	 * Go to standby first as real power off my be denied by the hardware
 	 * (single power line control for both coil and sensor).
 	 */
 	if (standby) {
@@ -172,10 +174,9 @@ fail:
 	return ret;
 }
 
-/* --------------------------------------------------------------------------
+/*
  * V4L2 controls
  */
-
 static int ad5820_set_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct ad5820_device *coil =
@@ -244,7 +245,8 @@ static int ad5820_init_controls(struct ad5820_device *coil)
 
 	v4l2_ctrl_handler_init(&coil->ctrls, ARRAY_SIZE(ad5820_ctrls) + 1);
 
-	/* V4L2_CID_FOCUS_ABSOLUTE
+	/*
+	 * V4L2_CID_FOCUS_ABSOLUTE
 	 *
 	 * Minimum current is 0 mA, maximum is 100 mA. Thus, 1 code is
 	 * equivalent to 100/1023 = 0.0978 mA. Nevertheless, we do not use [mA]
@@ -273,10 +275,9 @@ static int ad5820_init_controls(struct ad5820_device *coil)
 	return 0;
 }
 
-/* --------------------------------------------------------------------------
+/*
  * V4L2 subdev operations
  */
-
 static int
 ad5820_registered(struct v4l2_subdev *subdev)
 {
@@ -323,7 +324,8 @@ ad5820_set_power(struct v4l2_subdev *subdev, int on)
 
 	mutex_lock(&coil->power_lock);
 
-	/* If the power count is modified from 0 to != 0 or from != 0 to 0,
+	/*
+	 * If the power count is modified from 0 to != 0 or from != 0 to 0,
 	 * update the power state.
 	 */
 	if (coil->power_count == !on) {
@@ -365,7 +367,7 @@ static const struct v4l2_subdev_internal_ops ad5820_internal_ops = {
 	.close = ad5820_close,
 };
 
-/* --------------------------------------------------------------------------
+/*
  * I2C driver
  */
 #ifdef CONFIG_PM
