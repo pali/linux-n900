@@ -531,7 +531,7 @@ static int bridge_brd_start(struct bridge_dev_context *dev_ctxt,
 		/* Set the DSP clock rate */
 		(void)dev_get_symbol(dev_context->dev_obj,
 				     "_BRIDGEINIT_DSP_FREQ", &ul_dsp_clk_addr);
-		/*Set Autoidle Mode for IVA2 PLL */
+		/* Set Autoidle Mode for IVA2 PLL */
 		(*pdata->dsp_cm_write)(1,
 				OMAP3430_IVA2_MOD, OMAP3430_CM_AUTOIDLE_PLL);
 
