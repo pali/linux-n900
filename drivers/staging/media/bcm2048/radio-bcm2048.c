@@ -354,6 +354,9 @@ static struct region_info region_configs[] = {
 
 /*
  *	I2C Interface read / write
+ *
+ * Note: callers use | operation to combine errors from multiple
+ * calls. So this has to return just single error value.
  */
 static int bcm2048_send_command(struct bcm2048_device *bdev, unsigned int reg,
 					unsigned int value)
@@ -491,6 +494,8 @@ static int bcm2048_set_rds_no_lock(struct bcm2048_device *bdev, u8 rds_on)
 						flags);
 		memset(&bdev->rds_info, 0, sizeof(bdev->rds_info));
 	}
+
+	/* FIXME: if (err) return err ? */
 
 	err = bcm2048_send_command(bdev, BCM2048_I2C_FM_RDS_SYSTEM,
 					bdev->cache_fm_rds_system);
@@ -633,10 +638,7 @@ static int bcm2048_get_fm_frequency(struct bcm2048_device *bdev)
 	if (err)
 		return err;
 
-	err = compose_u16(msb, lsb);
-	err += BCM2048_FREQUENCY_BASE;
-
-	return err;
+	return compose_u16(msb, lsb) + BCM2048_FREQUENCY_BASE;
 }
 
 static int bcm2048_set_fm_af_frequency(struct bcm2048_device *bdev,
@@ -678,10 +680,7 @@ static int bcm2048_get_fm_af_frequency(struct bcm2048_device *bdev)
 	if (err)
 		return err;
 
-	err = compose_u16(msb, lsb);
-	err += BCM2048_FREQUENCY_BASE;
-
-	return err;
+	return compose_u16(msb, lsb) + BCM2048_FREQUENCY_BASE;
 }
 
 static int bcm2048_set_fm_deemphasis(struct bcm2048_device *bdev, int d)
