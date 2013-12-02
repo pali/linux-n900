@@ -1,5 +1,5 @@
 /*
- * drivers/media/video/smiaregs.c
+ * drivers/media/i2c/smia/smiaregs.c
  *
  * Copyright (C) 2008 Nokia Corporation
  *
@@ -31,11 +31,8 @@
 #include <media/smiaregs.h>
 
 /*
- *
  * Video control helpers
- *
  */
-
 int smia_ctrl_find(const struct v4l2_queryctrl *ctrls, size_t nctrls, int id)
 {
 	size_t i;
@@ -183,11 +180,8 @@ int smia_mode_g_ctrl(const __u32 *ctrls, size_t nctrls, struct v4l2_control *vc,
 EXPORT_SYMBOL_GPL(smia_mode_g_ctrl);
 
 /*
- *
  * Reglist helpers
- *
  */
-
 static int smia_reglist_cmp(const void *a, const void *b)
 {
 	const struct smia_reglist **list1 = (const struct smia_reglist **)a,
@@ -197,22 +191,22 @@ static int smia_reglist_cmp(const void *a, const void *b)
 	if ((*list1)->type == SMIA_REGLIST_MODE &&
 	    (*list2)->type != SMIA_REGLIST_MODE)
 		return -1;
-	else if ((*list1)->type != SMIA_REGLIST_MODE &&
-		 (*list2)->type == SMIA_REGLIST_MODE)
+	if ((*list1)->type != SMIA_REGLIST_MODE &&
+	    (*list2)->type == SMIA_REGLIST_MODE)
 		return 1;
 
 	/* Descending width. */
 	if ((*list1)->mode.window_width > (*list2)->mode.window_width)
 		return -1;
-	else if ((*list1)->mode.window_width < (*list2)->mode.window_width)
+	if ((*list1)->mode.window_width < (*list2)->mode.window_width)
 		return 1;
 
 	if ((*list1)->mode.window_height > (*list2)->mode.window_height)
 		return -1;
-	else if ((*list1)->mode.window_height < (*list2)->mode.window_height)
+	if ((*list1)->mode.window_height < (*list2)->mode.window_height)
 		return 1;
-	else
-		return 0;
+
+	return 0;
 }
 
 /*
