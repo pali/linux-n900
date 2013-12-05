@@ -942,7 +942,7 @@ again:
 	err = hci_h4p_read_fw(info, &fw_queue);
 	if (err < 0) {
 		dev_err(info->dev, "Cannot read firmware\n");
-		return err;
+		goto err_clean;
 	}
 
 	err = hci_h4p_send_fw(info, &fw_queue);
