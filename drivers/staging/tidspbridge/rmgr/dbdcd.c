@@ -74,6 +74,47 @@ static int get_dep_lib_info(struct dcd_manager *hdcd_mgr,
 				   enum nldr_phase phase);
 
 /*
+ *  ======== dcd_uuid_from_string ========
+ *  Purpose:
+ *      Converts an ANSI string to a dsp_uuid.
+ *  Parameters:
+ *      sz_uuid:    Pointer to a string that represents a dsp_uuid object.
+ *      uuid_obj:      Pointer to a dsp_uuid object.
+ *  Returns:
+ *      0:        Success.
+ *      -EINVAL:  Coversion failed
+ *  Requires:
+ *      uuid_obj & sz_uuid are non-NULL values.
+ *  Ensures:
+ *  Details:
+ *      We assume the string representation of a UUID has the following format:
+ *      "12345678_1234_1234_1234_123456789abc".
+ */
+static int dcd_uuid_from_string(char *sz_uuid, struct dsp_uuid *uuid_obj)
+{
+	char c;
+	u64 t;
+	struct dsp_uuid uuid_tmp;
+
+	/*
+	 * sscanf implementation cannot deal with hh format modifier
+	 * if the converted value doesn't fit in u32. So, convert the
+	 * last six bytes to u64 and memcpy what is needed
+	 */
+	if(sscanf(sz_uuid, "%8x%c%4hx%c%4hx%c%2hhx%2hhx%c%llx",
+	       &uuid_tmp.data1, &c, &uuid_tmp.data2, &c,
+	       &uuid_tmp.data3, &c, &uuid_tmp.data4,
+	       &uuid_tmp.data5, &c, &t) != 10)
+		return -EINVAL;
+
+	t = cpu_to_be64(t);
+	memcpy(&uuid_tmp.data6[0], ((char*)&t) + 2, 6);
+	*uuid_obj = uuid_tmp;
+
+	return 0;
+}
+
+/*
  *  ======== dcd_auto_register ========
  *  Purpose:
  *      Parses the supplied image and resigsters with DCD.
@@ -253,7 +294,7 @@ int dcd_enumerate_object(s32 index, enum dsp_dcdobjtype obj_type,
 		if (!status) {
 			/* Create UUID value using string retrieved from
 			 * registry. */
-			uuid_uuid_from_string(sz_value, &dsp_uuid_obj);
+			dcd_uuid_from_string(sz_value, &dsp_uuid_obj);
 
 			*uuid_obj = dsp_uuid_obj;
 
@@ -581,7 +622,7 @@ int dcd_get_objects(struct dcd_manager *hdcd_mgr,
 		psz_cur = psz_coff_buf;
 		while ((token = strsep(&psz_cur, seps)) && *token != '\0') {
 			/*  Retrieve UUID string. */
-			uuid_uuid_from_string(token, &dsp_uuid_obj);
+			dcd_uuid_from_string(token, &dsp_uuid_obj);
 
 			/*  Retrieve object type */
 			token = strsep(&psz_cur, seps);
@@ -1001,7 +1042,7 @@ static int get_attrs_from_buf(char *psz_buf, u32 ul_buf_size,
 		token = strsep(&psz_cur, seps);
 
 		/* dsp_uuid ui_node_id */
-		uuid_uuid_from_string(token,
+		dcd_uuid_from_string(token,
 				      &gen_obj->obj_data.node_obj.ndb_props.
 				      ui_node_id);
 		token = strsep(&psz_cur, seps);
@@ -1400,7 +1441,7 @@ static int get_dep_lib_info(struct dcd_manager *hdcd_mgr,
 				break;
 			} else {
 				/* Retrieve UUID string. */
-				uuid_uuid_from_string(token,
+				dcd_uuid_from_string(token,
 						      &(dep_lib_uuids
 							[dep_libs]));
 				/* Is this library persistent? */
