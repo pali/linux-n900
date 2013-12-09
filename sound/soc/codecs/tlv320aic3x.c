@@ -1310,9 +1310,7 @@ static int aic3x_probe(struct snd_soc_codec *codec)
 	struct aic3x_priv *aic3x = snd_soc_codec_get_drvdata(codec);
 	int ret, i;
 
-	INIT_LIST_HEAD(&aic3x->list);
 	aic3x->codec = codec;
-
 	ret = snd_soc_codec_set_cache_io(codec, 8, 8, SND_SOC_REGMAP);
 	if (ret != 0) {
 		dev_err(codec->dev, "Failed to set cache I/O: %d\n", ret);
@@ -1365,7 +1363,6 @@ static int aic3x_probe(struct snd_soc_codec *codec)
 	}
 
 	aic3x_add_widgets(codec);
-	list_add(&aic3x->list, &reset_list);
 
 	return 0;
 
@@ -1448,6 +1445,8 @@ static int aic3x_i2c_probe(struct i2c_client *i2c,
 		dev_err(&i2c->dev, "failed to create private data\n");
 		return -ENOMEM;
 	}
+
+	INIT_LIST_HEAD(&aic3x->list);
 
 	aic3x->regmap = devm_regmap_init_i2c(i2c, &aic3x_regmap);
 	if (IS_ERR(aic3x->regmap)) {
@@ -1535,10 +1534,12 @@ static int aic3x_i2c_probe(struct i2c_client *i2c,
 
 	ret = snd_soc_register_codec(&i2c->dev,
 			&soc_codec_dev_aic3x, &aic3x_dai, 1);
-	return ret;
+
+	if(!ret)
+		list_add(&aic3x->list, &reset_list);
 
 err_gpio:
-	if (gpio_is_valid(aic3x->gpio_reset) &&
+	if (ret && gpio_is_valid(aic3x->gpio_reset) &&
 	    !aic3x_is_shared_reset(aic3x))
 		gpio_free(aic3x->gpio_reset);
 err:
