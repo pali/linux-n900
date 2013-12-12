@@ -42,10 +42,10 @@
 #define RX51_JACK_DETECT_GPIO		177
 #define RX51_ECI_SW_GPIO		182
 /*
- * REVISIT: TWL4030 GPIO base in RX-51. Now statically defined to 192. This
+ * REVISIT: TWL4030 GPIO base in RX-51. Now statically defined to 238. This
  * gpio is reserved in arch/arm/mach-omap2/board-rx51-peripherals.c
  */
-#define RX51_SPEAKER_AMP_TWL_GPIO	(192 + 7)
+#define RX51_SPEAKER_AMP_TWL_GPIO	(238 + 7)
 
 enum {
 	RX51_JACK_DISABLED,
