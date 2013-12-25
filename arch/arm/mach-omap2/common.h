@@ -300,6 +300,8 @@ extern void omap_reserve(void);
 struct omap_hwmod;
 extern int omap_dss_reset(struct omap_hwmod *);
 
+extern void omap_fb_reserve_memblock(void);
+
 /* SoC specific clock initializer */
 int omap_clk_init(void);
 
