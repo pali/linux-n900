@@ -33,9 +33,6 @@
 #include <dspbridge/dbll.h>
 #include <dspbridge/rmm.h>
 
-/* Number of buckets for symbol hash table */
-#define MAXBUCKETS 211
-
 /* Max buffer length */
 #define MAXEXPR 128
 
@@ -183,7 +180,7 @@ static int execute(struct dynamic_loader_initialize *this, ldr_addr start);
 static void release(struct dynamic_loader_initialize *this);
 
 /* symbol table hash functions */
-static u16 name_hash(void *key, u16 max_bucket);
+static u32 name_hash(void *key);
 static bool name_match(void *key, void *sp);
 static void sym_delete(void *value);
 
@@ -280,7 +277,7 @@ bool dbll_get_addr(struct dbll_library_obj *zl_lib, char *name,
 	bool status = false;
 
 	sym = (struct dbll_symbol *)gh_find(zl_lib->sym_tab, name);
-	if (sym != NULL) {
+	if (!IS_ERR(sym)) {
 		*sym_val = &sym->value;
 		status = true;
 	}
@@ -322,7 +319,7 @@ bool dbll_get_c_addr(struct dbll_library_obj *zl_lib, char *name,
 	/* Check for C name, if not found */
 	sym = (struct dbll_symbol *)gh_find(zl_lib->sym_tab, cname);
 
-	if (sym != NULL) {
+	if (!IS_ERR(sym)) {
 		*sym_val = &sym->value;
 		status = true;
 	}
@@ -416,12 +413,13 @@ int dbll_load(struct dbll_library_obj *lib, dbll_flags flags,
 		/* Create a hash table for symbols if not already created */
 		if (zl_lib->sym_tab == NULL) {
 			got_symbols = false;
-			zl_lib->sym_tab = gh_create(MAXBUCKETS,
-						    sizeof(struct dbll_symbol),
+			zl_lib->sym_tab = gh_create(sizeof(struct dbll_symbol),
 						    name_hash,
 						    name_match, sym_delete);
-			if (zl_lib->sym_tab == NULL)
-				status = -ENOMEM;
+			if (IS_ERR(zl_lib->sym_tab)) {
+				status = PTR_ERR(zl_lib->sym_tab);
+				zl_lib->sym_tab = NULL;
+			}
 
 		}
 		/*
@@ -593,10 +591,11 @@ int dbll_open(struct dbll_tar_obj *target, char *file, dbll_flags flags,
 		goto func_cont;
 
 	zl_lib->sym_tab =
-	    gh_create(MAXBUCKETS, sizeof(struct dbll_symbol), name_hash,
-		      name_match, sym_delete);
-	if (zl_lib->sym_tab == NULL) {
-		status = -ENOMEM;
+	    gh_create(sizeof(struct dbll_symbol), name_hash, name_match,
+		      sym_delete);
+	if (IS_ERR(zl_lib->sym_tab)) {
+		status = PTR_ERR(zl_lib->sym_tab);
+		zl_lib->sym_tab = NULL;
 	} else {
 		/* Do a fake load to get symbols - set write func to no_op */
 		zl_lib->init.dl_init.writemem = no_op;
@@ -793,10 +792,9 @@ static int dof_open(struct dbll_library_obj *zl_lib)
 /*
  *  ======== name_hash ========
  */
-static u16 name_hash(void *key, u16 max_bucket)
+static u32 name_hash(void *key)
 {
-	u16 ret;
-	u16 hash;
+	u32 hash;
 	char *name = (char *)key;
 
 	hash = 0;
@@ -806,9 +804,7 @@ static u16 name_hash(void *key, u16 max_bucket)
 		hash ^= *name++;
 	}
 
-	ret = hash % max_bucket;
-
-	return ret;
+	return hash;
 }
 
 /*
@@ -937,7 +933,7 @@ static struct dynload_symbol *find_in_symbol_table(struct dynamic_loader_sym
 						   *this, const char *name,
 						   unsigned moduleid)
 {
-	struct dynload_symbol *ret_sym;
+	struct dynload_symbol *ret_sym = NULL;
 	struct ldr_symbol *ldr_sym = (struct ldr_symbol *)this;
 	struct dbll_library_obj *lib;
 	struct dbll_symbol *sym;
@@ -945,7 +941,9 @@ static struct dynload_symbol *find_in_symbol_table(struct dynamic_loader_sym
 	lib = ldr_sym->lib;
 	sym = (struct dbll_symbol *)gh_find(lib->sym_tab, (char *)name);
 
-	ret_sym = (struct dynload_symbol *)&sym->value;
+	if (!IS_ERR(sym))
+		ret_sym = (struct dynload_symbol *)&sym->value;
+
 	return ret_sym;
 }
 
@@ -991,8 +989,10 @@ static struct dynload_symbol *dbll_add_to_symbol_table(struct dynamic_loader_sym
 		sym_ptr =
 		    (struct dbll_symbol *)gh_insert(lib->sym_tab, (void *)name,
 						    (void *)&symbol);
-		if (sym_ptr == NULL)
+		if (IS_ERR(sym_ptr)) {
 			kfree(symbol.name);
+			sym_ptr = NULL;
+		}
 
 	}
 	if (sym_ptr != NULL)
