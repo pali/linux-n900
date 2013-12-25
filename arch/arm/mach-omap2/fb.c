@@ -30,6 +30,7 @@
 #include <linux/dma-mapping.h>
 
 #include <asm/mach/map.h>
+#include <asm/memblock.h>
 
 #include "soc.h"
 #include "display.h"
@@ -106,10 +107,53 @@ static struct platform_device omap_fb_device = {
 	.num_resources = 0,
 };
 
+static phys_addr_t omapfb_mem_base __initdata;
+static phys_addr_t omapfb_mem_size __initdata;
+
+void __init omap_fb_reserve_memblock(void)
+{
+	if (omapfb_mem_size) {
+		omapfb_mem_base = arm_memblock_steal(omapfb_mem_size, SZ_1M);
+		if (omapfb_mem_base)
+			pr_info("omapfb: reserved %u bytes at %x\n",
+				omapfb_mem_size, omapfb_mem_base);
+		else
+			pr_err("omapfb: arm_memblock_steal failed\n");
+	}
+}
+
 int __init omap_init_fb(void)
 {
-	return platform_device_register(&omap_fb_device);
+	int ret;
+
+	ret = platform_device_register(&omap_fb_device);
+
+	if (ret)
+		return ret;
+
+	if (!omapfb_mem_base)
+		return 0;
+
+	ret = dma_declare_coherent_memory(&omap_fb_device.dev,
+					  omapfb_mem_base, omapfb_mem_base,
+					  omapfb_mem_size, DMA_MEMORY_MAP |
+					  DMA_MEMORY_EXCLUSIVE);
+	if (!(ret & DMA_MEMORY_MAP))
+		pr_err("omapfb: dma_declare_coherent_memory failed\n");
+
+	return 0;
 }
+
+static int __init early_omapfb_memsize(char *p)
+{
+	omapfb_mem_size = ALIGN(memparse(p, &p), SZ_1M);
+
+	if(!omapfb_mem_size)
+		pr_err("omapfb: bad memsize parameter\n");
+
+	return 0;
+}
+early_param("omapfb_memsize", early_omapfb_memsize);
 #else
 int __init omap_init_fb(void) { return 0; }
 #endif
