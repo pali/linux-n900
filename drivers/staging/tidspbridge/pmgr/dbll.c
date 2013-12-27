@@ -989,8 +989,7 @@ static struct dynload_symbol *dbll_add_to_symbol_table(struct dynamic_loader_sym
 		sym_ptr =
 		    (struct dbll_symbol *)gh_insert(lib->sym_tab, (void *)name,
 						    (void *)&symbol);
-		if (IS_ERR(sym_ptr))
-		{
+		if (IS_ERR(sym_ptr)) {
 			kfree(symbol.name);
 			sym_ptr = NULL;
 		}
