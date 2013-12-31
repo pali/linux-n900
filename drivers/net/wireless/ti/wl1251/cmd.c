@@ -434,8 +434,7 @@ int wl1251_cmd_scan(struct wl1251 *wl, u8 *ssid, size_t ssid_len,
 	struct wl1251_cmd_scan *cmd;
 	int i, ret = 0;
 
-	wl1251_debug(DEBUG_CMD, "cmd scan channels %d ssid(%d) '%s'",
-		     n_channels, ssid_len, ssid);
+	wl1251_debug(DEBUG_CMD, "cmd scan channels %d", n_channels);
 
 	WARN_ON(n_channels > SCAN_MAX_NUM_OF_CHANNELS);
 
