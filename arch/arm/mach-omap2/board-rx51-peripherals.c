@@ -32,6 +32,7 @@
 #include <linux/platform_data/mtd-onenand-omap2.h>
 #include <linux/hsi/hsi.h>
 #include <linux/cmt.h>
+#include <linux/platform_data/bt-nokia-h4p.h>
 
 #include <asm/system_info.h>
 
@@ -40,6 +41,7 @@
 #include <linux/platform_data/ssi.h>
 
 #include "board-rx51.h"
+#include "serial.h"
 
 #include <sound/tlv320aic3x.h>
 #include <sound/tpa6130a2-plat.h>
@@ -83,6 +85,10 @@
 
 #define LIS302_IRQ1_GPIO 181
 #define LIS302_IRQ2_GPIO 180  /* Not yet in use */
+
+#define RX51_HCI_H4P_RESET_GPIO		91
+#define RX51_HCI_H4P_HOSTWU_GPIO	101
+#define RX51_HCI_H4P_BTWU_GPIO		37
 
 /* List all SPI devices here. Note that the list/probe order seems to matter! */
 enum {
@@ -1542,6 +1548,43 @@ static void __init rx51_init_omap3_rom_rng(void)
 	}
 }
 
+/* Allow C6 state {1, 3120, 5788, 10000} */
+#define H4P_WAKEUP_LATENCY	5700
+
+/* Use wakeup latency only for now */
+static void rx51_bt_set_pm_limits(struct device *dev, bool set)
+{
+	omap_pm_set_max_mpu_wakeup_lat(dev, set ? H4P_WAKEUP_LATENCY : -1);
+}
+
+struct hci_h4p_platform_data bt_plat_data = {
+	.chip_type		= 3,
+	.bt_sysclk		= 2,
+	.bt_wakeup_gpio		= RX51_HCI_H4P_BTWU_GPIO,
+	.host_wakeup_gpio	= RX51_HCI_H4P_HOSTWU_GPIO,
+	.reset_gpio		= RX51_HCI_H4P_RESET_GPIO,
+	.reset_gpio_shared	= 0,
+	.uart_irq		= 73 + OMAP_INTC_START,
+	.uart_base		= OMAP3_UART2_BASE,
+	.uart_iclk		= "uart2_ick",
+	.uart_fclk		= "uart2_fck",
+	.set_pm_limits		= rx51_bt_set_pm_limits,
+};
+
+static struct platform_device rx51_bt_device = {
+	.name		= "hci_h4p",
+	.id		= -1,
+	.num_resources	= 0,
+	.dev = {
+		.platform_data = &bt_plat_data,
+	}
+};
+
+void __init rx51_bt_init(void)
+{
+	platform_device_register(&rx51_bt_device);
+}
+
 void __init rx51_peripherals_init(void)
 {
 	rx51_gpio_init();
@@ -1557,6 +1600,7 @@ void __init rx51_peripherals_init(void)
 	rx51_init_bcm2048();
 	rx51_cmt_init();
 	rx51_ssi_init();
+	rx51_bt_init();
 	spi_register_board_info(rx51_peripherals_spi_board_info,
 				ARRAY_SIZE(rx51_peripherals_spi_board_info));
 
