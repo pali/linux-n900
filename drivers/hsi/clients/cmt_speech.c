@@ -36,7 +36,7 @@
 #include <linux/uaccess.h>
 #include <linux/pm_qos.h>
 #include <linux/hsi/hsi.h>
-#include <linux/hsi/ssip_slave.h>
+#include <linux/hsi/ssi_protocol.h>
 #include <linux/cs-protocol.h>
 
 #define CS_MMAP_SIZE	PAGE_SIZE
