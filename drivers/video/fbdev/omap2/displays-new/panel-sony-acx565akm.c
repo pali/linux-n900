@@ -632,6 +632,7 @@ static void acx565akm_panel_power_off(struct omap_dss_device *dssdev)
 
 static int acx565akm_enable(struct omap_dss_device *dssdev)
 {
+	struct panel_drv_data *ddata = to_panel_data(dssdev);
 	int r;
 
 	dev_dbg(dssdev->dev, "%s\n", __func__);
