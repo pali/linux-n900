@@ -192,13 +192,13 @@ struct omap_ssi_board_config {
 	int cawake_gpio[SSI_NUM_PORTS];
 };
 
-#ifdef CONFIG_OMAP_SSI_CONFIG
+#if defined (CONFIG_OMAP_SSI) || defined (CONFIG_OMAP_SSI_MODULE)
 extern int omap_ssi_config(struct omap_ssi_board_config *ssi_config);
 #else
 static inline int omap_ssi_config(struct omap_ssi_board_config *ssi_config)
 {
 	return 0;
 }
-#endif /* CONFIG_OMAP_SSI_CONFIG */
+#endif /* CONFIG_OMAP_SSI */
 
 #endif /* __OMAP_SSI_REGS_H__ */
