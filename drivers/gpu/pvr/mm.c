@@ -504,7 +504,7 @@ void __iomem *_IORemapWrapper(struct IMG_CPU_PHYADDR BasePAddr,
 	switch (ui32MappingFlags & PVRSRV_HAP_CACHETYPE_MASK) {
 	case PVRSRV_HAP_CACHED:
 #if defined(__arm__)
-		pvIORemapCookie = ioremap_cached(BasePAddr.uiAddr, ui32Bytes);
+		pvIORemapCookie = ioremap_cache(BasePAddr.uiAddr, ui32Bytes);
 #else
 		pvIORemapCookie = ioremap(BasePAddr.uiAddr, ui32Bytes);
 #endif
