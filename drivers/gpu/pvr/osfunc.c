@@ -31,7 +31,6 @@
 #include <linux/version.h>
 #include <linux/io.h>
 #include <asm/page.h>
-#include <asm/system.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
 #include <linux/hugetlb.h>
