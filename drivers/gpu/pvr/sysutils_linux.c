@@ -395,7 +395,6 @@ static enum PVRSRV_ERROR InitSgxClocks(struct SYS_DATA *psSysData)
 {
 	struct SYS_SPECIFIC_DATA *psSysSpecData = psSysData->pvSysSpecificData;
 	struct clk *psCLK;
-	struct clk *core_ck = NULL;
 
 	psCLK = clk_get(NULL, "sgx_fck");
 	if (IS_ERR(psCLK))
@@ -407,21 +406,10 @@ static enum PVRSRV_ERROR InitSgxClocks(struct SYS_DATA *psSysData)
 		goto err1;
 	psSysSpecData->psSGX_ICK = psCLK;
 
-	core_ck = clk_get(NULL, "core_ck");
-	if (IS_ERR(core_ck))
-		goto err2;
-	if (clk_set_parent(psSysSpecData->psSGX_FCK, core_ck) < 0) {
-		clk_put(core_ck);
-		goto err2;
-	}
-	clk_put(core_ck);
-
 	RegisterConstraintNotifications(psSysSpecData);
 
 	return PVRSRV_OK;
 
-err2:
-	clk_put(psSysSpecData->psSGX_ICK);
 err1:
 	clk_put(psSysSpecData->psSGX_FCK);
 err0:
