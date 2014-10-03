@@ -412,6 +412,12 @@ static int smiapp_set_ctrl(struct v4l2_ctrl *ctrl)
 	int exposure;
 	int rval;
 
+	rval = smiapp_call_quirk(sensor, s_ctrl, ctrl);
+	if (rval < 0)
+		return rval;
+	if (rval > 0)
+		return 0;
+
 	switch (ctrl->id) {
 	case V4L2_CID_ANALOGUE_GAIN:
 		return smiapp_write(
