@@ -1506,7 +1506,7 @@ static ssize_t wl1251_sysfs_store_tx_mgmt_frm_rate(struct device *dev,
 	unsigned long res;
 	int ret;
 
-	ret = strict_strtoul(buf, 10, &res);
+	ret = kstrtoul(buf, 10, &res);
 
 	if (ret < 0) {
 		wl1251_warning("incorrect value written to tx_mgmt_frm_rate");
@@ -1600,7 +1600,7 @@ static ssize_t wl1251_sysfs_store_bt_coex_mode(struct device *dev,
 	unsigned long res;
 	int ret;
 
-	ret = strict_strtoul(buf, 10, &res);
+	ret = kstrtoul(buf, 10, &res);
 
 	if (ret < 0) {
 		wl1251_warning("incorrect value written to bt_coex_mode");
