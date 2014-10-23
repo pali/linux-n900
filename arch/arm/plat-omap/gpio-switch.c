@@ -197,7 +197,7 @@ static ssize_t gpio_sw_disable_store(struct device *dev,
 	struct gpio_switch *sw = dev_get_drvdata(dev);
 	unsigned long res;
 
-	if (strict_strtoul(buf, 10, &res) < 0)
+	if (kstrtoul(buf, 10, &res) < 0)
 		return -EINVAL;
 
 	if (!!res == sw->disabled)
