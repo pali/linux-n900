@@ -437,13 +437,20 @@ out:
 }
 EXPORT_SYMBOL_GPL(usb_udc_attach_driver);
 
-int usb_gadget_probe_driver(struct usb_gadget_driver *driver)
+#define USB_GADGET_BIND_RETRIES		5
+#define USB_GADGET_BIND_TIMEOUT		(3 * HZ)
+static void usb_gadget_work(struct work_struct *work)
 {
+	struct usb_gadget_driver *driver = container_of(work,
+						struct usb_gadget_driver,
+						work.work);
 	struct usb_udc		*udc = NULL;
 	int			ret;
 
-	if (!driver || !driver->bind || !driver->setup)
-		return -EINVAL;
+	if (driver->retries++ > USB_GADGET_BIND_RETRIES) {
+		pr_err("couldn't find an available UDC\n");
+		return;
+	}
 
 	mutex_lock(&udc_lock);
 	list_for_each_entry(udc, &udc_list, list) {
@@ -452,13 +459,24 @@ int usb_gadget_probe_driver(struct usb_gadget_driver *driver)
 			goto found;
 	}
 
-	pr_debug("couldn't find an available UDC\n");
 	mutex_unlock(&udc_lock);
-	return -ENODEV;
+	schedule_delayed_work(&driver->work, USB_GADGET_BIND_TIMEOUT);
+	return;
+
 found:
 	ret = udc_bind_to_driver(udc, driver);
 	mutex_unlock(&udc_lock);
-	return ret;
+}
+
+int usb_gadget_probe_driver(struct usb_gadget_driver *driver)
+{
+	if (!driver || !driver->bind || !driver->setup)
+		return -EINVAL;
+
+	INIT_DELAYED_WORK(&driver->work, usb_gadget_work);
+	schedule_delayed_work(&driver->work, 0);
+
+	return 0;
 }
 EXPORT_SYMBOL_GPL(usb_gadget_probe_driver);
 
@@ -469,6 +487,8 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 
 	if (!driver || !driver->unbind)
 		return -EINVAL;
+
+	cancel_delayed_work(&driver->work);
 
 	mutex_lock(&udc_lock);
 	list_for_each_entry(udc, &udc_list, list)
@@ -624,7 +644,7 @@ static int __init usb_udc_init(void)
 	udc_class->dev_uevent = usb_udc_uevent;
 	return 0;
 }
-subsys_initcall(usb_udc_init);
+late_initcall_sync(usb_udc_init);
 
 static void __exit usb_udc_exit(void)
 {
