@@ -24,6 +24,7 @@ obj-$(CONFIG_VT6656)		+= vt6656/
 obj-$(CONFIG_VME_BUS)		+= vme/
 obj-$(CONFIG_IIO)		+= iio/
 obj-$(CONFIG_FB_XGI)		+= xgifb/
+obj-$(CONFIG_TIDSPBRIDGE)	+= tidspbridge/
 obj-$(CONFIG_USB_EMXX)		+= emxx_udc/
 obj-$(CONFIG_FT1000)		+= ft1000/
 obj-$(CONFIG_SPEAKUP)		+= speakup/
