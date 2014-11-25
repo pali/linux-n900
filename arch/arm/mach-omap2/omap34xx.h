@@ -95,5 +95,57 @@
 #define OMAP34XX_SEC_SHA1MD5_BASE	(OMAP34XX_SEC_BASE + 0x23000)
 #define OMAP34XX_SEC_AES_BASE	(OMAP34XX_SEC_BASE + 0x25000)
 
+/* VDD1 OPPS */
+#define VDD1_OPP1	0x1
+#define VDD1_OPP2	0x2
+#define VDD1_OPP3	0x3
+#define VDD1_OPP4	0x4
+#define VDD1_OPP5	0x5
+#define VDD1_OPP6	0x6
+#define VDD1_OPP7	0x7
+#define VDD1_OPP8	0x8
+#define VDD1_OPP9	0x9
+#define VDD1_OPP10	0xA
+#define VDD1_OPP11	0xB
+#define VDD1_OPP12	0xC
+#define VDD1_OPP13	0xD
+
+/* VDD2 OPPS */
+#define VDD2_OPP1	0x1
+#define VDD2_OPP2	0x2
+#define VDD2_OPP3	0x3
+
+#define MIN_VDD1_OPP	VDD1_OPP1
+#define MAX_VDD1_OPP	VDD1_OPP13
+#define MIN_VDD2_OPP	VDD2_OPP1
+#define MAX_VDD2_OPP	VDD2_OPP3
+
+/* MPU speeds */
+#define S1150M  1150000000
+#define S1100M  1100000000
+#define S1000M  1000000000
+#define S950M   950000000
+#define S900M   900000000
+#define S850M   850000000
+#define S805M   805000000
+#define S720M   720000000
+#define S600M   600000000
+#define S550M   550000000
+#define S500M   500000000
+#define S250M   250000000
+#define S125M   125000000
+
+/* DSP speeds */
+#define S520M   520000000
+#define S430M   430000000
+#define S400M   400000000
+#define S360M   360000000
+#define S180M   180000000
+#define S90M    90000000
+
+/* L3 speeds */
+#define S83M    83000000
+#define S166M   166000000
+
 #endif /* __ASM_ARCH_OMAP3_H */
 
