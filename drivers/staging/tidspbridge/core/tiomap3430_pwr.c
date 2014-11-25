@@ -46,6 +46,7 @@
 #include "_tiomap_pwr.h"
 #include <mach-omap2/prm-regbits-34xx.h>
 #include <mach-omap2/cm-regbits-34xx.h>
+#include <mach-omap2/omap34xx.h>
 
 #define PWRSTST_TIMEOUT          200
 
@@ -124,7 +125,7 @@ int handle_hibernation_from_dsp(struct bridge_dev_context *dev_context)
 			status =
 			    dev_get_io_mgr(dev_context->dev_obj, &hio_mgr);
 			if (!hio_mgr) {
-				status = DSP_EHANDLE;
+				status = -EINVAL;
 				return status;
 			}
 			io_sh_msetting(hio_mgr, SHM_GETOPP, &opplevel);
@@ -355,7 +356,7 @@ int pre_scale_dsp(struct bridge_dev_context *dev_context, void *pargs)
 	if ((dev_context->brd_state == BRD_HIBERNATION) ||
 	    (dev_context->brd_state == BRD_RETENTION) ||
 	    (dev_context->brd_state == BRD_DSP_HIBERNATION)) {
-		dev_dbg(bridge, "OPP: %s IVA in sleep. No message to DSP\n");
+		dev_dbg(bridge, "OPP: %s IVA in sleep. No message to DSP\n", __func__);
 		return 0;
 	} else if (dev_context->brd_state == BRD_RUNNING) {
 		/* Send a prenotification to DSP */
