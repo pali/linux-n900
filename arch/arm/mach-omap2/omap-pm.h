@@ -19,6 +19,20 @@
 #include <linux/clk.h>
 #include <linux/pm_opp.h>
 
+/**
+ * struct omap_opp - clock frequency-to-OPP ID table for DSP, MPU
+ * @rate: target clock rate
+ * @opp_id: OPP ID
+ * @min_vdd: minimum VDD1 voltage (in millivolts) for this OPP
+ *
+ * Operating performance point data.  Can vary by OMAP chip and board.
+ */
+struct omap_opp {
+	unsigned long rate;
+	u8 opp_id;
+	u16 vsel;
+};
+
 /*
  * agent_id values for use with omap_pm_set_min_bus_tput():
  *
