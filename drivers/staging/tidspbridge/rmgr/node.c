@@ -433,7 +433,7 @@ int node_allocate(struct proc_object *hprocessor,
 #ifdef DSP_DMM_DEBUG
 	status = dmm_get_handle(p_proc_object, &dmm_mgr);
 	if (!dmm_mgr) {
-		status = DSP_EHANDLE;
+		status = -EINVAL;
 		goto func_cont;
 	}
 
@@ -2437,7 +2437,7 @@ static void delete_node(struct node_object *hnode,
 			if (dmm_mgr)
 				dmm_mem_map_dump(dmm_mgr);
 			else
-				status = DSP_EHANDLE;
+				status = -EINVAL;
 #endif
 		}
 	}

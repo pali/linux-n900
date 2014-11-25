@@ -29,6 +29,7 @@
 /* Host OS */
 #include <dspbridge/host_os.h>
 #include <linux/workqueue.h>
+#include <linux/platform_data/dsp-omap.h>
 
 /*  ----------------------------------- DSP/BIOS Bridge */
 #include <dspbridge/dbdefs.h>
@@ -1567,7 +1568,7 @@ int io_sh_msetting(struct io_mgr *hio_mgr, u8 desc, void *pargs)
 {
 #ifdef CONFIG_TIDSPBRIDGE_DVFS
 	u32 i;
-	struct dspbridge_platform_data *pdata =
+	struct omap_dsp_platform_data *pdata =
 	    omap_dspbridge_dev->dev.platform_data;
 
 	switch (desc) {
