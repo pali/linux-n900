@@ -799,6 +799,25 @@ static struct omap_ssi_board_config __initdata rx51_ssi_config = {
 	.cawake_gpio = { 151 },
 };
 
+static struct hsi_channel __initdata rx51_hsi_channels[] = {
+	[0] =  {
+		.id = 0,
+		.name = "mcsaab-control",
+		},
+	[1] =  {
+		.id = 1,
+		.name = "speech-control",
+		},
+	[2] =  {
+		.id = 2,
+		.name = "speech-data",
+		},
+	[3] =  {
+		.id = 3,
+		.name = "mcsaab-data",
+		},
+};
+
 static struct hsi_board_info __initdata rx51_ssi_cl[] = {
 	[0] =	{
 		.name = "hsi_char",
@@ -811,13 +830,15 @@ static struct hsi_board_info __initdata rx51_ssi_cl[] = {
 		.port = 0,
 		.tx_cfg = {
 			.mode = HSI_MODE_FRAME,
-			.channels = 4,
+			.num_channels = 4,
+			.channels = rx51_hsi_channels,
 			.speed = 55000,
 			.arb_mode = HSI_ARB_RR,
 			},
 		.rx_cfg = {
 			.mode = HSI_MODE_FRAME,
-			.channels = 4,
+			.num_channels = 4,
+			.channels = rx51_hsi_channels,
 			},
 		},
 	[2] =	{
