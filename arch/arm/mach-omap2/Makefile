@@ -225,6 +225,10 @@ obj-$(CONFIG_HW_PERF_EVENTS)		+= pmu.o
 
 obj-$(CONFIG_OMAP_IOMMU)		+= omap-iommu.o
 
+ifneq ($(CONFIG_TIDSPBRIDGE),)
+obj-y					+= dsp.o
+endif
+
 # OMAP2420 MSDI controller integration support ("MMC")
 obj-$(CONFIG_SOC_OMAP2420)		+= msdi.o
 
