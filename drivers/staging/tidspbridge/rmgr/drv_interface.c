@@ -44,7 +44,9 @@
 #include <dspbridge/dev.h>
 
 #ifdef CONFIG_TIDSPBRIDGE_DVFS
-#include <mach-omap2/omap3-opp.h>
+//#include <mach-omap2/omap3-opp.h>
+#include <mach-omap2/omap-pm.h>
+#include <mach-omap2/omap34xx.h>
 #endif
 
 /*  ----------------------------------- Globals */
@@ -406,6 +408,9 @@ static int omap3_bridge_startup(struct platform_device *pdev)
 	struct drv_data *drv_datap = NULL;
 	u32 phys_membase, phys_memsize;
 	int err;
+#ifdef CONFIG_TIDSPBRIDGE_DVFS
+	int i = 0;
+#endif
 
 #ifdef CONFIG_TIDSPBRIDGE_RECOVERY
 	bridge_rec_queue = create_workqueue("bridge_rec_queue");
@@ -494,9 +499,6 @@ static int omap34_xx_bridge_probe(struct platform_device *pdev)
 {
 	int err;
 	dev_t dev = 0;
-#ifdef CONFIG_TIDSPBRIDGE_DVFS
-	int i = 0;
-#endif
 
 	omap_dspbridge_dev = pdev;
 
