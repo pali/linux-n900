@@ -13,7 +13,7 @@
 #include <dt-bindings/input/input.h>
 
 / {
-	model = "Nokia RX-51 board";
+	model = "Nokia N900";
 	compatible = "nokia,omap3-n900", "ti,omap3430", "ti,omap3";
 
 	aliases {
