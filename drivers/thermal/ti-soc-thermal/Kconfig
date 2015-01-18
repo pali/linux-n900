@@ -21,13 +21,28 @@ config TI_THERMAL
 	  This includes trip points definitions, extrapolation rules and
 	  CPU cooling device bindings.
 
+config OMAP3_THERMAL
+	bool "Texas Instruments OMAP3 thermal support"
+	depends on TI_SOC_THERMAL
+	depends on ARCH_OMAP3
+	help
+	  If you say yes here you get thermal support for the Texas Instruments
+	  OMAP3 SoC family. The current chips supported are:
+	   - OMAP3430
+
+	  OMAP3 chips normally don't need thermal management, and sensors in
+	  this generation are not very accurate, nor they are very close to
+	  the important hotspots.
+
+	  Say 'N' here.
+
 config OMAP4_THERMAL
 	bool "Texas Instruments OMAP4 thermal support"
 	depends on TI_SOC_THERMAL
 	depends on ARCH_OMAP4
 	help
 	  If you say yes here you get thermal support for the Texas Instruments
-	  OMAP4 SoC family. The current chip supported are:
+	  OMAP4 SoC family. The current chips supported are:
 	   - OMAP4430
 	   - OMAP4460
 	   - OMAP4470
@@ -41,7 +56,7 @@ config OMAP5_THERMAL
 	depends on SOC_OMAP5
 	help
 	  If you say yes here you get thermal support for the Texas Instruments
-	  OMAP5 SoC family. The current chip supported are:
+	  OMAP5 SoC family. The current chips supported are:
 	   - OMAP5430
 
 	  This includes alert interrupts generation and also the TSHUT
@@ -53,7 +68,7 @@ config DRA752_THERMAL
 	depends on SOC_DRA7XX
 	help
 	  If you say yes here you get thermal support for the Texas Instruments
-	  DRA752 SoC family. The current chip supported are:
+	  DRA752 SoC family. The current chips supported are:
 	   - DRA752
 
 	  This includes alert interrupts generation and also the TSHUT
