@@ -331,6 +331,7 @@ struct ti_temp_sensor {
 #define TI_BANDGAP_FEATURE_FREEZE_BIT		BIT(7)
 #define TI_BANDGAP_FEATURE_COUNTER_DELAY	BIT(8)
 #define TI_BANDGAP_FEATURE_HISTORY_BUFFER	BIT(9)
+#define TI_BANDGAP_FEATURE_UNRELIABLE		BIT(10)
 #define TI_BANDGAP_HAS(b, f)			\
 			((b)->conf->features & TI_BANDGAP_FEATURE_ ## f)
 
@@ -384,25 +385,10 @@ int ti_bandgap_set_sensor_data(struct ti_bandgap *bgp, int id, void *data);
 void *ti_bandgap_get_sensor_data(struct ti_bandgap *bgp, int id);
 int ti_bandgap_get_trend(struct ti_bandgap *bgp, int id, int *trend);
 
-#ifdef CONFIG_OMAP4_THERMAL
+extern const struct ti_bandgap_data omap34xx_data;
 extern const struct ti_bandgap_data omap4430_data;
 extern const struct ti_bandgap_data omap4460_data;
 extern const struct ti_bandgap_data omap4470_data;
-#else
-#define omap4430_data					NULL
-#define omap4460_data					NULL
-#define omap4470_data					NULL
-#endif
-
-#ifdef CONFIG_OMAP5_THERMAL
 extern const struct ti_bandgap_data omap5430_data;
-#else
-#define omap5430_data					NULL
-#endif
-
-#ifdef CONFIG_DRA752_THERMAL
 extern const struct ti_bandgap_data dra752_data;
-#else
-#define dra752_data					NULL
-#endif
 #endif
