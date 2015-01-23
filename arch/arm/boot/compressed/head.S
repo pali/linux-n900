@@ -268,7 +268,7 @@ restart:	adr	r0, LC0
 		 * area.  No GOT fixup has occurred yet, but none of the
 		 * code we're about to call uses any global variable.
 		*/
-		add	sp, sp, #0x10000
+		add	sp, sp, #0x20000
 		stmfd	sp!, {r0-r3, ip, lr}
 		mov	r0, r8
 		mov	r1, r6
@@ -289,7 +289,7 @@ restart:	adr	r0, LC0
 		bleq	atags_to_fdt
 
 		ldmfd	sp!, {r0-r3, ip, lr}
-		sub	sp, sp, #0x10000
+		sub	sp, sp, #0x20000
 #endif
 
 		mov	r8, r6			@ use the appended device tree
