@@ -20,6 +20,7 @@
 #include <linux/of_platform.h>
 #include <linux/smp.h>
 #include <linux/libfdt_env.h>
+#include <linux/libfdt.h>
 
 #include <asm/cputype.h>
 #include <asm/setup.h>
@@ -29,6 +30,7 @@
 #include <asm/mach-types.h>
 #include <asm/system_info.h>
 
+#include "atags.h"
 
 #ifdef CONFIG_SMP
 extern struct of_cpu_method __cpu_method_of_table[];
@@ -208,6 +210,11 @@ const struct machine_desc * __init setup_machine_fdt(unsigned int dt_phys)
 	const struct machine_desc *mdesc, *mdesc_best = NULL;
 	unsigned long dt_root;
 	const u32 *rev;
+	void *dt_virt;
+#ifdef CONFIG_ARM_ATAG_DTB_COMPAT
+	const void *atags;
+	unsigned long dt_chosen;
+#endif
 
 #ifdef CONFIG_ARCH_MULTIPLATFORM
 	DT_MACHINE_START(GENERIC_DT, "Generic DT based system")
@@ -216,7 +223,12 @@ const struct machine_desc * __init setup_machine_fdt(unsigned int dt_phys)
 	mdesc_best = &__mach_desc_GENERIC_DT;
 #endif
 
-	if (!dt_phys || !early_init_dt_verify(phys_to_virt(dt_phys)))
+	if (!dt_phys)
+		return NULL;
+
+	dt_virt = phys_to_virt(dt_phys);
+
+	if (!early_init_dt_verify(dt_virt))
 		return NULL;
 
 	dt_root = of_get_flat_dt_root();
@@ -253,6 +265,16 @@ const struct machine_desc * __init setup_machine_fdt(unsigned int dt_phys)
 	rev = of_get_flat_dt_prop(dt_root, "revision", NULL);
 	if (rev)
 		system_rev = fdt32_to_cpu(*rev);
+
+#ifdef CONFIG_ARM_ATAG_DTB_COMPAT
+	/* Store DT /chosen/linux,atags into /proc/atags */
+	dt_chosen = fdt_path_offset(dt_virt, "/chosen");
+	if (dt_chosen >= 0) {
+		atags = of_get_flat_dt_prop(dt_chosen, "linux,atags", NULL);
+		if (atags)
+			save_atags(atags);
+	}
+#endif
 
 	return mdesc;
 }
