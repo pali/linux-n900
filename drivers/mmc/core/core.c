@@ -2500,6 +2500,9 @@ static int mmc_rescan_try_freq(struct mmc_host *host, unsigned freq)
 
 	if (!mmc_attach_sd(host))
 		return 0;
+
+	mmc_go_idle(host);
+
 	if (!mmc_attach_mmc(host))
 		return 0;
 
