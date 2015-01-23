@@ -171,6 +171,8 @@ int atags_to_fdt(void *atag_list, void *fdt, int total_space)
 					cpu_to_fdt32(atag->u.mem.size);
 			}
 
+		} else if (atag->hdr.tag == ATAG_REVISION) {
+			setprop_cell(fdt, "/", "revision", atag->u.revision.rev);
 		} else if (atag->hdr.tag == ATAG_INITRD2) {
 			uint32_t initrd_start, initrd_size;
 			initrd_start = atag->u.initrd.start;
