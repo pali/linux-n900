@@ -385,9 +385,9 @@ int smia_reglist_enum_mbus_code(struct smia_meta_reglist *meta,
 
 		if (code->index == npixelformat) {
 			if (mode->pixel_format == V4L2_PIX_FMT_SGRBG10DPCM8)
-				code->code = V4L2_MBUS_FMT_SGRBG10_DPCM8_1X8;
+				code->code = MEDIA_BUS_FMT_SGRBG10_DPCM8_1X8;
 			else
-				code->code = V4L2_MBUS_FMT_SGRBG10_1X10;
+				code->code = MEDIA_BUS_FMT_SGRBG10_1X10;
 			return 0;
 		}
 
@@ -473,9 +473,9 @@ void smia_reglist_to_mbus(const struct smia_reglist *reglist,
 	fmt->height = reglist->mode.window_height;
 
 	if (reglist->mode.pixel_format == V4L2_PIX_FMT_SGRBG10DPCM8)
-		fmt->code = V4L2_MBUS_FMT_SGRBG10_DPCM8_1X8;
+		fmt->code = MEDIA_BUS_FMT_SGRBG10_DPCM8_1X8;
 	else
-		fmt->code = V4L2_MBUS_FMT_SGRBG10_1X10;
+		fmt->code = MEDIA_BUS_FMT_SGRBG10_1X10;
 }
 EXPORT_SYMBOL_GPL(smia_reglist_to_mbus);
 
