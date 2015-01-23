@@ -29,6 +29,7 @@
 #include <asm/mach-types.h>
 #include <asm/system_info.h>
 
+#include "atags.h"
 
 #ifdef CONFIG_SMP
 extern struct of_cpu_method __cpu_method_of_table[];
@@ -253,6 +254,11 @@ const struct machine_desc * __init setup_machine_fdt(unsigned int dt_phys)
 	prop = of_get_flat_dt_prop(dt_root, "revision", NULL);
 	if (prop)
 		system_rev = fdt32_to_cpu(*prop);
+
+	/* Save atags */
+	prop = of_get_flat_dt_prop(dt_root, "atags", NULL);
+	if (prop)
+		save_atags((void *)prop);
 
 	return mdesc;
 }
