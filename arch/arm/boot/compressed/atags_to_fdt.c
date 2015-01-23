@@ -112,7 +112,7 @@ int atags_to_fdt(void *atag_list, void *fdt, int total_space)
 	 * address and size for each bank */
 	uint32_t mem_reg_property[2 * 2 * NR_BANKS];
 	int memcount = 0;
-	int ret, memsize;
+	int ret, memsize, atag_size;
 
 	/* make sure we've got an aligned pointer */
 	if ((u32)atag_list & 0x3)
@@ -188,6 +188,10 @@ int atags_to_fdt(void *atag_list, void *fdt, int total_space)
 		setprop(fdt, "/memory", "reg", mem_reg_property,
 			4 * memcount * memsize);
 	}
+
+	/* include the terminating ATAG_NONE */
+	atag_size = (char *)atag - (char *)atag_list + sizeof(struct tag_header);
+	setprop(fdt, "/chosen", "linux,atags", atag_list, atag_size);
 
 	return fdt_pack(fdt);
 }
