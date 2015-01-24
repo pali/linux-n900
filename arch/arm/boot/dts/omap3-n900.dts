@@ -665,6 +665,7 @@
 };
 
 &mmc1 {
+	slot-name = "external";
 	pinctrl-names = "default";
 	pinctrl-0 = <&mmc1_pins>;
 	vmmc-supply = <&vmmc1>;
@@ -674,6 +675,7 @@
 
 /* most boards use vaux3, only some old versions use vmmc2 instead */
 &mmc2 {
+	slot-name = "internal";
 	pinctrl-names = "default";
 	pinctrl-0 = <&mmc2_pins>;
 	vmmc-supply = <&vaux3>;
