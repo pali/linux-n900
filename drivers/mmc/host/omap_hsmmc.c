@@ -2021,6 +2021,8 @@ static struct omap_hsmmc_platform_data *of_get_hsmmc_pdata(struct device *dev)
 	if (of_find_property(np, "enable-sdio-wakeup", NULL))
 		pdata->pm_caps |= MMC_PM_WAKE_SDIO_IRQ;
 
+	of_property_read_string(np, "slot-name", &pdata->name);
+
 	return pdata;
 }
 #else
