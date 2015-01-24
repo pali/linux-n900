@@ -1984,6 +1984,8 @@ static struct omap_hsmmc_platform_data *of_get_hsmmc_pdata(struct device *dev)
 	if (of_find_property(np, "ti,needs-special-hs-handling", NULL))
 		pdata->features |= HSMMC_HAS_HSPE_SUPPORT;
 
+	of_property_read_string(np, "slot-name", &pdata->name);
+
 	return pdata;
 }
 #else
