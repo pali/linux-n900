@@ -24,7 +24,6 @@
  *
  ******************************************************************************/
 
-#include <linux/version.h>
 #include <linux/clk.h>
 #include <linux/err.h>
 #include <linux/hardirq.h>
