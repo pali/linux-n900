@@ -28,7 +28,6 @@
 #include <linux/config.h>
 #endif
 
-#include <linux/version.h>
 #include <linux/io.h>
 #include <asm/page.h>
 #include <linux/mm.h>
