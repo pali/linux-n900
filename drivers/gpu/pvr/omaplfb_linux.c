@@ -28,7 +28,6 @@
 #include <linux/config.h>
 #endif
 
-#include <linux/version.h>
 #include <linux/module.h>
 
 #include <linux/pci.h>
