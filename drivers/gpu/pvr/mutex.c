@@ -24,7 +24,6 @@
  *
  ******************************************************************************/
 
-#include <linux/version.h>
 #include <linux/errno.h>
 #include <linux/mutex.h>
 #include <linux/module.h>
