@@ -31,7 +31,6 @@
 #include <linux/config.h>
 #endif
 
-#include <linux/version.h>
 #include <linux/sched.h>
 #include <linux/hardirq.h>
 

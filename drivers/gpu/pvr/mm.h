@@ -31,7 +31,6 @@
 #include <linux/config.h>
 #endif
 
-#include <linux/version.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
 
