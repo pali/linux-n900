@@ -27,7 +27,6 @@
 #if !defined(__SYSLOCAL_H__)
 #define __SYSLOCAL_H__
 
-#include <linux/version.h>
 #include <linux/clk.h>
 #include <linux/semaphore.h>
 
