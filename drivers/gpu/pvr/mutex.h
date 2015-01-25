@@ -27,7 +27,6 @@
 #ifndef __INCLUDED_LINUX_MUTEX_H_
 #define __INCLUDED_LINUX_MUTEX_H_
 
-#include <linux/version.h>
 
 #include <linux/mutex.h>
 
