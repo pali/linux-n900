@@ -278,6 +278,7 @@ static struct omap_gpio_switch rx51_gpio_switches[] __initdata = {
 		.type			= OMAP_GPIO_SWITCH_TYPE_ACTIVITY,
 		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
 		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.failed			= true,
 	}, {
 		.name			= "cam_launch",
 		.gpio			= RX51_GPIO_CAMERA_CAPTURE,
@@ -285,6 +286,7 @@ static struct omap_gpio_switch rx51_gpio_switches[] __initdata = {
 		.type			= OMAP_GPIO_SWITCH_TYPE_ACTIVITY,
 		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
 		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.failed			= true,
 	}, {
 		.name			= "cam_shutter",
 		.gpio			= RX51_GPIO_CAMERA_LENS_COVER,
@@ -292,6 +294,7 @@ static struct omap_gpio_switch rx51_gpio_switches[] __initdata = {
 		.type			= OMAP_GPIO_SWITCH_TYPE_COVER,
 		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
 		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.failed			= true,
 	}, {
 		.name			= "cmt_apeslpx",
 		.gpio			= RX51_GPIO_CMT_APESLPX,
@@ -341,6 +344,7 @@ static struct omap_gpio_switch rx51_gpio_switches[] __initdata = {
 		.type			= OMAP_GPIO_SWITCH_TYPE_CONNECTION,
 		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
 		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.failed			= true,
 	}, {
 		.name			= "kb_lock",
 		.gpio			= RX51_GPIO_LOCK_BUTTON,
@@ -348,6 +352,7 @@ static struct omap_gpio_switch rx51_gpio_switches[] __initdata = {
 		.type			= OMAP_GPIO_SWITCH_TYPE_COVER,
 		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
 		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.failed			= true,
 	}, {
 		.name			= "proximity",
 		.gpio			= RX51_GPIO_PROXIMITY,
@@ -355,6 +360,7 @@ static struct omap_gpio_switch rx51_gpio_switches[] __initdata = {
 		.type			= OMAP_GPIO_SWITCH_TYPE_COVER,
 		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
 		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.failed			= true,
 	}, {
 		.name			= "sleep_ind",
 		.gpio			= RX51_GPIO_SLEEP_IND,
@@ -362,6 +368,7 @@ static struct omap_gpio_switch rx51_gpio_switches[] __initdata = {
 		.type			= OMAP_GPIO_SWITCH_TYPE_ACTIVITY,
 		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
 		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.failed			= true,
 	}, {
 		.name			= "slide",
 		.gpio			= RX51_GPIO_KEYPAD_SLIDE,
@@ -369,6 +376,7 @@ static struct omap_gpio_switch rx51_gpio_switches[] __initdata = {
 		.type			= OMAP_GPIO_SWITCH_TYPE_COVER,
 		.debounce_rising	= RX51_GPIO_DEBOUNCE_TIMEOUT,
 		.debounce_falling	= RX51_GPIO_DEBOUNCE_TIMEOUT,
+		.failed			= true,
 	}
 };
 
