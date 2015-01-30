@@ -263,16 +263,37 @@ restart:	adr	r0, LC0
 		 * OK... Let's do some funky business here.
 		 * If we do have a DTB appended to zImage, and we do have
 		 * an ATAG list around, we want the later to be translated
-		 * and folded into the former here.  To be on the safe side,
-		 * let's temporarily move  the stack away into the malloc
-		 * area.  No GOT fixup has occurred yet, but none of the
-		 * code we're about to call uses any global variable.
+		 * and folded into the former here. No GOT fixup has occurred
+		 * yet, but none of the code we're about to call uses any
+		 * global variable.
 		*/
-		add	sp, sp, #0x20000
+
+		/* Get the initial DTB size */
+		ldr	r5, [r6, #4]
+#ifndef __ARMEB__
+		/* convert to little endian */
+		eor	r1, r5, r5, ror #16
+		bic	r1, r1, #0x00ff0000
+		mov	r5, r5, ror #8
+		eor	r5, r5, r1, lsr #8
+#endif
+		/* 50% DTB growth should be good enough */
+		add	r5, r5, r5, lsr #1
+		/* preserve 64-bit alignment */
+		add	r5, r5, #7
+		bic	r5, r5, #7
+		/* clamp to 32KB min and 1MB max */
+		movs	r1, r5, lsr #15
+		moveq	r5, #(1 << 15)
+		movs	r1, r5, lsr #20
+		movne	r5, #(1 << 20)
+
+		/* Temporarily relocate the stack past the DTB work space */
+		add	sp, sp, r5
 		stmfd	sp!, {r0-r3, ip, lr}
 		mov	r0, r8
 		mov	r1, r6
-		sub	r2, sp, r6
+		mov	r2, r5
 		bl	atags_to_fdt
 
 		/*
@@ -285,11 +306,11 @@ restart:	adr	r0, LC0
 		bic	r0, r0, #1
 		add	r0, r0, #0x100
 		mov	r1, r6
-		sub	r2, sp, r6
+		mov	r2, r5
 		bleq	atags_to_fdt
 
 		ldmfd	sp!, {r0-r3, ip, lr}
-		sub	sp, sp, #0x20000
+		sub	sp, sp, r5
 #endif
 
 		mov	r8, r6			@ use the appended device tree
@@ -306,7 +327,7 @@ restart:	adr	r0, LC0
 		subs	r1, r5, r1
 		addhi	r9, r9, r1
 
-		/* Get the dtb's size */
+		/* Get the current DTB size */
 		ldr	r5, [r6, #4]
 #ifndef __ARMEB__
 		/* convert r5 (dtb size) to little endian */
