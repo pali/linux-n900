@@ -314,7 +314,10 @@ static int __init new_switch(struct gpio_switch *sw)
 	}
 	dev_set_drvdata(&sw->pdev.dev, sw);
 
-	r = gpio_request(sw->gpio, sw->name);
+	if (!sw->failed)
+		r = gpio_request(sw->gpio, sw->name);
+	else
+		r = -EINVAL;
 	if (r < 0) {
 		printk(KERN_ERR "gpio-switch: gpio_reguest failed for %s %d\n",
 				sw->name, sw->gpio);
@@ -443,6 +446,7 @@ static int __init add_board_switches(void)
 		sw->debounce_falling = cfg->debounce_falling;
 		sw->notify = cfg->notify;
 		sw->notify_data = cfg->notify_data;
+		sw->failed = cfg->failed;
 		if ((r = new_switch(sw)) < 0) {
 			kfree(sw);
 		}
