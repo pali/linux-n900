@@ -46,6 +46,7 @@ struct omap_gpio_switch {
 	/* notify board-specific code about state changes */
 	void (* notify)(void *data, int state);
 	void *notify_data;
+	bool failed;
 };
 
 /* Call at init time only */
