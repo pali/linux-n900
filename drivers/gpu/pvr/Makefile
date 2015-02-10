@@ -16,10 +16,8 @@ obj-$(CONFIG_PVR_EXAMPLES) += bc_example.o
 bc_example-objs		:= bufferclass_example.o bufferclass_example_linux.o \
 			   bufferclass_example_private.o
 
-DATE			:= $(shell date "+%a %B %d %Z %Y" )
 CBUILD			:= -O2						\
 			   -DPVR_BUILD_DIR="\"$(PVR_BUILD_DIR)\""	\
-			   -DPVR_BUILD_DATE="\"$(DATE)\""	\
 			   -DAUTOCONF_INCLUDED
 
 ccflags-y		+= $(CBUILD) -include $(src)/pvrconfig.h
