@@ -12,6 +12,8 @@ Required properties:
                                       specifier or both the interrupt
                                       controller phandle and interrupt
                                       specifier.
+- compatible : should be "ti+brcm,omap3-uart,bcm2048" for bcm2048
+	       bluetooth connected to OMAP3 serial
 - ti,hwmods : Must be "uart<n>", n being the instance number (1-based)
 
 Optional properties:
@@ -31,3 +33,8 @@ Example:
                         ti,hwmods = "uart4";
                         clock-frequency = <48000000>;
                 };
+
+Required properties for ti+brcm,omap3-uart,bcm2048:
+- reset-gpios : gpio for reset pin
+- host-wakeup-gpios : gpio for host wakeup
+- bluetooth-wakeup-gpios : gpio for bluetooth wakeup
