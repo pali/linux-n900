@@ -897,9 +897,19 @@
 };
 
 &uart2 {
+        compatible = "ti+brcm,omap3-uart,bcm2048", "ti,omap3-uart";
 	interrupts-extended = <&intc 73 &omap3_pmx_core OMAP3_UART2_RX>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart2_pins>;
+
+	clocks = <&uart2_fck>, <&uart2_ick>;
+	clock-names = "fck", "ick";
+
+	device {
+		  reset-gpios = <&gpio3 27 GPIO_ACTIVE_HIGH>; /* 91 */
+		  host-wakeup-gpios = <&gpio4 5 GPIO_ACTIVE_HIGH>; /* 101 */
+		  bluetooth-wakeup-gpios = <&gpio2 5 GPIO_ACTIVE_HIGH>; /* 37 */
+	};
 };
 
 &uart3 {
