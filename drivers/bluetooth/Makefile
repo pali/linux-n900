@@ -38,4 +38,8 @@ hci_uart-$(CONFIG_BT_HCIUART_BCM)	+= hci_bcm.o
 hci_uart-$(CONFIG_BT_HCIUART_QCA)	+= hci_qca.o
 hci_uart-objs				:= $(hci_uart-y)
 
+obj-$(CONFIG_BT_NOKIA_H4P)	+= nokia_h4p.o
+
+nokia_h4p-y			:= nokia_core.o nokia_fw.o nokia_uart.o
+
 ccflags-y += -D__CHECK_ENDIAN__
