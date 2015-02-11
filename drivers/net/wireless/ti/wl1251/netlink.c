@@ -190,11 +190,7 @@ static int wl1251_nl_test_cmd(struct sk_buff *skb, struct genl_info *info)
 			sizeof(*cmd), cmd))
 			goto nla_put_failure;
 
-		ret = genlmsg_end(msg, hdr);
-		if (ret < 0) {
-			wl1251_error("%s() failed", __func__);
-			goto nla_put_failure;
-		}
+		genlmsg_end(msg, hdr);
 
 		wl1251_debug(DEBUG_NETLINK, "TEST cmd sent, answer");
 		ret = genlmsg_reply(msg, info);
@@ -270,11 +266,7 @@ static int wl1251_nl_interrogate(struct sk_buff *skb, struct genl_info *info)
 	if (nla_put(msg, WL1251_NL_ATTR_CMD_IE_ANSWER, cmd_ie_len, cmd))
 		goto nla_put_failure;
 
-	ret = genlmsg_end(msg, hdr);
-	if (ret < 0) {
-		wl1251_error("%s() failed", __func__);
-		goto nla_put_failure;
-	}
+	genlmsg_end(msg, hdr);
 
 	kfree(cmd);
 	return genlmsg_reply(msg, info);
@@ -406,14 +398,10 @@ static int wl1251_nl_phy_reg_read(struct sk_buff *skb, struct genl_info *info)
 	if (nla_put_u32(msg, WL1251_NL_ATTR_REG_VAL, *reg_value))
 		goto nla_put_failure;
 
-	ret = genlmsg_end(msg, hdr);
-	if (ret < 0) {
-		wl1251_error("%s() failed", __func__);
-		goto nla_put_failure;
-	}
+	genlmsg_end(msg, hdr);
 
 	kfree(reg_value);
-
+	
 	return genlmsg_reply(msg, info);
 
 nla_put_failure:
@@ -509,11 +497,7 @@ static int wl1251_nl_reg_read(struct sk_buff *skb, struct genl_info *info)
 	if (nla_put_u32(msg, WL1251_NL_ATTR_REG_VAL, val))
 		goto nla_put_failure;
 
-	ret = genlmsg_end(msg, hdr);
-	if (ret < 0) {
-		wl1251_error("%s() failed", __func__);
-		goto nla_put_failure;
-	}
+	genlmsg_end(msg, hdr);
 
 	return genlmsg_reply(msg, info);
 
