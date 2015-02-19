@@ -9,7 +9,7 @@
 
 /dts-v1/;
 
-#include "omap34xx-hs.dtsi"
+#include "omap34xx.dtsi"
 #include <dt-bindings/input/input.h>
 
 / {
@@ -975,5 +975,20 @@
 };
 
 &ssi_port2 {
+	status = "disabled";
+};
+
+/*
+ * Default secure signed bootloader (Nokia X-Loader) does not enable L3 firewall
+ * for omap HW crypto support. When kernel drivers try to access these crypto
+ * blocks then kernel receive "Unhandled fault: external abort on non-linefetch"
+ * and crash. Until somebody fix omap-aes and omap-sham kernel drivers (to not
+ * crash anymore) we need to disable omap crypto support for Nokia N900 devices.
+ */
+&aes {
+	status = "disabled";
+};
+
+&sham {
 	status = "disabled";
 };
