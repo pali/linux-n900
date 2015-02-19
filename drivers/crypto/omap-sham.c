@@ -1949,7 +1949,13 @@ static int omap_sham_probe(struct platform_device *pdev)
 	dd->flags |= dd->pdata->flags;
 
 	pm_runtime_enable(dev);
-	pm_runtime_get_sync(dev);
+
+	err = pm_runtime_get_sync(dev);
+	if (err < 0) {
+		dev_err(dev, "failed to get sync: %d\n", err);
+		goto err_pm;
+	}
+
 	rev = omap_sham_read(dd, SHA_REG_REV(dd));
 	pm_runtime_put_sync(&pdev->dev);
 
@@ -1979,6 +1985,7 @@ err_algs:
 		for (j = dd->pdata->algs_info[i].registered - 1; j >= 0; j--)
 			crypto_unregister_ahash(
 					&dd->pdata->algs_info[i].algs_list[j]);
+err_pm:
 	pm_runtime_disable(dev);
 	if (dd->dma_lch)
 		dma_release_channel(dd->dma_lch);
