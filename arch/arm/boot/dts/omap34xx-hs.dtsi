@@ -10,7 +10,3 @@
 &sham {
 	status = "disabled";
 };
-
-&timer12 {
-	status = "disabled";
-};
