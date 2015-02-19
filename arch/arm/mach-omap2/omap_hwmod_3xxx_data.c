@@ -3773,30 +3773,16 @@ static struct omap_hwmod_ocp_if *omap3xxx_hwmod_ocp_ifs[] __initdata = {
 /* GP-only hwmod links */
 static struct omap_hwmod_ocp_if *omap34xx_gp_hwmod_ocp_ifs[] __initdata = {
 	&omap3xxx_l4_sec__timer12,
-	&omap3xxx_l4_core__sham,
-	&omap3xxx_l4_core__aes,
 	NULL
 };
 
 static struct omap_hwmod_ocp_if *omap36xx_gp_hwmod_ocp_ifs[] __initdata = {
 	&omap3xxx_l4_sec__timer12,
-	&omap3xxx_l4_core__sham,
-	&omap3xxx_l4_core__aes,
 	NULL
 };
 
 static struct omap_hwmod_ocp_if *am35xx_gp_hwmod_ocp_ifs[] __initdata = {
 	&omap3xxx_l4_sec__timer12,
-	/*
-	 * Apparently the SHA/MD5 and AES accelerator IP blocks are
-	 * only present on some AM35xx chips, and no one knows which
-	 * ones.  See
-	 * http://www.spinics.net/lists/arm-kernel/msg215466.html So
-	 * if you need these IP blocks on an AM35xx, try uncommenting
-	 * the following lines.
-	 */
-	/* &omap3xxx_l4_core__sham, */
-	/* &omap3xxx_l4_core__aes, */
 	NULL
 };
 
@@ -3844,6 +3830,8 @@ static struct omap_hwmod_ocp_if *omap34xx_hwmod_ocp_ifs[] __initdata = {
 	&omap3xxx_l4_core__mmu_isp,
 	&omap3xxx_l3_main__mmu_iva,
 	&omap34xx_l4_core__ssi,
+	&omap3xxx_l4_core__sham,
+	&omap3xxx_l4_core__aes,
 	NULL
 };
 
@@ -3867,6 +3855,8 @@ static struct omap_hwmod_ocp_if *omap36xx_hwmod_ocp_ifs[] __initdata = {
 	&omap3xxx_sad2d__l3,
 	&omap3xxx_l4_core__mmu_isp,
 	&omap3xxx_l3_main__mmu_iva,
+	&omap3xxx_l4_core__sham,
+	&omap3xxx_l4_core__aes,
 	NULL
 };
 
@@ -3886,6 +3876,16 @@ static struct omap_hwmod_ocp_if *am35xx_hwmod_ocp_ifs[] __initdata = {
 	&am35xx_l4_core__mdio,
 	&am35xx_emac__l3,
 	&am35xx_l4_core__emac,
+	/*
+	 * Apparently the SHA/MD5 and AES accelerator IP blocks are
+	 * only present on some AM35xx chips, and no one knows which
+	 * ones.  See
+	 * http://www.spinics.net/lists/arm-kernel/msg215466.html So
+	 * if you need these IP blocks on an AM35xx, try uncommenting
+	 * the following lines.
+	 */
+	/* &omap3xxx_l4_core__sham, */
+	/* &omap3xxx_l4_core__aes, */
 	NULL
 };
 
