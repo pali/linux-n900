@@ -1792,6 +1792,10 @@ static const struct of_device_id omap_sham_of_match[] = {
 		.data		= &omap_sham_pdata_omap2,
 	},
 	{
+		.compatible	= "ti,omap3-sham",
+		.data		= &omap_sham_pdata_omap2,
+	},
+	{
 		.compatible	= "ti,omap4-sham",
 		.data		= &omap_sham_pdata_omap4,
 	},
