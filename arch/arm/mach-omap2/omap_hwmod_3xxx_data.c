@@ -3744,29 +3744,54 @@ static struct omap_hwmod_ocp_if *omap3xxx_hwmod_ocp_ifs[] __initdata = {
 /* GP-only hwmod links */
 static struct omap_hwmod_ocp_if *omap34xx_gp_hwmod_ocp_ifs[] __initdata = {
 	&omap3xxx_l4_sec__timer12,
-	&omap3xxx_l4_core__sham,
-	&omap3xxx_l4_core__aes,
 	NULL
 };
 
 static struct omap_hwmod_ocp_if *omap36xx_gp_hwmod_ocp_ifs[] __initdata = {
 	&omap3xxx_l4_sec__timer12,
-	&omap3xxx_l4_core__sham,
-	&omap3xxx_l4_core__aes,
 	NULL
 };
 
 static struct omap_hwmod_ocp_if *am35xx_gp_hwmod_ocp_ifs[] __initdata = {
 	&omap3xxx_l4_sec__timer12,
-	/*
-	 * Apparently the SHA/MD5 and AES accelerator IP blocks are
-	 * only present on some AM35xx chips, and no one knows which
-	 * ones.  See
-	 * http://www.spinics.net/lists/arm-kernel/msg215466.html So
-	 * if you need these IP blocks on an AM35xx, try uncommenting
-	 * the following lines.
-	 */
+	NULL
+};
+
+/* crypto hwmod links */
+static struct omap_hwmod_ocp_if *omap34xx_sham_hwmod_ocp_ifs[] __initdata = {
+	&omap3xxx_l4_core__sham,
+	NULL
+};
+
+static struct omap_hwmod_ocp_if *omap34xx_aes_hwmod_ocp_ifs[] __initdata = {
+	&omap3xxx_l4_core__aes,
+	NULL
+};
+
+static struct omap_hwmod_ocp_if *omap36xx_sham_hwmod_ocp_ifs[] __initdata = {
+	&omap3xxx_l4_core__sham,
+	NULL
+};
+
+static struct omap_hwmod_ocp_if *omap36xx_aes_hwmod_ocp_ifs[] __initdata = {
+	&omap3xxx_l4_core__aes,
+	NULL
+};
+
+/*
+ * Apparently the SHA/MD5 and AES accelerator IP blocks are
+ * only present on some AM35xx chips, and no one knows which
+ * ones.  See
+ * http://www.spinics.net/lists/arm-kernel/msg215466.html So
+ * if you need these IP blocks on an AM35xx, try uncommenting
+ * the following lines.
+ */
+static struct omap_hwmod_ocp_if *am35xx_sham_hwmod_ocp_ifs[] __initdata = {
 	/* &omap3xxx_l4_core__sham, */
+	NULL
+};
+
+static struct omap_hwmod_ocp_if *am35xx_aes_hwmod_ocp_ifs[] __initdata = {
 	/* &omap3xxx_l4_core__aes, */
 	NULL
 };
@@ -3871,7 +3896,8 @@ static struct omap_hwmod_ocp_if *omap3xxx_dss_hwmod_ocp_ifs[] __initdata = {
 int __init omap3xxx_hwmod_init(void)
 {
 	int r;
-	struct omap_hwmod_ocp_if **h = NULL, **h_gp = NULL;
+	struct omap_hwmod_ocp_if **h = NULL, **h_gp = NULL, **h_sham = NULL, **h_aes = NULL;
+	struct device_node *bus = NULL;
 	unsigned int rev;
 
 	omap_hwmod_init();
@@ -3893,13 +3919,19 @@ int __init omap3xxx_hwmod_init(void)
 	    rev == OMAP3430_REV_ES3_1 || rev == OMAP3430_REV_ES3_1_2) {
 		h = omap34xx_hwmod_ocp_ifs;
 		h_gp = omap34xx_gp_hwmod_ocp_ifs;
+		h_sham = omap34xx_sham_hwmod_ocp_ifs;
+		h_aes = omap34xx_aes_hwmod_ocp_ifs;
 	} else if (rev == AM35XX_REV_ES1_0 || rev == AM35XX_REV_ES1_1) {
 		h = am35xx_hwmod_ocp_ifs;
 		h_gp = am35xx_gp_hwmod_ocp_ifs;
+		h_sham = am35xx_sham_hwmod_ocp_ifs;
+		h_aes = am35xx_aes_hwmod_ocp_ifs;
 	} else if (rev == OMAP3630_REV_ES1_0 || rev == OMAP3630_REV_ES1_1 ||
 		   rev == OMAP3630_REV_ES1_2) {
 		h = omap36xx_hwmod_ocp_ifs;
 		h_gp = omap36xx_gp_hwmod_ocp_ifs;
+		h_sham = omap36xx_sham_hwmod_ocp_ifs;
+		h_aes = omap36xx_aes_hwmod_ocp_ifs;
 	} else {
 		WARN(1, "OMAP3 hwmod family init: unknown chip type\n");
 		return -EINVAL;
@@ -3916,6 +3948,27 @@ int __init omap3xxx_hwmod_init(void)
 			return r;
 	}
 
+	/*
+	 * Register crypto hwmod links only if they are not disabled in DT.
+	 * If DT information is missing, enable them only for GP devices.
+	 */
+
+	if (of_have_populated_dt())
+		bus = of_find_node_by_name(NULL, "ocp");
+
+	if (h_sham && ((!bus && omap_type() == OMAP2_DEVICE_TYPE_GP) ||
+	    (bus && of_device_is_available(of_find_node_by_name(bus, "sham"))))) {
+		r = omap_hwmod_register_links(h_sham);
+		if (r < 0)
+			return r;
+	}
+
+	if (h_aes && ((!bus && omap_type() == OMAP2_DEVICE_TYPE_GP) ||
+	    (bus && of_device_is_available(of_find_node_by_name(bus, "aes"))))) {
+		r = omap_hwmod_register_links(h_aes);
+		if (r < 0)
+			return r;
+	}
 
 	/*
 	 * Register hwmod links specific to certain ES levels of a
