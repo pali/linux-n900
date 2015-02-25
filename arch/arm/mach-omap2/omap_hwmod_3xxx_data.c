@@ -3831,7 +3831,7 @@ static struct omap_hwmod_ocp_if *omap34xx_hwmod_ocp_ifs[] __initdata = {
 	&omap3xxx_l3_main__mmu_iva,
 	&omap34xx_l4_core__ssi,
 	&omap3xxx_l4_core__sham,
-	&omap3xxx_l4_core__aes,
+//	&omap3xxx_l4_core__aes,
 	NULL
 };
 
