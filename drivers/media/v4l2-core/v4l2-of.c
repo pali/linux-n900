@@ -20,6 +20,11 @@
 
 #include <media/v4l2-of.h>
 
+enum v4l2_of_bus_type {
+	V4L2_OF_BUS_TYPE_CSI2 = 0,
+	V4L2_OF_BUS_TYPE_PARALLEL,
+};
+
 static int v4l2_of_parse_csi2_bus(const struct device_node *node,
 				 struct v4l2_of_endpoint *endpoint)
 {
@@ -151,6 +156,7 @@ static void v4l2_of_parse_parallel_bus(const struct device_node *node,
 int v4l2_of_parse_endpoint(const struct device_node *node,
 			   struct v4l2_of_endpoint *endpoint)
 {
+	u32 bus_type;
 	int rval;
 
 	of_graph_parse_endpoint(node, &endpoint->base);
@@ -158,17 +164,33 @@ int v4l2_of_parse_endpoint(const struct device_node *node,
 	memset(&endpoint->bus_type, 0, sizeof(*endpoint) -
 	       offsetof(typeof(*endpoint), bus_type));
 
-	rval = v4l2_of_parse_csi2_bus(node, endpoint);
-	if (rval)
-		return rval;
-	/*
-	 * Parse the parallel video bus properties only if none
-	 * of the MIPI CSI-2 specific properties were found.
-	 */
-	if (endpoint->bus.mipi_csi2.flags == 0)
-		v4l2_of_parse_parallel_bus(node, endpoint);
+	rval = of_property_read_u32(node, "bus-type", &bus_type);
+	if (rval < 0) {
+		endpoint->bus_type = 0;
+		rval = v4l2_of_parse_csi2_bus(node, endpoint);
+		if (rval)
+			return rval;
+		/*
+		 * Parse the parallel video bus properties only if none
+		 * of the MIPI CSI-2 specific properties were found.
+		 */
+		if (endpoint->bus.mipi_csi2.flags == 0)
+			v4l2_of_parse_parallel_bus(node, endpoint);
 
-	return 0;
+		return 0;
+	}
+
+	switch (bus_type) {
+	case V4L2_OF_BUS_TYPE_CSI2:
+		return v4l2_of_parse_csi2_bus(node, endpoint);
+	case V4L2_OF_BUS_TYPE_PARALLEL:
+		v4l2_of_parse_parallel_bus(node, endpoint);
+		return 0;
+	default:
+		pr_warn("bad bus-type %u, device_node \"%s\"\n",
+			bus_type, node->full_name);
+		return -EINVAL;
+	}
 }
 EXPORT_SYMBOL(v4l2_of_parse_endpoint);
 
