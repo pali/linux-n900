@@ -145,7 +145,7 @@ static struct usb_function_instance *fi_obex2;
 static struct usb_function_instance *fi_phonet;
 static struct usb_function_instance *fi_msg;
 
-static int __init nokia_bind_config(struct usb_configuration *c)
+static int nokia_bind_config(struct usb_configuration *c)
 {
 	struct usb_function *f_acm;
 	struct usb_function *f_phonet = NULL;
@@ -276,7 +276,7 @@ err_get_acm:
 	return status;
 }
 
-static int __init nokia_bind(struct usb_composite_dev *cdev)
+static int nokia_bind(struct usb_composite_dev *cdev)
 {
 	struct usb_gadget	*gadget = cdev->gadget;
 	struct fsg_opts		*fsg_opts;
