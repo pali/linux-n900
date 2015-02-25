@@ -23,6 +23,8 @@
 enum v4l2_of_bus_type {
 	V4L2_OF_BUS_TYPE_CSI2 = 0,
 	V4L2_OF_BUS_TYPE_PARALLEL,
+	V4L2_OF_BUS_TYPE_CSI1,
+	V4L2_OF_BUS_TYPE_CCP2,
 };
 
 static int v4l2_of_parse_lanes(const struct device_node *node,
@@ -163,6 +165,35 @@ static void v4l2_of_parse_parallel_bus(const struct device_node *node,
 
 }
 
+void v4l2_of_parse_csi1_bus(const struct device_node *node,
+			    struct v4l2_of_endpoint *endpoint,
+			    enum v4l2_of_bus_type bus_type)
+{
+	struct v4l2_of_bus_mipi_csi1 *bus = &endpoint->bus.mipi_csi1;
+	u32 v;
+
+	v4l2_of_parse_lanes(node, &bus->clock_lane, NULL,
+			    &bus->data_lane, bus->lane_polarity,
+			    NULL, 1);
+
+	if (!of_property_read_u32(node, "clock-inv", &v))
+		bus->clock_inv = v;
+
+	if (!of_property_read_u32(node, "strobe", &v))
+		bus->strobe = v;
+
+	if (!of_property_read_u32(node, "data-lane", &v))
+		bus->data_lane = v;
+
+	if (!of_property_read_u32(node, "clock-lane", &v))
+		bus->data_lane = v;
+
+	if (bus_type == V4L2_OF_BUS_TYPE_CSI1)
+		endpoint->bus_type = V4L2_MBUS_CSI1;
+	else
+		endpoint->bus_type = V4L2_MBUS_CCP2;
+}
+
 /**
  * v4l2_of_parse_endpoint() - parse all endpoint node properties
  * @node: pointer to endpoint device_node
@@ -215,6 +246,10 @@ int v4l2_of_parse_endpoint(const struct device_node *node,
 		return v4l2_of_parse_csi2_bus(node, endpoint);
 	case V4L2_OF_BUS_TYPE_PARALLEL:
 		v4l2_of_parse_parallel_bus(node, endpoint);
+		return 0;
+	case V4L2_OF_BUS_TYPE_CSI1:
+	case V4L2_OF_BUS_TYPE_CCP2:
+		v4l2_of_parse_csi1_bus(node, endpoint, bus_type);
 		return 0;
 	default:
 		pr_warn("bad bus-type %u, device_node \"%s\"\n",
