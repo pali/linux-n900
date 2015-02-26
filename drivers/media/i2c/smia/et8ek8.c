@@ -1630,8 +1630,9 @@ static const struct v4l2_subdev_internal_ops et8ek8_internal_ops = {
  */
 #ifdef CONFIG_PM
 
-static int et8ek8_suspend(struct i2c_client *client, pm_message_t mesg)
+static int et8ek8_suspend(struct device *dev)
 {
+	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
 	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 
@@ -1641,8 +1642,9 @@ static int et8ek8_suspend(struct i2c_client *client, pm_message_t mesg)
 	return __et8ek8_set_power(sensor, 0);
 }
 
-static int et8ek8_resume(struct i2c_client *client)
+static int et8ek8_resume(struct device *dev)
 {
+	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
 	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 
@@ -1714,14 +1716,15 @@ static const struct i2c_device_id et8ek8_id_table[] = {
 };
 MODULE_DEVICE_TABLE(i2c, et8ek8_id_table);
 
+static SIMPLE_DEV_PM_OPS(et8ek8_pm, et8ek8_suspend, et8ek8_resume);
+
 static struct i2c_driver et8ek8_i2c_driver = {
 	.driver		= {
 		.name	= ET8EK8_NAME,
+		.pm	= &et8ek8_pm,
 	},
 	.probe		= et8ek8_probe,
 	.remove		= __exit_p(et8ek8_remove),
-	.suspend	= et8ek8_suspend,
-	.resume		= et8ek8_resume,
 	.id_table	= et8ek8_id_table,
 };
 
