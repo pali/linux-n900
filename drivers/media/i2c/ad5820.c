@@ -372,8 +372,9 @@ static const struct v4l2_subdev_internal_ops ad5820_internal_ops = {
  */
 #ifdef CONFIG_PM
 
-static int ad5820_suspend(struct i2c_client *client, pm_message_t mesg)
+static int ad5820_suspend(struct device *dev)
 {
+	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
 	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
 	struct ad5820_device *coil = to_ad5820_device(subdev);
 
@@ -383,8 +384,9 @@ static int ad5820_suspend(struct i2c_client *client, pm_message_t mesg)
 	return ad5820_power_off(coil, 0);
 }
 
-static int ad5820_resume(struct i2c_client *client)
+static int ad5820_resume(struct device *dev)
 {
+	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
 	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
 	struct ad5820_device *coil = to_ad5820_device(subdev);
 
@@ -447,14 +449,15 @@ static const struct i2c_device_id ad5820_id_table[] = {
 };
 MODULE_DEVICE_TABLE(i2c, ad5820_id_table);
 
+static SIMPLE_DEV_PM_OPS(ad5820_pm, ad5820_suspend, ad5820_resume);
+
 static struct i2c_driver ad5820_i2c_driver = {
 	.driver		= {
 		.name	= AD5820_NAME,
+		.pm	= &ad5820_pm,
 	},
 	.probe		= ad5820_probe,
 	.remove		= __exit_p(ad5820_remove),
-	.suspend	= ad5820_suspend,
-	.resume		= ad5820_resume,
 	.id_table	= ad5820_id_table,
 };
 
