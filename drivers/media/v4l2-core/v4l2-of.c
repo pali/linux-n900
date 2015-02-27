@@ -20,7 +20,7 @@
 
 #include <media/v4l2-of.h>
 
-static int v4l2_of_parse_csi_bus(const struct device_node *node,
+static int v4l2_of_parse_csi2_bus(const struct device_node *node,
 				 struct v4l2_of_endpoint *endpoint)
 {
 	struct v4l2_of_bus_mipi_csi2 *bus = &endpoint->bus.mipi_csi2;
@@ -158,7 +158,7 @@ int v4l2_of_parse_endpoint(const struct device_node *node,
 	memset(&endpoint->bus_type, 0, sizeof(*endpoint) -
 	       offsetof(typeof(*endpoint), bus_type));
 
-	rval = v4l2_of_parse_csi_bus(node, endpoint);
+	rval = v4l2_of_parse_csi2_bus(node, endpoint);
 	if (rval)
 		return rval;
 	/*
