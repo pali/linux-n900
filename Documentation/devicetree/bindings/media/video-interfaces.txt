@@ -114,9 +114,10 @@ Optional endpoint properties
   lane and followed by the data lanes in the same order as in data-lanes.
   Valid values are 0 (normal) and 1 (inverted). The length of the array
   should be the combined length of data-lanes and clock-lanes properties.
-  If the lane-polarities property is omitted, the value must be interpreted
-  as 0 (normal). This property is valid for serial busses only.
-
+- clock-inv: Clock or strobe signal inversion.
+  Possible values: 0 -- not inverted; 1 -- inverted
+- strobe: Whether the clock signal is used as clock or strobe. Used
+  with CCP2, for instance.
 
 Example
 -------
