@@ -1,0 +1,63 @@
+Video Bus Switch Binding
+========================
+
+This is a binding for a gpio controlled switch for camera interfaces. Such a
+device is used on some embedded devices to connect two cameras to the same
+interface of a image signal processor.
+
+Required properties
+===================
+
+compatible	: must contain "video-bus-switch"
+switch-gpios	: GPIO specifier for the gpio, which can toggle the
+		  selected camera. The GPIO should be configured, so
+		  that a disabled GPIO means, that the first port is
+		  selected.
+
+Required Port nodes
+===================
+
+More documentation on these bindings is available in
+video-interfaces.txt in the same directory.
+
+reg		: The interface:
+		  0 - port for image signal processor
+		  1 - port for first camera sensor
+		  2 - port for second camera sensor
+
+Example
+=======
+
+video-bus-switch {
+	compatible = "video-bus-switch"
+	switch-gpios = <&gpio1 1 GPIO_ACTIVE_HIGH>;
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+
+			csi_switch_in: endpoint {
+				remote-endpoint = <&csi_isp>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+
+			csi_switch_out1: endpoint {
+				remote-endpoint = <&csi_cam1>;
+			};
+		};
+
+		port@2 {
+			reg = <2>;
+
+			csi_switch_out2: endpoint {
+				remote-endpoint = <&csi_cam2>;
+			};
+		};
+	};
+};
