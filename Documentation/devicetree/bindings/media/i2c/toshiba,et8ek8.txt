@@ -1,0 +1,56 @@
+Toshiba ET8EK8 sensor
+
+Toshiba ET8EK8 is an image sensor used in the Nokia N900.
+
+Additional information about video interfaces in DT can be found in
+Documentation/devicetree/bindings/media/video-interfaces.txt .
+
+Mandatory properties
+--------------------
+
+- compatible: "toshiba,et8ek8"
+- reg: I2C address (0x3e, or an alternative address)
+- vana-supply: Analogue voltage supply (VANA), typically 2.8 volts (sensor
+  dependent).
+- clocks: External clock to the sensor
+- clock-frequency: Frequency of the external clock to the sensor
+
+Optional properties
+-------------------
+
+- reset-gpios: XSHUTDOWN GPIO
+
+
+Endpoint node mandatory properties
+----------------------------------
+
+- clock-lanes: <0>
+- data-lanes: <1>
+- remote-endpoint: A phandle to the bus receiver's endpoint node.
+
+Example
+-------
+
+&i2c2 {
+	clock-frequency = <400000>;
+
+	cam1: camera@3e {
+		compatible = "toshiba,et8ek8";
+		reg = <0x3e>;
+
+		vana-supply = <&vaux4>;
+
+		clocks = <&isp 0>;
+		clock-frequency = <9600000>;
+
+		reset-gpio = <&gpio4 6 GPIO_ACTIVE_HIGH>; /* 102 */
+
+		port {
+			cam1_1: endpoint {
+				clock-lanes = <0>;
+				data-lanes = <1>;
+				remote-endpoint = <&isp_csi>;
+			};
+		};
+	};
+};
