@@ -142,6 +142,86 @@
 		io-channels = <&twl_madc 0>, <&twl_madc 4>, <&twl_madc 12>;
 		io-channel-names = "temp", "bsi", "vbat";
 	};
+
+	rear_camera: camera@0 {
+		compatible = "linux,camera";
+
+		module {
+			model = "TCM8341MD";
+			sensor = <&cam1>;
+			focus = <&autofocus>;
+		};
+
+		//flashes = <&adp1653>;
+	};
+
+	front_camera: camera@1 {
+		compatible = "linux,camera";
+
+		module {
+			model = "VS6555";
+			sensor = <&cam2>;
+		};
+	};
+
+	autofocus: dac-camera-autofocus {
+		compatible = "dac-camera-autofocus";
+		io-channels = <&ad5820>;
+	};
+
+	video-bus-switch {
+		compatible = "video-bus-switch";
+
+		switch-gpios = <&gpio4 1 GPIO_ACTIVE_HIGH>; /* 97 */
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				csi_switch_in: endpoint {
+					remote-endpoint = <&csi_isp>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+
+				csi_switch_out1: endpoint {
+					remote-endpoint = <&csi_cam1>;
+				};
+			};
+
+			port@2 {
+				reg = <2>;
+
+				csi_switch_out2: endpoint {
+					remote-endpoint = <&csi_cam2>;
+				};
+			};
+		};
+	};
+};
+
+&isp {
+	vdd-csiphy1-supply = <&vaux2>;
+	vdd-csiphy2-supply = <&vaux2>;
+
+	ports {
+		port@1 {
+			reg = <1>;
+
+			csi_isp: endpoint {
+				remote-endpoint = <&csi_switch_in>;
+				bus-type = <3>; /* CCP2 */
+				strobe = <1>;
+				clock-inv = <1>;
+				crc = <1>;
+			};
+		};
+	};
 };
 
 &omap3_pmx_core {
@@ -485,6 +565,28 @@
 
 	clock-frequency = <100000>;
 
+	cam2: camera@10 {
+		compatible = "nokia,smia";
+		reg = <0x10>;
+
+		vana-supply = <&vaux4>;
+
+		clocks = <&isp 0>;
+		clock-frequency = <9600000>;
+
+		port {
+			csi_cam2: endpoint {
+				link-frequencies = /bits/ 64 <60000000>;
+				bus-type = <3>; /* CCP2 */
+				strobe = <1>;
+				clock-inv = <1>;
+				crc = <1>;
+
+				remote-endpoint = <&csi_switch_out2>;
+			};
+		};
+	};
+
 	tlv320aic3x: tlv320aic3x@18 {
 		compatible = "ti,tlv320aic3x";
 		reg = <0x18>;
@@ -679,6 +781,38 @@
 		st,max-limit-y = <32>;
 		st,max-limit-z = <32>;
 	};
+
+	cam1: camera@3e {
+		compatible = "toshiba,et8ek8";
+		reg = <0x3e>;
+
+		vana-supply = <&vaux4>;
+
+		clocks = <&isp 0>;
+		clock-names = "extclk";
+		clock-frequency = <9600000>;
+
+		reset-gpio = <&gpio4 6 GPIO_ACTIVE_HIGH>; /* 102 */
+
+		port {
+			csi_cam1: endpoint {
+				bus-type = <3>; /* CCP2 */
+				strobe = <1>;
+				clock-inv = <1>;
+				crc = <1>;
+
+				remote-endpoint = <&csi_switch_out1>;
+			};
+		};
+	};
+
+	/* D/A converter for auto-focus */
+	ad5820: dac@0c {
+		compatible = "adi,ad5820";
+		reg = <0x0c>;
+
+		#io-channel-cells = <0>;
+	};
 };
 
 &mmc1 {
@@ -687,7 +821,7 @@
 	pinctrl-0 = <&mmc1_pins>;
 	vmmc-supply = <&vmmc1>;
 	bus-width = <4>;
-	cd-gpios = <&gpio6 0 GPIO_ACTIVE_HIGH>; /* 160 */
+	//cd-gpios = <&gpio6 0 GPIO_ACTIVE_HIGH>; /* 160 */
 };
 
 /* most boards use vaux3, only some old versions use vmmc2 instead */
