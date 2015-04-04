@@ -1,0 +1,16 @@
+Analog Devices AD5820 DAC device driver
+
+Required properties:
+- compatible: Must be "adi,ad5820"
+- reg: I2C address for the device
+- #io-channel-cells: Must be 0, for details see
+  Documentation/devicetree/bindings/iio/iio-bindings.txt
+
+Example:
+
+		dac@0c {
+			compatible = "adi,ad5820";
+			reg = <0x0c>;
+
+			#io-channel-cells = <0>;
+		};
