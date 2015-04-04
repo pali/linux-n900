@@ -1,0 +1,16 @@
+Bindings for digital-analog-converter based camera autofocus
+
+Required Properties:
+
+- compatible: Must contain "dac-camera-autofocus"
+- io-channels: Must be a iio specifier to DAC channel
+- lens-control: Must be a phandle to the camera chip,
+  which is affected by the autofocus
+
+Example:
+
+autofocus: dac-camera-autofocus {
+	compatible = "dac-camera-autofocus";
+	io-channels = <&ad5820>;
+	lens-control = <&cam1>;
+};
