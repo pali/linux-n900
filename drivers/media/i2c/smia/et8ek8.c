@@ -27,23 +27,29 @@
  *
  */
 
+#define DEBUG
+
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
+#include <linux/gpio/consumer.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/version.h>
 #include <linux/v4l2-mediabus.h>
 
+#include <media/media-entity.h>
 #include <media/smiaregs.h>
+#include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-subdev.h>
 
-#include <media/et8ek8.h>
-
+#define ET8EK8_NAME		"et8ek8"
 #define ET8EK8_XCLK_HZ		9600000
+#define ET8EK8_PRIV_MEM_SIZE	128
 
 #define CTRL_GAIN		0
 #define CTRL_EXPOSURE		1
@@ -53,6 +59,28 @@
 				 (id)==V4L2_CID_EXPOSURE ? CTRL_EXPOSURE : \
 				 (id)==V4L2_CID_TEST_PATTERN ? CTRL_TEST_PATTERN : \
 				 -EINVAL)
+
+struct et8ek8_sensor {
+	struct v4l2_subdev subdev;
+	struct media_pad pad;
+	struct v4l2_mbus_framefmt format;
+	struct gpio_desc *reset;
+	struct regulator *vana;
+	struct clk *ext_clk;
+
+	u16 version;
+
+	struct v4l2_ctrl_handler ctrl_handler;
+	struct v4l2_ctrl *exposure;
+	struct smia_reglist *current_reglist;
+
+	u8 priv_mem[ET8EK8_PRIV_MEM_SIZE];
+
+	struct mutex power_lock;
+	int power_count;
+};
+
+#define to_et8ek8_sensor(sd)	container_of(sd, struct et8ek8_sensor, subdev)
 
 enum et8ek8_versions {
 	ET8EK8_REV_1 = 0x0001,
@@ -1129,15 +1157,14 @@ static int et8ek8_s_stream(struct v4l2_subdev *subdev, int streaming)
 
 static int et8ek8_power_off(struct et8ek8_sensor *sensor)
 {
-	struct v4l2_subdev *subdev = &sensor->subdev;
 	int rval;
 
-	rval = sensor->platform_data->set_xshutdown(subdev, 0);
+	gpiod_set_value(sensor->reset, 0);
 	udelay(1);
 
 	clk_disable_unprepare(sensor->ext_clk);
 
-	rval |= regulator_disable(sensor->vana);
+	rval = regulator_disable(sensor->vana);
 	return rval;
 }
 
@@ -1174,9 +1201,7 @@ static int et8ek8_power_on(struct et8ek8_sensor *sensor)
 
 	udelay(10);			/* I wish this is a good value */
 
-	rval = sensor->platform_data->set_xshutdown(subdev, 1);
-	if (rval)
-		goto out;
+	gpiod_set_value(sensor->reset, 1);
 
 	msleep(5000*1000/hz+1);				/* Wait 5000 cycles */
 
@@ -1235,7 +1260,8 @@ static int et8ek8_enum_frame_ival(struct v4l2_subdev *subdev,
 }
 
 static struct v4l2_mbus_framefmt *
-__et8ek8_get_pad_format(struct et8ek8_sensor *sensor, struct v4l2_subdev_pad_config *cfg,
+__et8ek8_get_pad_format(struct et8ek8_sensor *sensor,
+			struct v4l2_subdev_pad_config *cfg,
 			unsigned int pad, enum v4l2_subdev_format_whence which)
 {
 	switch (which) {
@@ -1404,22 +1430,10 @@ static int et8ek8_dev_init(struct v4l2_subdev *subdev)
 	struct i2c_client *client = v4l2_get_subdevdata(subdev);
 	int rval, rev_l, rev_h;
 
-	sensor->vana = regulator_get(&client->dev, "VANA");
-	if (IS_ERR(sensor->vana)) {
-		dev_err(&client->dev, "could not get regulator for vana\n");
-		return -ENODEV;
-	}
-
-	sensor->ext_clk = devm_clk_get(&client->dev, "ext_clk");
-	if (IS_ERR(sensor->ext_clk)) {
-		dev_err(&client->dev, "could not get clock\n");
-		return -ENODEV;
-	}
-
 	rval = et8ek8_power_on(sensor);
 	if (rval) {
-		rval = -ENODEV;
-		goto out_regulator_put;
+		dev_err(&client->dev, "could not power on\n");
+		return rval;
 	}
 
 	if (smia_i2c_read_reg(client, SMIA_REG_8BIT,
@@ -1487,9 +1501,6 @@ static int et8ek8_dev_init(struct v4l2_subdev *subdev)
 
 out_poweroff:
 	et8ek8_power_off(sensor);
-out_regulator_put:
-	regulator_put(sensor->vana);
-	sensor->vana = NULL;
 
 	return rval;
 }
@@ -1526,6 +1537,8 @@ et8ek8_registered(struct v4l2_subdev *subdev)
 	struct v4l2_mbus_framefmt *format;
 	int rval;
 
+	dev_dbg(&client->dev, "registered!");
+
 	if (device_create_file(&client->dev, &dev_attr_priv_mem) != 0) {
 		dev_err(&client->dev, "could not register sysfs entry\n");
 		return -EBUSY;
@@ -1546,7 +1559,7 @@ et8ek8_registered(struct v4l2_subdev *subdev)
 	return 0;
 }
 
-static int __et8ek8_set_power(struct et8ek8_sensor *sensor, int on)
+static int __et8ek8_set_power(struct et8ek8_sensor *sensor, bool on)
 {
 	return on ? et8ek8_power_on(sensor) : et8ek8_power_off(sensor);
 }
@@ -1587,12 +1600,12 @@ static int et8ek8_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	format = __et8ek8_get_pad_format(sensor, fh->pad, 0, V4L2_SUBDEV_FORMAT_TRY);
 	smia_reglist_to_mbus(reglist, format);
 
-	return et8ek8_set_power(sd, 1);
+	return et8ek8_set_power(sd, true);
 }
 
 static int et8ek8_close(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 {
-	return et8ek8_set_power(sd, 0);
+	return et8ek8_set_power(sd, false);
 }
 
 static const struct v4l2_subdev_video_ops et8ek8_video_ops = {
@@ -1632,32 +1645,36 @@ static const struct v4l2_subdev_internal_ops et8ek8_internal_ops = {
 
 static int et8ek8_suspend(struct device *dev)
 {
-	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
+	struct i2c_client *client = to_i2c_client(dev);
 	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 
 	if (!sensor->power_count)
 		return 0;
 
-	return __et8ek8_set_power(sensor, 0);
+	return __et8ek8_set_power(sensor, false);
 }
 
 static int et8ek8_resume(struct device *dev)
 {
-	struct i2c_client *client = container_of(dev, struct i2c_client, dev);
+	struct i2c_client *client = to_i2c_client(dev);
 	struct v4l2_subdev *subdev = i2c_get_clientdata(client);
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 
 	if (!sensor->power_count)
 		return 0;
 
-	return __et8ek8_set_power(sensor, 1);
+	return __et8ek8_set_power(sensor, true);
 }
+
+static struct dev_pm_ops et8ek8_pm_ops = {
+	.suspend	= et8ek8_suspend,
+	.resume		= et8ek8_resume,
+};
 
 #else
 
-#define et8ek8_suspend	NULL
-#define et8ek8_resume	NULL
+#define et8ek8_pm_ops	NULL
 
 #endif /* CONFIG_PM */
 
@@ -1667,11 +1684,27 @@ static int et8ek8_probe(struct i2c_client *client,
 	struct et8ek8_sensor *sensor;
 	int ret;
 
-	sensor = kzalloc(sizeof(*sensor), GFP_KERNEL);
-	if (sensor == NULL)
+	sensor = devm_kzalloc(&client->dev, sizeof(*sensor), GFP_KERNEL);
+	if (!sensor)
 		return -ENOMEM;
 
-	sensor->platform_data = client->dev.platform_data;
+	sensor->reset = devm_gpiod_get(&client->dev, "reset", GPIOD_OUT_LOW);
+	if (IS_ERR(sensor->reset)) {
+		dev_dbg(&client->dev, "could not request reset gpio\n");
+		return PTR_ERR(sensor->reset);;
+	}
+
+	sensor->vana = devm_regulator_get(&client->dev, "vana");
+	if (IS_ERR(sensor->vana)) {
+		dev_err(&client->dev, "could not get regulator for vana\n");
+		return PTR_ERR(sensor->vana);
+	}
+
+	sensor->ext_clk = devm_clk_get(&client->dev, "extclk");
+	if (IS_ERR(sensor->ext_clk)) {
+		dev_err(&client->dev, "could not get clock\n");
+		return PTR_ERR(sensor->ext_clk);
+	}
 
 	mutex_init(&sensor->power_lock);
 
@@ -1681,10 +1714,20 @@ static int et8ek8_probe(struct i2c_client *client,
 
 	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
 	ret = media_entity_init(&sensor->subdev.entity, 1, &sensor->pad, 0);
-	if (ret < 0)
-		kfree(sensor);
+	if (ret < 0) {
+		dev_err(&client->dev, "media entity init failed!\n");
+		return ret;
+	}
 
-	return ret;
+	ret = v4l2_async_register_subdev(&sensor->subdev);
+	if (ret < 0) {
+		media_entity_cleanup(&sensor->subdev.entity);
+		return ret;
+	}
+
+	dev_dbg(&client->dev, "initialized!\n");
+
+	return 0;
 }
 
 static int __exit et8ek8_remove(struct i2c_client *client)
@@ -1693,8 +1736,7 @@ static int __exit et8ek8_remove(struct i2c_client *client)
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 
 	if (sensor->power_count) {
-		if (sensor->platform_data->set_xshutdown)
-			sensor->platform_data->set_xshutdown( subdev, 0);
+		gpiod_set_value(sensor->reset, 0);
 		clk_disable_unprepare(sensor->ext_clk);
 		sensor->power_count = 0;
 	}
@@ -1703,12 +1745,14 @@ static int __exit et8ek8_remove(struct i2c_client *client)
 	device_remove_file(&client->dev, &dev_attr_priv_mem);
 	v4l2_ctrl_handler_free(&sensor->ctrl_handler);
 	media_entity_cleanup(&sensor->subdev.entity);
-	if (sensor->vana)
-		regulator_put(sensor->vana);
 
-	kfree(sensor);
 	return 0;
 }
+
+static const struct of_device_id et8ek8_of_table[] = {
+	{ .compatible = "toshiba,et8ek8" },
+	{ },
+};
 
 static const struct i2c_device_id et8ek8_id_table[] = {
 	{ ET8EK8_NAME, 0 },
@@ -1716,37 +1760,18 @@ static const struct i2c_device_id et8ek8_id_table[] = {
 };
 MODULE_DEVICE_TABLE(i2c, et8ek8_id_table);
 
-static SIMPLE_DEV_PM_OPS(et8ek8_pm, et8ek8_suspend, et8ek8_resume);
-
 static struct i2c_driver et8ek8_i2c_driver = {
 	.driver		= {
 		.name	= ET8EK8_NAME,
-		.pm	= &et8ek8_pm,
+		.pm	= &et8ek8_pm_ops,
+		.of_match_table	= et8ek8_of_table,
 	},
 	.probe		= et8ek8_probe,
 	.remove		= __exit_p(et8ek8_remove),
 	.id_table	= et8ek8_id_table,
 };
 
-static int __init et8ek8_init(void)
-{
-	int rval;
-
-	rval = i2c_add_driver(&et8ek8_i2c_driver);
-	if (rval)
-		printk(KERN_INFO "%s: failed registering " ET8EK8_NAME "\n",
-		       __func__);
-
-	return rval;
-}
-
-static void __exit et8ek8_exit(void)
-{
-	i2c_del_driver(&et8ek8_i2c_driver);
-}
-
-module_init(et8ek8_init);
-module_exit(et8ek8_exit);
+module_i2c_driver(et8ek8_i2c_driver);
 
 MODULE_AUTHOR("Sakari Ailus <sakari.ailus@nokia.com>");
 MODULE_DESCRIPTION("Toshiba ET8EK8 camera sensor driver");
