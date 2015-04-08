@@ -11,6 +11,8 @@ obj-$(CONFIG_VIDEO_MMP_CAMERA) += marvell-ccic/
 
 obj-$(CONFIG_VIDEO_OMAP3)	+= omap3isp/
 
+obj-$(CONFIG_VIDEO_BUS_SWITCH) += video-bus-switch.o
+
 obj-$(CONFIG_VIDEO_VIU) += fsl-viu.o
 
 obj-$(CONFIG_VIDEO_VIVID)		+= vivid/
