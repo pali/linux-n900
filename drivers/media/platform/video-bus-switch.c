@@ -13,6 +13,8 @@
  * General Public License for more details.
  */
 
+#define DEBUG
+
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
@@ -60,6 +62,7 @@ static int vbs_of_parse_nodes(struct device *dev, struct vbs_data *pdata)
 	if (!notifier->subdevs)
 		return -ENOMEM;
 
+	notifier->num_subdevs = 0;
 	while (notifier->num_subdevs < CSI_SWITCH_SUBDEVS &&
 	       (node = of_graph_get_next_endpoint(dev->of_node, node))) {
 		struct v4l2_of_endpoint vep;
@@ -109,6 +112,8 @@ static int vbs_registered(struct v4l2_subdev *sd)
 	struct v4l2_device *v4l2_dev = sd->v4l2_dev;
 	struct vbs_data *pdata;
 	int err;
+
+	dev_dbg(sd->dev, "registered, init notifier...\n");
 
 	pdata = v4l2_get_subdevdata(sd);
 
@@ -190,6 +195,7 @@ static int vbs_subdev_notifier_bound(struct v4l2_async_notifier *async,
 		return -EINVAL;
 	}
 
+	dev_dbg(pdata->subdev.dev, "create link: %s -> %s\n", src->name, sink->name);
 	err = media_entity_create_link(src, src_pad, sink, sink_pad, 0);
 	if (err < 0)
 		return err;
@@ -197,6 +203,13 @@ static int vbs_subdev_notifier_bound(struct v4l2_async_notifier *async,
 	ssd->sd = subdev;
 
 	return err;
+}
+
+static int vbs_subdev_notifier_complete(struct v4l2_async_notifier *async)
+{
+	struct vbs_data *pdata = container_of(async, struct vbs_data, notifier);
+
+	return v4l2_device_register_subdev_nodes(pdata->subdev.v4l2_dev);
 }
 
 static const struct v4l2_subdev_internal_ops vbs_internal_ops = {
@@ -218,13 +231,13 @@ static int video_bus_switch_probe(struct platform_device *pdev)
 	int err = 0;
 
 	/* platform data */
-	pdata = devm_kmalloc(&pdev->dev, sizeof(*pdata), GFP_KERNEL);
+	pdata = devm_kzalloc(&pdev->dev, sizeof(*pdata), GFP_KERNEL);
 	if (!pdata)
 		return -ENOMEM;
 	platform_set_drvdata(pdev, pdata);
 
 	/* switch gpio */
-	pdata->swgpio = devm_gpiod_get(&pdev->dev, "switch", GPIOD_OUT_LOW);
+	pdata->swgpio = devm_gpiod_get(&pdev->dev, "switch", GPIOD_OUT_HIGH);
 	if (IS_ERR(pdata->swgpio)) {
 		err = PTR_ERR(pdata->swgpio);
 		dev_err(&pdev->dev, "Failed to request gpio: %d\n", err);
@@ -233,11 +246,14 @@ static int video_bus_switch_probe(struct platform_device *pdev)
 
 	/* find sub-devices */
 	err = vbs_of_parse_nodes(&pdev->dev, pdata);
-	if (err < 0)
+	if (err < 0) {
+		dev_err(&pdev->dev, "Failed to parse nodes: %d\n", err);
 		return err;
+	}
 
 	pdata->state = CSI_SWITCH_DISABLED;
 	pdata->notifier.bound = vbs_subdev_notifier_bound;
+	pdata->notifier.complete = vbs_subdev_notifier_complete;
 
 	/* setup subdev */
 	pdata->pads[0].flags = MEDIA_PAD_FL_SOURCE;
@@ -245,18 +261,24 @@ static int video_bus_switch_probe(struct platform_device *pdev)
 	pdata->pads[2].flags = MEDIA_PAD_FL_SINK;
 
 	v4l2_subdev_init(&pdata->subdev, &vbs_ops);
+	pdata->subdev.dev = &pdev->dev;
+	pdata->subdev.owner = pdev->dev.driver->owner;
+	strncpy(pdata->subdev.name, dev_name(&pdev->dev), V4L2_SUBDEV_NAME_SIZE);
 	v4l2_set_subdevdata(&pdata->subdev, pdata);
 	pdata->subdev.entity.flags |= MEDIA_ENT_T_V4L2_SUBDEV_SWITCH;
 	pdata->subdev.entity.ops = &vbs_media_ops;
 	pdata->subdev.internal_ops = &vbs_internal_ops;
 	err = media_entity_init(&pdata->subdev.entity, CSI_SWITCH_PORTS,
 				pdata->pads, 0);
-	if (err < 0)
+	if (err < 0) {
+		dev_err(&pdev->dev, "Failed to init media entity: %d\n", err);
 		return err;
+	}
 
 	/* register subdev */
 	err = v4l2_async_register_subdev(&pdata->subdev);
 	if (err < 0) {
+		dev_err(&pdev->dev, "Failed to register v4l2 subdev: %d\n", err);
 		media_entity_cleanup(&pdata->subdev.entity);
 		return err;
 	}
@@ -268,6 +290,7 @@ static int video_bus_switch_remove(struct platform_device *pdev)
 {
 	struct vbs_data *pdata = platform_get_drvdata(pdev);
 
+	v4l2_async_notifier_unregister(&pdata->notifier);
 	v4l2_async_unregister_subdev(&pdata->subdev);
 	media_entity_cleanup(&pdata->subdev.entity);
 
