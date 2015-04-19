@@ -3025,13 +3025,19 @@ static struct smiapp_platform_data *smiapp_get_pdata(struct device *dev)
 	switch (bus_cfg->bus_type) {
 	case V4L2_MBUS_CSI2:
 		pdata->csi_signalling_mode = SMIAPP_CSI_SIGNALLING_MODE_CSI2;
+		pdata->lanes = bus_cfg->bus.mipi_csi2.num_data_lanes;
 		break;
-		/* FIXME: add CCP2 support. */
+	case V4L2_MBUS_CCP2:
+		pdata->csi_signalling_mode = (bus_cfg->bus.mipi_csi1.strobe) ?
+		SMIAPP_CSI_SIGNALLING_MODE_CCP2_DATA_STROBE :
+		SMIAPP_CSI_SIGNALLING_MODE_CCP2_DATA_CLOCK;
+		pdata->lanes = 1;
+		break;
 	default:
+		dev_err(dev, "unknown bus protocol\n");
 		goto out_err;
 	}
 
-	pdata->lanes = bus_cfg->bus.mipi_csi2.num_data_lanes;
 	dev_dbg(dev, "lanes %u\n", pdata->lanes);
 
 	/* xshutdown GPIO is optional */
@@ -3048,7 +3054,7 @@ static struct smiapp_platform_data *smiapp_get_pdata(struct device *dev)
 		goto out_err;
 	}
 
-	dev_dbg(dev, "reset %d, nvm %d, clk %d, csi %d\n", pdata->xshutdown,
+	dev_dbg(dev, "reset %d, nvm %d, clk %d, mode %d\n", pdata->xshutdown,
 		pdata->nvm_size, pdata->ext_clk, pdata->csi_signalling_mode);
 
 	if (!bus_cfg->nr_of_link_frequencies) {
