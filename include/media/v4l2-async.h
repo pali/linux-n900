@@ -71,6 +71,7 @@ struct v4l2_async_subdev {
  * @waiting:	list of struct v4l2_async_subdev, waiting for their drivers
  * @done:	list of struct v4l2_subdev, already probed
  * @list:	member in a global list of notifiers
+ * @lock:       lock hold when the notifier is being processed
  * @bound:	a subdevice driver has successfully probed one of subdevices
  * @complete:	all subdevices have been probed successfully
  * @unbind:	a subdevice is leaving
@@ -82,6 +83,7 @@ struct v4l2_async_notifier {
 	struct list_head waiting;
 	struct list_head done;
 	struct list_head list;
+	struct mutex lock;
 	int (*bound)(struct v4l2_async_notifier *notifier,
 		     struct v4l2_subdev *subdev,
 		     struct v4l2_async_subdev *asd);
