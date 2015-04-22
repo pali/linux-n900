@@ -131,6 +131,8 @@ static int vbs_link_setup(struct media_entity *entity,
 	struct v4l2_subdev *sd = media_entity_to_v4l2_subdev(entity);
 	struct vbs_data *pdata = v4l2_get_subdevdata(sd);
 	bool enable = flags & MEDIA_LNK_FL_ENABLED;
+	struct v4l2_async_subdev *asd;
+	struct vbs_async_subdev *ssd;
 
 	if (local->index > CSI_SWITCH_PORTS-1)
 		return -ENXIO;
@@ -156,10 +158,18 @@ static int vbs_link_setup(struct media_entity *entity,
 	case 1:
 		pdata->state = CSI_SWITCH_PORT_1;
 		gpiod_set_value(pdata->swgpio, false);
+
+		asd = pdata->notifier.subdevs[0];
+		ssd = container_of(asd, struct vbs_async_subdev, asd);
+		pdata->subdev.ctrl_handler = ssd->sd->ctrl_handler;
 		break;
 	case 2:
 		pdata->state = CSI_SWITCH_PORT_2;
 		gpiod_set_value(pdata->swgpio, true);
+
+		asd = pdata->notifier.subdevs[1];
+		ssd = container_of(asd, struct vbs_async_subdev, asd);
+		pdata->subdev.ctrl_handler = ssd->sd->ctrl_handler;
 		break;
 	}
 
