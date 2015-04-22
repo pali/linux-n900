@@ -879,6 +879,7 @@ static int et8ek8_get_ctrl(struct v4l2_ctrl *ctrl)
 		ctrl->cur.val = mode->window_height;
 		break;
 	case V4L2_CID_MODE_PIXELCLOCK:
+	case V4L2_CID_PIXEL_RATE:
 		ctrl->cur.val = mode->pixel_clock;
 		break;
 	case V4L2_CID_MODE_SENSITIVITY:
