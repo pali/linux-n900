@@ -132,7 +132,7 @@ static int smiapp_read_frame_fmt(struct smiapp_sensor *sensor)
 				>> SMIAPP_FRAME_FORMAT_DESC_4_PIXELCODE_SHIFT;
 			pixels = desc & SMIAPP_FRAME_FORMAT_DESC_4_PIXELS_MASK;
 		} else {
-			dev_dbg(&client->dev,
+			dev_err(&client->dev,
 				"invalid frame format model type %d\n",
 				fmt_model_type);
 			return -EINVAL;
@@ -769,7 +769,7 @@ static int smiapp_get_mbus_formats(struct smiapp_sensor *sensor)
 		return rval;
 
 	if (pixel_order >= ARRAY_SIZE(pixel_order_str)) {
-		dev_dbg(&client->dev, "bad pixel order %d\n", pixel_order);
+		dev_err(&client->dev, "bad pixel order %d\n", pixel_order);
 		return -EINVAL;
 	}
 
