@@ -1034,7 +1034,7 @@ static int h4p_probe(struct platform_device *pdev)
 	}
 
 	err = devm_request_irq(&pdev->dev, info->irq, h4p_interrupt,
-			       IRQF_DISABLED, "nokia_h4p", info);
+			       0, "nokia_h4p", info);
 	if (err < 0) {
 		dev_err(info->dev, "nokia_h4p: unable to get IRQ %d\n",
 			info->irq);
@@ -1043,7 +1043,7 @@ static int h4p_probe(struct platform_device *pdev)
 
 	err = devm_request_irq(&pdev->dev, gpio_to_irq(info->host_wakeup_gpio),
 			       h4p_wakeup_interrupt,  IRQF_TRIGGER_FALLING |
-			       IRQF_TRIGGER_RISING | IRQF_DISABLED,
+			       IRQF_TRIGGER_RISING,
 			       "h4p_wkup", info);
 	if (err < 0) {
 		dev_err(info->dev, "nokia_h4p: unable to get wakeup IRQ %d\n",
