@@ -739,7 +739,20 @@ static int bcm2048_set_region(struct bcm2048_device *bdev, u8 region)
 		return -EINVAL;
 
 	mutex_lock(&bdev->mutex);
+
 	bdev->region_info = region_configs[region];
+
+	bdev->cache_fm_ctrl &= ~BCM2048_BAND_SELECT;
+	if (region > 2) {
+		bdev->cache_fm_ctrl |= BCM2048_BAND_SELECT;
+		err = bcm2048_send_command(bdev, BCM2048_I2C_FM_CTRL,
+					bdev->cache_fm_ctrl);
+		if (err) {
+			mutex_unlock(&bdev->mutex);
+			goto done;
+		}
+	}
+
 	mutex_unlock(&bdev->mutex);
 
 	if (bdev->frequency < region_configs[region].bottom_frequency ||
