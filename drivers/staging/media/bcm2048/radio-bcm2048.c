@@ -817,6 +817,93 @@ static int bcm2048_get_mute(struct bcm2048_device *bdev)
 	return err;
 }
 
+static int bcm2048_set_automute(struct bcm2048_device *bdev, u8 automute)
+{
+	int err;
+
+	mutex_lock(&bdev->mutex);
+
+	err = bcm2048_send_command(bdev, BCM2048_I2C_FM_AUDIO_PAUSE, automute);
+
+	mutex_unlock(&bdev->mutex);
+	return err;
+}
+
+static int bcm2048_get_automute(struct bcm2048_device *bdev)
+{
+	int err;
+	u8 value;
+
+	mutex_lock(&bdev->mutex);
+
+	err = bcm2048_recv_command(bdev, BCM2048_I2C_FM_AUDIO_PAUSE, &value);
+
+	mutex_unlock(&bdev->mutex);
+
+	if (!err)
+		err = value;
+
+	return err;
+}
+
+static int bcm2048_set_ctrl0(struct bcm2048_device *bdev, u8 value)
+{
+	int err;
+
+	mutex_lock(&bdev->mutex);
+
+	err = bcm2048_send_command(bdev, BCM2048_I2C_FM_AUDIO_CTRL0, value);
+
+	mutex_unlock(&bdev->mutex);
+	return err;
+}
+
+static int bcm2048_set_ctrl1(struct bcm2048_device *bdev, u8 value)
+{
+	int err;
+
+	mutex_lock(&bdev->mutex);
+
+	err = bcm2048_send_command(bdev, BCM2048_I2C_FM_AUDIO_CTRL1, value);
+
+	mutex_unlock(&bdev->mutex);
+	return err;
+}
+
+static int bcm2048_get_ctrl0(struct bcm2048_device *bdev)
+{
+	int err;
+	u8 value;
+
+	mutex_lock(&bdev->mutex);
+
+	err = bcm2048_recv_command(bdev, BCM2048_I2C_FM_AUDIO_CTRL0, &value);
+
+	mutex_unlock(&bdev->mutex);
+
+	if (!err)
+		err = value;
+
+	return err;
+}
+
+static int bcm2048_get_ctrl1(struct bcm2048_device *bdev)
+{
+	int err;
+	u8 value;
+
+	mutex_lock(&bdev->mutex);
+
+	err = bcm2048_recv_command(bdev, BCM2048_I2C_FM_AUDIO_CTRL1, &value);
+
+	mutex_unlock(&bdev->mutex);
+
+	if (!err)
+		err = value;
+
+	return err;
+}
+
 static int bcm2048_set_audio_route(struct bcm2048_device *bdev, u8 route)
 {
 	int err;
@@ -2049,6 +2136,9 @@ static ssize_t bcm2048_##prop##_read(struct device *dev,		\
 
 DEFINE_SYSFS_PROPERTY(power_state, unsigned, int, "%u", 0)
 DEFINE_SYSFS_PROPERTY(mute, unsigned, int, "%u", 0)
+DEFINE_SYSFS_PROPERTY(automute, unsigned, int, "%x", 0)
+DEFINE_SYSFS_PROPERTY(ctrl0, unsigned, int, "%x", 0)
+DEFINE_SYSFS_PROPERTY(ctrl1, unsigned, int, "%x", 0)
 DEFINE_SYSFS_PROPERTY(audio_route, unsigned, int, "%u", 0)
 DEFINE_SYSFS_PROPERTY(dac_output, unsigned, int, "%u", 0)
 
@@ -2086,6 +2176,12 @@ static struct device_attribute attrs[] = {
 		bcm2048_power_state_write),
 	__ATTR(mute, S_IRUGO | S_IWUSR, bcm2048_mute_read,
 		bcm2048_mute_write),
+	__ATTR(automute, S_IRUGO | S_IWUSR, bcm2048_automute_read,
+		bcm2048_automute_write),
+	__ATTR(ctrl0, S_IRUGO | S_IWUSR, bcm2048_ctrl0_read,
+		bcm2048_ctrl0_write),
+	__ATTR(ctrl1, S_IRUGO | S_IWUSR, bcm2048_ctrl1_read,
+		bcm2048_ctrl1_write),
 	__ATTR(audio_route, S_IRUGO | S_IWUSR, bcm2048_audio_route_read,
 		bcm2048_audio_route_write),
 	__ATTR(dac_output, S_IRUGO | S_IWUSR, bcm2048_dac_output_read,
