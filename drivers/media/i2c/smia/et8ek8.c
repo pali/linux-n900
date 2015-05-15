@@ -27,6 +27,8 @@
  *
  */
 
+#if 0
+
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
@@ -1751,3 +1753,5 @@ module_exit(et8ek8_exit);
 MODULE_AUTHOR("Sakari Ailus <sakari.ailus@nokia.com>");
 MODULE_DESCRIPTION("Toshiba ET8EK8 camera sensor driver");
 MODULE_LICENSE("GPL");
+
+#endif
