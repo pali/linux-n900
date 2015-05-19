@@ -1214,33 +1214,33 @@ out:
  */
 
 static int et8ek8_enum_mbus_code(struct v4l2_subdev *subdev,
-				 struct v4l2_subdev_fh *fh,
+				 struct v4l2_subdev_pad_config *cfg,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
 	return smia_reglist_enum_mbus_code(&et8ek8_smia_meta_reglist, code);
 }
 
 static int et8ek8_enum_frame_size(struct v4l2_subdev *subdev,
-				  struct v4l2_subdev_fh *fh,
+				  struct v4l2_subdev_pad_config *cfg,
 				  struct v4l2_subdev_frame_size_enum *fse)
 {
 	return smia_reglist_enum_frame_size(&et8ek8_smia_meta_reglist, fse);
 }
 
 static int et8ek8_enum_frame_ival(struct v4l2_subdev *subdev,
-				  struct v4l2_subdev_fh *fh,
+				  struct v4l2_subdev_pad_config *cfg,
 				  struct v4l2_subdev_frame_interval_enum *fie)
 {
 	return smia_reglist_enum_frame_ival(&et8ek8_smia_meta_reglist, fie);
 }
 
 static struct v4l2_mbus_framefmt *
-__et8ek8_get_pad_format(struct et8ek8_sensor *sensor, struct v4l2_subdev_fh *fh,
+__et8ek8_get_pad_format(struct et8ek8_sensor *sensor, struct v4l2_subdev_pad_config *cfg,
 			unsigned int pad, enum v4l2_subdev_format_whence which)
 {
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_get_try_format(fh, pad);
+		return v4l2_subdev_get_try_format(&sensor->subdev, cfg, pad);
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
 		return &sensor->format;
 	default: 
@@ -1249,13 +1249,13 @@ __et8ek8_get_pad_format(struct et8ek8_sensor *sensor, struct v4l2_subdev_fh *fh,
 }
 
 static int et8ek8_get_pad_format(struct v4l2_subdev *subdev,
-				 struct v4l2_subdev_fh *fh,
+				 struct v4l2_subdev_pad_config *cfg,
 				 struct v4l2_subdev_format *fmt)
 {
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 	struct v4l2_mbus_framefmt *format;
  
-	format = __et8ek8_get_pad_format(sensor, fh, fmt->pad, fmt->which);
+	format = __et8ek8_get_pad_format(sensor, cfg, fmt->pad, fmt->which);
 	if (format == NULL)
 		return -EINVAL;
 
@@ -1264,14 +1264,14 @@ static int et8ek8_get_pad_format(struct v4l2_subdev *subdev,
 }
 
 static int et8ek8_set_pad_format(struct v4l2_subdev *subdev,
-				 struct v4l2_subdev_fh *fh,
+				 struct v4l2_subdev_pad_config *cfg,
 				 struct v4l2_subdev_format *fmt)
 {
 	struct et8ek8_sensor *sensor = to_et8ek8_sensor(subdev);
 	struct v4l2_mbus_framefmt *format;
         struct smia_reglist *reglist;
 
-	format = __et8ek8_get_pad_format(sensor, fh, fmt->pad, fmt->which);
+	format = __et8ek8_get_pad_format(sensor, cfg, fmt->pad, fmt->which);
 	if (format == NULL)
 		return -EINVAL;
 
@@ -1584,7 +1584,7 @@ static int et8ek8_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 
 	reglist = smia_reglist_find_type(&et8ek8_smia_meta_reglist,
 					 SMIA_REGLIST_MODE);
-	format = __et8ek8_get_pad_format(sensor, fh, 0, V4L2_SUBDEV_FORMAT_TRY);
+	format = __et8ek8_get_pad_format(sensor, fh->pad, 0, V4L2_SUBDEV_FORMAT_TRY);
 	smia_reglist_to_mbus(reglist, format);
 
 	return et8ek8_set_power(sd, 1);
