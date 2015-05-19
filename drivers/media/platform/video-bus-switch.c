@@ -308,8 +308,9 @@ static int video_bus_switch_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id video_bus_switch_of_match[] = {
-	{ .compatible = "video-bus-switch", },
-}
+	{ .compatible = "video-bus-switch" },
+	{ },
+};
 MODULE_DEVICE_TABLE(of, video_bus_switch_of_match);
 
 static struct platform_driver video_bus_switch_driver = {
