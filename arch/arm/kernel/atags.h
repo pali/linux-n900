@@ -1,7 +1,7 @@
 #ifdef CONFIG_ATAGS_PROC
-extern void save_atags(struct tag *tags);
+extern void save_atags(const struct tag *tags);
 #else
-static inline void save_atags(struct tag *tags) { }
+static inline void save_atags(const struct tag *tags) { }
 #endif
 
 void convert_to_tag_list(struct tag *tags);
