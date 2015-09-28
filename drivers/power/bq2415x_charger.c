@@ -826,7 +826,7 @@ static int bq2415x_notifier_call(struct notifier_block *nb,
 
 	/* Ignore event if it was not send by notify_node/notify_device */
 	if (bq->notify_node) {
-		if (psy->dev.parent &&
+		if (!psy->dev.parent ||
 		    psy->dev.parent->of_node != bq->notify_node)
 			return NOTIFY_OK;
 	} else if (bq->init_data.notify_device) {
@@ -1704,7 +1704,7 @@ error_4:
 error_3:
 	bq2415x_power_supply_exit(bq);
 error_2:
-	if (bq->notify_node)
+	if (bq && bq->notify_node)
 		of_node_put(bq->notify_node);
 	kfree(name);
 error_1:
