@@ -25,9 +25,9 @@
 #include <linux/platform_device.h>
 #include <linux/sched.h>
 #include <linux/wait.h>
+#include <linux/clk.h>
 
 #include "../../../arch/arm/plat-omap/include/plat/dmtimer.h"
-#include "../../../arch/arm/mach-omap2/clock.h"
 
 #include <media/lirc.h>
 #include <media/lirc_dev.h>
