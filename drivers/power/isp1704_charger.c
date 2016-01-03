@@ -462,7 +462,7 @@ static int isp1704_charger_probe(struct platform_device *pdev)
 		goto fail1;
 	}
 
-	isp->psy_desc.name		= "isp1704";
+	isp->psy_desc.name		= dev_name(&pdev->dev);
 	isp->psy_desc.type		= POWER_SUPPLY_TYPE_USB;
 	isp->psy_desc.properties	= power_props;
 	isp->psy_desc.num_properties	= ARRAY_SIZE(power_props);
