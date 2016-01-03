@@ -1195,9 +1195,33 @@ static const struct i2c_device_id bq27xxx_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, bq27xxx_id);
 
+#ifdef CONFIG_OF
+static const struct of_device_id bq27xxx_battery_i2c_of_match_table[] = {
+	{ .compatible = "ti,bq27200" },
+	{ .compatible = "ti,bq27210" },
+	{ .compatible = "ti,bq27500" },
+	{ .compatible = "ti,bq27510" },
+	{ .compatible = "ti,bq27520" },
+	{ .compatible = "ti,bq27530" },
+	{ .compatible = "ti,bq27531" },
+	{ .compatible = "ti,bq27541" },
+	{ .compatible = "ti,bq27542" },
+	{ .compatible = "ti,bq27546" },
+	{ .compatible = "ti,bq27742" },
+	{ .compatible = "ti,bq27545" },
+	{ .compatible = "ti,bq27421" },
+	{ .compatible = "ti,bq27425" },
+	{ .compatible = "ti,bq27441" },
+	{ .compatible = "ti,bq27621" },
+	{},
+};
+MODULE_DEVICE_TABLE(of, bq27xxx_battery_i2c_of_match_table);
+#endif
+
 static struct i2c_driver bq27xxx_battery_i2c_driver = {
 	.driver = {
 		.name = "bq27xxx-battery",
+		.of_match_table = of_match_ptr(bq27xxx_battery_i2c_of_match_table),
 	},
 	.probe = bq27xxx_battery_i2c_probe,
 	.remove = bq27xxx_battery_i2c_remove,
@@ -1309,11 +1333,22 @@ static int bq27xxx_battery_platform_remove(struct platform_device *pdev)
 	return 0;
 }
 
+MODULE_ALIAS("platform:bq27000-battery");
+
+#ifdef CONFIG_OF
+static const struct of_device_id bq27xxx_battery_platform_of_match_table[] = {
+	{ .compatible = "ti,bq27000" },
+	{},
+};
+MODULE_DEVICE_TABLE(of, bq27xxx_battery_platform_of_match_table);
+#endif
+
 static struct platform_driver bq27xxx_battery_platform_driver = {
 	.probe	= bq27xxx_battery_platform_probe,
 	.remove = bq27xxx_battery_platform_remove,
 	.driver = {
 		.name = "bq27000-battery",
+		.of_match_table = of_match_ptr(bq27xxx_battery_platform_of_match_table),
 	},
 };
 
@@ -1365,10 +1400,6 @@ static void __exit bq27xxx_battery_exit(void)
 	bq27xxx_battery_i2c_exit();
 }
 module_exit(bq27xxx_battery_exit);
-
-#ifdef CONFIG_BATTERY_BQ27XXX_PLATFORM
-MODULE_ALIAS("platform:bq27000-battery");
-#endif
 
 MODULE_AUTHOR("Rodolfo Giometti <giometti@linux.it>");
 MODULE_DESCRIPTION("BQ27xxx battery monitor driver");
