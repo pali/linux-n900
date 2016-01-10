@@ -68,6 +68,7 @@
 			linux,input-type = <EV_SW>;
 			linux,code = <SW_CAMERA_LENS_COVER>;
 			gpio-key,wakeup;
+			linux,can-disable;
 		};
 
 		camera_focus {
@@ -75,6 +76,7 @@
 			gpios = <&gpio3 4 GPIO_ACTIVE_LOW>; /* 68 */
 			linux,code = <KEY_CAMERA_FOCUS>;
 			gpio-key,wakeup;
+			linux,can-disable;
 		};
 
 		camera_capture {
@@ -82,6 +84,7 @@
 			gpios = <&gpio3 5 GPIO_ACTIVE_LOW>; /* 69 */
 			linux,code = <KEY_CAMERA>;
 			gpio-key,wakeup;
+			linux,can-disable;
 		};
 
 		lock_button {
@@ -89,6 +92,7 @@
 			gpios = <&gpio4 17 GPIO_ACTIVE_LOW>; /* 113 */
 			linux,code = <KEY_SCREENLOCK>;
 			gpio-key,wakeup;
+			linux,can-disable;
 		};
 
 		keypad_slide {
@@ -97,6 +101,7 @@
 			linux,input-type = <EV_SW>;
 			linux,code = <SW_KEYPAD_SLIDE>;
 			gpio-key,wakeup;
+			linux,can-disable;
 		};
 
 		proximity_sensor {
@@ -104,6 +109,7 @@
 			gpios = <&gpio3 25 GPIO_ACTIVE_HIGH>; /* 89 */
 			linux,input-type = <EV_SW>;
 			linux,code = <SW_FRONT_PROXIMITY>;
+			linux,can-disable;
 		};
 	};
 
