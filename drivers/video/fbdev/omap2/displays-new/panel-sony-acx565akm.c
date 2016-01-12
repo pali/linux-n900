@@ -555,7 +555,6 @@ static int acx565akm_panel_power_on(struct omap_dss_device *dssdev)
 
 	r = in->ops.sdi->enable(in);
 	if (r) {
-		mutex_unlock(&ddata->mutex);
 		pr_err("%s sdi enable failed\n", __func__);
 		return r;
 	}
@@ -567,7 +566,6 @@ static int acx565akm_panel_power_on(struct omap_dss_device *dssdev)
 		gpio_set_value(ddata->reset_gpio, 1);
 
 	if (ddata->enabled) {
-		mutex_unlock(&ddata->mutex);
 		dev_dbg(&ddata->spi->dev, "panel already enabled\n");
 		return 0;
 	}
@@ -598,14 +596,10 @@ static void acx565akm_panel_power_off(struct omap_dss_device *dssdev)
 	struct panel_drv_data *ddata = to_panel_data(dssdev);
 	struct omap_dss_device *in = ddata->in;
 
-	mutex_lock(&ddata->mutex);
-
 	dev_dbg(dssdev->dev, "%s\n", __func__);
 
-	if (!ddata->enabled) {
-		mutex_unlock(&ddata->mutex);
+	if (!ddata->enabled)
 		return;
-	}
 
 	set_display_state(ddata, 0);
 	set_sleep_mode(ddata, 1);
@@ -625,13 +619,11 @@ static void acx565akm_panel_power_off(struct omap_dss_device *dssdev)
 	msleep(100);
 
 	in->ops.sdi->disable(in);
-
-	mutex_unlock(&ddata->mutex);
-
 }
 
 static int acx565akm_enable(struct omap_dss_device *dssdev)
 {
+	struct panel_drv_data *ddata = to_panel_data(dssdev);
 	int r;
 
 	dev_dbg(dssdev->dev, "%s\n", __func__);
