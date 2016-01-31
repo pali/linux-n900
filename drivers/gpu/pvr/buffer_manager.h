@@ -28,6 +28,7 @@
 #define _BUFFER_MANAGER_H_
 
 #include <linux/kernel.h>
+#include <linux/bug.h>
 #include "img_types.h"
 #include "ra.h"
 #include "perproc.h"
