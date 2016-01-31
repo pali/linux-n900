@@ -1714,7 +1714,7 @@ static int et8ek8_probe(struct i2c_client *client,
 	sensor->subdev.internal_ops = &et8ek8_internal_ops;
 
 	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
-	ret = media_entity_init(&sensor->subdev.entity, 1, &sensor->pad, 0);
+	ret = media_entity_pads_init(&sensor->subdev.entity, 1, &sensor->pad);
 	if (ret < 0) {
 		dev_err(&client->dev, "media entity init failed!\n");
 		return ret;
