@@ -421,7 +421,7 @@ static int ad5820_probe(struct i2c_client *client,
 	coil->subdev.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	coil->subdev.internal_ops = &ad5820_internal_ops;
 
-	ret = media_entity_init(&coil->subdev.entity, 0, NULL, 0);
+	ret = media_entity_pads_init(&coil->subdev.entity, 0, NULL);
 	if (ret < 0)
 		kfree(coil);
 
