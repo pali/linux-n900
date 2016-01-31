@@ -206,7 +206,7 @@ static int vbs_subdev_notifier_bound(struct v4l2_async_notifier *async,
 	}
 
 	dev_dbg(pdata->subdev.dev, "create link: %s -> %s\n", src->name, sink->name);
-	err = media_entity_create_link(src, src_pad, sink, sink_pad, 0);
+	err = media_create_pad_link(src, src_pad, sink, sink_pad, 0);
 	if (err < 0)
 		return err;
 
@@ -275,11 +275,11 @@ static int video_bus_switch_probe(struct platform_device *pdev)
 	pdata->subdev.owner = pdev->dev.driver->owner;
 	strncpy(pdata->subdev.name, dev_name(&pdev->dev), V4L2_SUBDEV_NAME_SIZE);
 	v4l2_set_subdevdata(&pdata->subdev, pdata);
-	pdata->subdev.entity.flags |= MEDIA_ENT_T_V4L2_SUBDEV_SWITCH;
+	pdata->subdev.entity.flags |= MEDIA_ENT_F_SWITCH;
 	pdata->subdev.entity.ops = &vbs_media_ops;
 	pdata->subdev.internal_ops = &vbs_internal_ops;
-	err = media_entity_init(&pdata->subdev.entity, CSI_SWITCH_PORTS,
-				pdata->pads, 0);
+	err = media_entity_pads_init(&pdata->subdev.entity, CSI_SWITCH_PORTS,
+				pdata->pads);
 	if (err < 0) {
 		dev_err(&pdev->dev, "Failed to init media entity: %d\n", err);
 		return err;
