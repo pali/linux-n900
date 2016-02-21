@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm 4.5.0-rc1 Kernel Configuration
+# Linux/arm 4.5.0-rc5 Kernel Configuration
 #
 CONFIG_ARM=y
 CONFIG_ARM_HAS_SG_CHAIN=y
@@ -3457,7 +3457,6 @@ CONFIG_IIO=y
 # CONFIG_MXC4005 is not set
 # CONFIG_MXC6255 is not set
 # CONFIG_STK8312 is not set
-# CONFIG_STK8BA50 is not set
 
 #
 # Analog to digital converters
@@ -3579,7 +3578,6 @@ CONFIG_TWL4030_MADC=y
 # CONFIG_ADIS16400 is not set
 # CONFIG_ADIS16480 is not set
 # CONFIG_KMX61 is not set
-# CONFIG_INV_MPU6050_IIO is not set
 
 #
 # Light sensors
@@ -3675,7 +3673,6 @@ CONFIG_GENERIC_PHY=y
 CONFIG_OMAP_CONTROL_PHY=y
 CONFIG_TWL4030_USB=y
 # CONFIG_BCM_KONA_USB2_PHY is not set
-# CONFIG_PHY_HI6220_USB is not set
 # CONFIG_POWERCAP is not set
 # CONFIG_MCB is not set
 
@@ -4046,6 +4043,7 @@ CONFIG_DEBUG_BUGVERBOSE=y
 CONFIG_RCU_CPU_STALL_TIMEOUT=21
 # CONFIG_RCU_TRACE is not set
 # CONFIG_RCU_EQS_DEBUG is not set
+# CONFIG_DEBUG_WQ_FORCE_RR_CPU is not set
 # CONFIG_DEBUG_BLOCK_EXT_DEVT is not set
 # CONFIG_NOTIFIER_ERROR_INJECTION is not set
 # CONFIG_FAULT_INJECTION is not set
