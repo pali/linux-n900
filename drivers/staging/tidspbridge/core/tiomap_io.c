@@ -203,6 +203,7 @@ int write_dsp_data(struct bridge_dev_context *dev_context,
 	} else {
 		return -EPERM;
 	}
+
 	if (ul_num_bytes)
 		memcpy((u8 *) (dw_base_addr + offset), host_buff, ul_num_bytes);
 	else
@@ -224,18 +225,13 @@ int write_ext_dsp_data(struct bridge_dev_context *dev_context,
 {
 	u32 dw_base_addr = dev_context->dsp_ext_base_addr;
 	u32 dw_offset = 0;
-	u8 temp_byte1, temp_byte2;
-	u8 remain_byte[4];
-	s32 i;
 	int ret = 0;
 	u32 dw_ext_prog_virt_mem;
 	u32 ul_tlb_base_virt = 0;
 	u32 ul_shm_offset_virt = 0;
 	struct cfg_hostres *host_res = dev_context->resources;
 	bool trace_load = false;
-
-	temp_byte1 = 0x0;
-	temp_byte2 = 0x0;
+	u32 ext_base;
 
 	if (symbols_reloaded) {
 		/* Check if it is a load to Trace section */
@@ -300,9 +296,11 @@ int write_ext_dsp_data(struct bridge_dev_context *dev_context,
 		/* Trace buffer it right after the shm SEG0, so set the
 		 *      base address to SHMBASE */
 		if (trace_load)
-			ul_ext_base = ul_shm_base_virt;
+			ext_base = ul_shm_base_virt;
+		else
+			ext_base = ul_ext_base;
 
-		if (ul_ext_end < ul_ext_base)
+		if (ul_ext_end < ext_base)
 			ret = -EPERM;
 
 		if (!ret) {
@@ -318,7 +316,7 @@ int write_ext_dsp_data(struct bridge_dev_context *dev_context,
 					    dev_get_symbol
 					    (dev_context->dev_obj, DYNEXTBASE,
 					     &ul_dyn_ext_base);
-				}
+					}
 			}
 			ul_shm_offset_virt =
 			    ul_shm_base_virt - ul_tlb_base_virt;
@@ -328,28 +326,31 @@ int write_ext_dsp_data(struct bridge_dev_context *dev_context,
 			} else {
 				dw_ext_prog_virt_mem = host_res->mem_base[1];
 				dw_ext_prog_virt_mem +=
-				    (ul_ext_base - ul_dyn_ext_base);
+				    (ext_base - ul_dyn_ext_base);
 			}
 
 			dev_context->dsp_ext_base_addr =
 			    (u32) MEM_LINEAR_ADDRESS((void *)
 						     dw_ext_prog_virt_mem,
-						     ul_ext_end - ul_ext_base);
-			dw_base_addr += dev_context->dsp_ext_base_addr;
+						     ul_ext_end - ext_base);
+			dw_base_addr = dev_context->dsp_ext_base_addr;
 			/* This dsp_ext_base_addr will get cleared only when
 			 * the board is stopped. */
 			if (!dev_context->dsp_ext_base_addr)
 				ret = -EPERM;
 		}
 	}
-	if (!dw_base_addr || !ul_ext_base || !ul_ext_end)
+
+	if (trace_load)
+		ext_base = ul_shm_base_virt;
+	else
+		ext_base = ul_ext_base;
+
+	if (!dw_base_addr || !ext_base || !ul_ext_end)
 		ret = -EPERM;
 
 	if (!ret) {
-		for (i = 0; i < 4; i++)
-			remain_byte[i] = 0x0;
-
-		dw_offset = dsp_addr - ul_ext_base;
+		dw_offset = dsp_addr - ext_base;
 		/* Also make sure the dsp_addr is < ul_ext_end */
 		if (dsp_addr > ul_ext_end || dw_offset > dsp_addr)
 			ret = -EPERM;
@@ -431,12 +432,12 @@ int sm_interrupt_dsp(struct bridge_dev_context *dev_context, u16 mb_val)
 		dsp_clock_enable_all(dev_context->dsp_per_clks);
 	}
 
-	status = omap_mbox_msg_send(dev_context->mbox, mb_val);
+	status = mbox_send_message(dev_context->mbox, (void *)(u32)mb_val);
 
-	if (status) {
+	if (status < 0)
 		pr_err("omap_mbox_msg_send Fail and status = %d\n", status);
-		status = -EPERM;
-	}
+	else
+		status = 0;
 
-	return 0;
+	return status;
 }

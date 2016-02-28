@@ -140,18 +140,39 @@ void dsp_clk_exit(void)
 void dsp_clk_init(void)
 {
 	static struct platform_device dspbridge_device;
-	int i, id;
+	int i;
 
 	dspbridge_device.dev.bus = &platform_bus_type;
 
-	for (i = 0, id = 5; i < DM_TIMER_CLOCKS; i++, id++)
-		timer[i] = omap_dm_timer_request_specific(id);
+	for (i = 0; i < DM_TIMER_CLOCKS; i++) {
+		timer[i] = omap_dm_timer_request_by_cap(OMAP_TIMER_HAS_DSP_IRQ);
+
+		if (!timer[i])
+			dev_err(bridge, "failed to get DSP timer %d\n", i);
+	}
+
+	iva2_clk = clk_get(&dspbridge_device.dev, "dpll2_ck");
+	if (IS_ERR(iva2_clk)) {
+		i = PTR_ERR(iva2_clk);
+		dev_err(bridge, "failed to get dpll2 clock %d\n", i);
+		return;
+	}
+
+	i = clk_set_rate(iva2_clk, 90000000L);
+	if (i < 0)
+		dev_err(bridge,
+			"failed to set dpll2 clock rate %d\n", i);
+
+	clk_put(iva2_clk);
 
 	iva2_clk = clk_get(&dspbridge_device.dev, "iva2_ck");
-	if (IS_ERR(iva2_clk))
-		dev_err(bridge, "failed to get iva2 clock %p\n", iva2_clk);
-	else
-		clk_prepare(iva2_clk);
+	if (IS_ERR(iva2_clk)) {
+		i = PTR_ERR(iva2_clk);
+		dev_err(bridge, "failed to get iva2 clock %d\n", i);
+		return;
+	}
+
+	clk_prepare(iva2_clk);
 
 	ssi.sst_fck = clk_get(&dspbridge_device.dev, "ssi_sst_fck");
 	ssi.ssr_fck = clk_get(&dspbridge_device.dev, "ssi_ssr_fck");
@@ -227,13 +248,15 @@ int dsp_clk_enable(enum dsp_clk_id clk_id)
 	case GPT_CLK:
 		status = omap_dm_timer_start(timer[clk_id - 1]);
 		break;
-#if 0
 #ifdef CONFIG_SND_OMAP_SOC_MCBSP
 	case MCBSP_CLK:
+#if 0
 		omap_mcbsp_request(MCBSP_ID(clk_id));
 		omap2_mcbsp_set_clks_src(MCBSP_ID(clk_id), MCBSP_CLKS_PAD_SRC);
-		break;
+#else
+		BUG();
 #endif
+		break;
 #endif
 	case WDT_CLK:
 		dev_err(bridge, "ERROR: DSP requested to enable WDT3 clk\n");
@@ -305,13 +328,16 @@ int dsp_clk_disable(enum dsp_clk_id clk_id)
 	case GPT_CLK:
 		status = omap_dm_timer_stop(timer[clk_id - 1]);
 		break;
-#if 0
 #ifdef CONFIG_SND_OMAP_SOC_MCBSP
 	case MCBSP_CLK:
+#if 0
 		omap2_mcbsp_set_clks_src(MCBSP_ID(clk_id), MCBSP_CLKS_PRCM_SRC);
 		omap_mcbsp_free(MCBSP_ID(clk_id));
-		break;
+#else
+		BUG();
 #endif
+
+		break;
 #endif
 	case WDT_CLK:
 		dev_err(bridge, "ERROR: DSP requested to disable WDT3 clk\n");

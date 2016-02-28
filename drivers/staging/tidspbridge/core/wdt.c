@@ -78,7 +78,7 @@ int dsp_wdt_init(void)
 		ret = -EFAULT;
 
 	if (!ret)
-		ret = request_irq(INT_34XX_WDT3_IRQ, dsp_wdt_isr, 0,
+		ret = request_irq(INT_34XX_WDT3_IRQ, dsp_wdt_isr, IRQF_SHARED,
 							"dsp_wdt", &dsp_wdt);
 
 	/* Disable at this moment, it will be enabled when DSP starts */

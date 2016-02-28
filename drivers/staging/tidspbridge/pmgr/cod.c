@@ -124,7 +124,7 @@ static s32 cod_f_read(void __user *pbuffer, s32 size, s32 count,
 		/* read from file */
 		fs = get_fs();
 		set_fs(get_ds());
-		dw_bytes_read = filp->f_op->read(filp, pbuffer, size * count,
+		dw_bytes_read = vfs_read(filp, pbuffer, size * count,
 						 &(filp->f_pos));
 		set_fs(fs);
 
