@@ -20,15 +20,6 @@ struct omap_dsp_platform_data {
 
 	void (*set_bootaddr)(u32);
 	void (*set_bootmode)(u8);
-
-	phys_addr_t phys_mempool_base;
-	phys_addr_t phys_mempool_size;
 };
-
-#if defined(CONFIG_TIDSPBRIDGE) || defined(CONFIG_TIDSPBRIDGE_MODULE)
-extern void omap_dsp_reserve_sdram_memblock(void);
-#else
-static inline void omap_dsp_reserve_sdram_memblock(void) { }
-#endif
 
 #endif

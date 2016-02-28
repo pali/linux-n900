@@ -39,6 +39,7 @@
 #include <dspbridge/dspioctl.h>	/* for bridge_ioctl_extproc defn */
 #include <dspbridge/sync.h>
 #include <dspbridge/clk.h>
+#include <linux/mailbox_client.h>
 
 struct map_l4_peripheral {
 	u32 phys_addr;
@@ -338,7 +339,8 @@ struct bridge_dev_context {
 	u32 dsp_start_add;	/* API Boot vector */
 	u32 internal_size;	/* Internal memory size */
 
-	struct omap_mbox *mbox;		/* Mail box handle */
+	struct mbox_chan *mbox;         /* Mail box handle */
+	struct mbox_client mbox_client;
 
 	struct cfg_hostres *resources;	/* Host Resources */
 
