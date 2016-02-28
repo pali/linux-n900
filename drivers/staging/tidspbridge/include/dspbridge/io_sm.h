@@ -86,7 +86,7 @@ extern void io_dpc(unsigned long ref_data);
  *  Returns:
  *	NOTIFY_OK if handled; NOTIFY_BAD otherwise.
  */
-int io_mbox_msg(struct notifier_block *self, unsigned long len, void *msg);
+void io_mbox_msg(struct mbox_client *client, void *data);
 
 /*
  *  ======== io_request_chnl ========

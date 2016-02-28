@@ -20,8 +20,8 @@
 
 #include <linux/module.h>
 #include <linux/platform_device.h>
-
-#include <asm/memblock.h>
+#include <linux/dma-mapping.h>
+#include <linux/of_reserved_mem.h>
 
 #include "control.h"
 #include "cm2xxx_3xxx.h"
@@ -33,9 +33,26 @@
 
 #include <linux/platform_data/dsp-omap.h>
 
-static struct platform_device *omap_dsp_pdev;
+static void omap_pm_dsp_set_min_opp(u8 opp_id)
+{
+	return;
+}
+static u8 omap_pm_dsp_get_opp(void)
+{
+	return 2;
+}
 
-static struct omap_dsp_platform_data omap_dsp_pdata __initdata = {
+static void omap_pm_cpu_set_freq(unsigned long f)
+{
+	return;
+}
+
+static unsigned long omap_pm_cpu_get_freq(void)
+{
+	return 250000000;
+}
+
+struct omap_dsp_platform_data omap_dsp_pdata = {
 #ifdef CONFIG_TIDSPBRIDGE_DVFS
 	.dsp_set_min_opp = omap_pm_dsp_set_min_opp,
 	.dsp_get_opp = omap_pm_dsp_get_opp,
@@ -53,81 +70,48 @@ static struct omap_dsp_platform_data omap_dsp_pdata __initdata = {
 	.set_bootmode = omap_ctrl_write_dsp_boot_mode,
 };
 
-static phys_addr_t omap_dsp_phys_mempool_base;
-
-void __init omap_dsp_reserve_sdram_memblock(void)
+static int rmem_dsp_device_init(struct reserved_mem *rmem, struct device *dev)
 {
-	phys_addr_t size = CONFIG_TIDSPBRIDGE_MEMPOOL_SIZE;
-	phys_addr_t paddr;
+	int dma;
 
-	if (!cpu_is_omap34xx())
-		return;
-
-	if (!size)
-		return;
-
-	paddr = arm_memblock_steal(size, SZ_1M);
-	if (!paddr) {
-		pr_err("%s: failed to reserve %llx bytes\n",
-				__func__, (unsigned long long)size);
-		return;
-	}
-
-	omap_dsp_phys_mempool_base = paddr;
-}
-
-static phys_addr_t omap_dsp_get_mempool_base(void)
-{
-	return omap_dsp_phys_mempool_base;
-}
-
-static int __init omap_dsp_init(void)
-{
-	struct platform_device *pdev;
-	int err = -ENOMEM;
-	struct omap_dsp_platform_data *pdata = &omap_dsp_pdata;
-
-	if (!cpu_is_omap34xx())
+	if (rmem->priv)
 		return 0;
 
-	pdata->phys_mempool_base = omap_dsp_get_mempool_base();
-
-	if (pdata->phys_mempool_base) {
-		pdata->phys_mempool_size = CONFIG_TIDSPBRIDGE_MEMPOOL_SIZE;
-		pr_info("%s: %llx bytes @ %llx\n", __func__,
-			(unsigned long long)pdata->phys_mempool_size,
-			(unsigned long long)pdata->phys_mempool_base);
+	dma = dma_declare_coherent_memory(dev, rmem->base,
+					  rmem->base, rmem->size,
+					  DMA_MEMORY_MAP |
+					  DMA_MEMORY_EXCLUSIVE);
+	if (!(dma & DMA_MEMORY_MAP)) {
+			pr_err("dsp: dma_declare_coherent_memory failed\n");
+			return -ENOMEM;
 	}
+	else
+		rmem->priv = dev->dma_mem;
 
-	pdev = platform_device_alloc("omap-dsp", -1);
-	if (!pdev)
-		goto err_out;
-
-	err = platform_device_add_data(pdev, pdata, sizeof(*pdata));
-	if (err)
-		goto err_out;
-
-	err = platform_device_add(pdev);
-	if (err)
-		goto err_out;
-
-	omap_dsp_pdev = pdev;
 	return 0;
-
-err_out:
-	platform_device_put(pdev);
-	return err;
 }
-module_init(omap_dsp_init);
 
-static void __exit omap_dsp_exit(void)
+static void rmem_dsp_device_release(struct reserved_mem *rmem,
+				    struct device *dev)
 {
-	if (!cpu_is_omap34xx())
-		return;
-
-	platform_device_unregister(omap_dsp_pdev);
+	dma_release_declared_memory(dev);
+	rmem->priv = 0;
 }
-module_exit(omap_dsp_exit);
+
+static const struct reserved_mem_ops rmem_dsp_ops = {
+	.device_init    = rmem_dsp_device_init,
+	.device_release = rmem_dsp_device_release,
+};
+
+static int __init rmem_dsp_setup(struct reserved_mem *rmem)
+{
+	pr_info("dsp: reserved %d bytes at %pa\n", rmem->size, &rmem->base);
+	rmem->ops = &rmem_dsp_ops;
+
+	return 0;
+}
+
+RESERVEDMEM_OF_DECLARE(dss, "ti,dsp-memsize", rmem_dsp_setup);
 
 MODULE_AUTHOR("Hiroshi DOYU");
 MODULE_DESCRIPTION("TI's OMAP DSP platform device registration");

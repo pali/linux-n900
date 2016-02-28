@@ -26,6 +26,23 @@
 	status = "disabled";
 };
 
+&mmu_iva {
+	status = "ok";
+};
+
+&iva {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	memory-region = <&dsp>;
+	iommus = <&mmu_iva>;
+	mboxes = <&mailbox &mbox_dsp>;
+
+	iva@0 {
+		reg = <0>;
+	};
+};
+
 / {
 	model = "Nokia N900";
 	compatible = "nokia,omap3-n900", "ti,omap3430", "ti,omap3";
@@ -63,6 +80,12 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 		ranges;
+
+		dsp: dsp {
+			size = <0x900000>;
+			alignment = <0x100000>;
+			compatible = "ti,dsp-memsize";
+		};
 
 		fb: omapfb {
 			size = <0x700000>;

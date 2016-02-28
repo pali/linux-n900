@@ -281,8 +281,8 @@ bool dbll_get_addr(struct dbll_library_obj *zl_lib, char *name,
 
 	*sym_val = &sym->value;
 
-	dev_dbg(bridge, "%s: lib: %p name: %s paddr: %p\n",
-		__func__, zl_lib, name, sym_val);
+	dev_dbg(bridge, "%s: lib: %p name: %s val: %08X\n",
+		__func__, zl_lib, name, sym->value.value);
 	return true;
 }
 
