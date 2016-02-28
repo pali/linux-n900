@@ -116,6 +116,7 @@ enum gpp_proc_res_state {
 /* Bridge Data */
 struct drv_data {
 	char *base_img;
+	void *shm_base;
 	s32 shm_size;
 	int tc_wordswapon;
 	void *drv_object;
@@ -368,28 +369,6 @@ int drv_request_bridge_res_dsp(void **phost_resources);
 #ifdef CONFIG_TIDSPBRIDGE_RECOVERY
 void bridge_recover_schedule(void);
 #endif
-
-/*
- *  ======== mem_ext_phys_pool_init ========
- *  Purpose:
- *      Uses the physical memory chunk passed for internal consistent memory
- *      allocations.
- *      physical address based on the page frame address.
- *  Parameters:
- *      pool_phys_base  starting address of the physical memory pool.
- *      pool_size      size of the physical memory pool.
- *  Returns:
- *      none.
- *  Requires:
- *      - MEM initialized.
- *      - valid physical address for the base and size > 0
- */
-extern void mem_ext_phys_pool_init(u32 pool_phys_base, u32 pool_size);
-
-/*
- *  ======== mem_ext_phys_pool_release ========
- */
-extern void mem_ext_phys_pool_release(void);
 
 /*  ======== mem_alloc_phys_mem ========
  *  Purpose:
