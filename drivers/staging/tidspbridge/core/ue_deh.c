@@ -115,7 +115,7 @@ int bridge_deh_create(struct deh_mgr **ret_deh,
 	deh->bridge_context = hbridge_context;
 
 	/* Install ISR function for DSP MMU fault */
-	status = request_irq(INT_DSP_MMU_IRQ, mmu_fault_isr, 0,
+	status = request_irq(INT_DSP_MMU_IRQ, mmu_fault_isr, IRQF_SHARED,
 			"DspBridge\tiommu fault", deh);
 	if (status < 0)
 		goto err;

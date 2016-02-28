@@ -214,10 +214,6 @@ static struct bridge_drv_interface drv_interface_fxns = {
 	bridge_msg_set_queue_id,
 };
 
-static struct notifier_block dsp_mbox_notifier = {
-	.notifier_call = io_mbox_msg,
-};
-
 static inline void flush_all(struct bridge_dev_context *dev_context)
 {
 	if (dev_context->brd_state == BRD_DSP_HIBERNATION ||
@@ -548,14 +544,26 @@ static int bridge_brd_start(struct bridge_dev_context *dev_ctxt,
 		 * Enable Mailbox events and also drain any pending
 		 * stale messages.
 		 */
-		dev_context->mbox = omap_mbox_get("dsp", &dsp_mbox_notifier);
-		if (IS_ERR(dev_context->mbox)) {
-			dev_context->mbox = NULL;
-			pr_err("%s: Failed to get dsp mailbox handle\n",
-								__func__);
-			status = -EPERM;
-		}
+		{
+			struct mbox_client *client = &dev_context->mbox_client;
 
+			client->dev = bridge;
+			client->tx_tout = 0;
+			client->tx_done = NULL;
+			client->rx_callback = io_mbox_msg;
+			client->tx_block = false;
+			client->knows_txdone = false;
+
+			dev_context->mbox = mbox_request_channel(client, 0);
+
+			if (IS_ERR(dev_context->mbox)) {
+				status = PTR_ERR(dev_context->mbox);
+				pr_err("%s: Failed to get dsp mailbox handle %d\n",
+				       __func__, status);
+				dev_context->mbox = NULL;
+			}
+
+		}
 	}
 	if (!status) {
 /*PM_IVA2GRPSEL_PER = 0xC0;*/
@@ -684,7 +692,7 @@ static int bridge_brd_stop(struct bridge_dev_context *dev_ctxt)
 	/* Disable the mailbox interrupts */
 	if (dev_context->mbox) {
 		omap_mbox_disable_irq(dev_context->mbox, IRQ_RX);
-		omap_mbox_put(dev_context->mbox, &dsp_mbox_notifier);
+		mbox_free_channel(dev_context->mbox);
 		dev_context->mbox = NULL;
 	}
 	/* Reset IVA2 clocks*/

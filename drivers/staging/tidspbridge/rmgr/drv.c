@@ -51,14 +51,6 @@ struct drv_ext {
 };
 
 /*  ----------------------------------- Globals */
-static bool ext_phys_mem_pool_enabled;
-struct ext_phys_mem_pool {
-	u32 phys_mem_base;
-	u32 phys_mem_size;
-	u32 virt_mem_base;
-	u32 next_phys_alloc_ptr;
-};
-static struct ext_phys_mem_pool ext_mem_pool;
 
 /*  ----------------------------------- Function Prototypes */
 static int request_bridge_resources(struct cfg_hostres *res);
@@ -656,25 +648,14 @@ int drv_request_bridge_res_dsp(void **phost_resources)
 		host_res->dmmu_base = ioremap(OMAP_DMMU_BASE,
 						 OMAP_DMMU_SIZE);
 
-		dev_dbg(bridge, "mem_base[0] 0x%x\n",
-			host_res->mem_base[0]);
-		dev_dbg(bridge, "mem_base[1] 0x%x\n",
-			host_res->mem_base[1]);
-		dev_dbg(bridge, "mem_base[2] 0x%x\n",
-			host_res->mem_base[2]);
-		dev_dbg(bridge, "mem_base[3] 0x%x\n",
-			host_res->mem_base[3]);
-		dev_dbg(bridge, "mem_base[4] 0x%x\n",
-			host_res->mem_base[4]);
-		dev_dbg(bridge, "dmmu_base %p\n", host_res->dmmu_base);
-
 		shm_size = drv_datap->shm_size;
 		if (shm_size >= 0x10000) {
 			/* Allocate Physically contiguous,
 			 * non-cacheable  memory */
-			host_res->mem_base[1] =
-			    (u32) mem_alloc_phys_mem(shm_size, 0x100000,
-						     &dma_addr);
+			drv_datap->shm_base =
+					mem_alloc_phys_mem(shm_size, 0x100000,
+							   &dma_addr);
+			host_res->mem_base[1] = (u32) drv_datap->shm_base;
 			if (host_res->mem_base[1] == 0) {
 				status = -ENOMEM;
 				pr_err("shm reservation Failed\n");
@@ -688,6 +669,19 @@ int drv_request_bridge_res_dsp(void **phost_resources)
 					dma_addr, shm_size);
 			}
 		}
+
+		dev_dbg(bridge, "mem_base[0] 0x%x\n",
+			host_res->mem_base[0]);
+		dev_dbg(bridge, "mem_base[1] 0x%x\n",
+			host_res->mem_base[1]);
+		dev_dbg(bridge, "mem_base[2] 0x%x\n",
+			host_res->mem_base[2]);
+		dev_dbg(bridge, "mem_base[3] 0x%x\n",
+			host_res->mem_base[3]);
+		dev_dbg(bridge, "mem_base[4] 0x%x\n",
+			host_res->mem_base[4]);
+		dev_dbg(bridge, "dmmu_base %p\n", host_res->dmmu_base);
+
 		if (!status) {
 			/* These are hard-coded values */
 			host_res->birq_registers = 0;
@@ -705,77 +699,6 @@ int drv_request_bridge_res_dsp(void **phost_resources)
 	return status;
 }
 
-void mem_ext_phys_pool_init(u32 pool_phys_base, u32 pool_size)
-{
-	u32 pool_virt_base;
-
-	/* get the virtual address for the physical memory pool passed */
-	pool_virt_base = (u32) ioremap(pool_phys_base, pool_size);
-
-	if ((void **)pool_virt_base == NULL) {
-		pr_err("%s: external physical memory map failed\n", __func__);
-		ext_phys_mem_pool_enabled = false;
-	} else {
-		ext_mem_pool.phys_mem_base = pool_phys_base;
-		ext_mem_pool.phys_mem_size = pool_size;
-		ext_mem_pool.virt_mem_base = pool_virt_base;
-		ext_mem_pool.next_phys_alloc_ptr = pool_phys_base;
-		ext_phys_mem_pool_enabled = true;
-	}
-}
-
-void mem_ext_phys_pool_release(void)
-{
-	if (ext_phys_mem_pool_enabled) {
-		iounmap((void *)(ext_mem_pool.virt_mem_base));
-		ext_phys_mem_pool_enabled = false;
-	}
-}
-
-/*
- *  ======== mem_ext_phys_mem_alloc ========
- *  Purpose:
- *     Allocate physically contiguous, uncached memory from external memory pool
- */
-
-static void *mem_ext_phys_mem_alloc(u32 bytes, u32 align, u32 *phys_addr)
-{
-	u32 new_alloc_ptr;
-	u32 offset;
-	u32 virt_addr;
-
-	if (align == 0)
-		align = 1;
-
-	if (bytes > ((ext_mem_pool.phys_mem_base + ext_mem_pool.phys_mem_size)
-		     - ext_mem_pool.next_phys_alloc_ptr)) {
-		phys_addr = NULL;
-		return NULL;
-	} else {
-		offset = (ext_mem_pool.next_phys_alloc_ptr & (align - 1));
-		if (offset == 0)
-			new_alloc_ptr = ext_mem_pool.next_phys_alloc_ptr;
-		else
-			new_alloc_ptr = (ext_mem_pool.next_phys_alloc_ptr) +
-			    (align - offset);
-		if ((new_alloc_ptr + bytes) <=
-		    (ext_mem_pool.phys_mem_base + ext_mem_pool.phys_mem_size)) {
-			/* we can allocate */
-			*phys_addr = new_alloc_ptr;
-			ext_mem_pool.next_phys_alloc_ptr =
-			    new_alloc_ptr + bytes;
-			virt_addr =
-			    ext_mem_pool.virt_mem_base + (new_alloc_ptr -
-							  ext_mem_pool.
-							  phys_mem_base);
-			return (void *)virt_addr;
-		} else {
-			*phys_addr = 0;
-			return NULL;
-		}
-	}
-}
-
 /*
  *  ======== mem_alloc_phys_mem ========
  *  Purpose:
@@ -788,17 +711,14 @@ void *mem_alloc_phys_mem(u32 byte_size, u32 align_mask,
 	dma_addr_t pa_mem;
 
 	if (byte_size > 0) {
-		if (ext_phys_mem_pool_enabled) {
-			va_mem = mem_ext_phys_mem_alloc(byte_size, align_mask,
-							(u32 *) &pa_mem);
-		} else
-			va_mem = dma_alloc_coherent(NULL, byte_size, &pa_mem,
-								GFP_KERNEL);
+		va_mem = dmam_alloc_coherent(bridge, byte_size, &pa_mem,
+					     GFP_KERNEL);
 		if (va_mem == NULL)
 			*physical_address = 0;
 		else
 			*physical_address = pa_mem;
 	}
+
 	return va_mem;
 }
 
@@ -810,7 +730,6 @@ void *mem_alloc_phys_mem(u32 byte_size, u32 align_mask,
 void mem_free_phys_mem(void *virtual_address, u32 physical_address,
 		       u32 byte_size)
 {
-	if (!ext_phys_mem_pool_enabled)
-		dma_free_coherent(NULL, byte_size, virtual_address,
-				  physical_address);
+	dmam_free_coherent(bridge, byte_size, virtual_address,
+			   physical_address);
 }
