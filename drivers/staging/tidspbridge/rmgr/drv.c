@@ -274,7 +274,7 @@ int drv_create(struct drv_object **drv_obj)
 {
 	int status = 0;
 	struct drv_object *pdrv_object = NULL;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 	pdrv_object = kzalloc(sizeof(struct drv_object), GFP_KERNEL);
 	if (pdrv_object) {
@@ -313,7 +313,7 @@ int drv_destroy(struct drv_object *driver_obj)
 {
 	int status = 0;
 	struct drv_object *pdrv_object = (struct drv_object *)driver_obj;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 	kfree(pdrv_object);
 	/* Update the DRV Object in the driver data */
@@ -364,7 +364,7 @@ u32 drv_get_first_dev_object(void)
 {
 	u32 dw_dev_object = 0;
 	struct drv_object *pdrv_obj;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 	if (drv_datap && drv_datap->drv_object) {
 		pdrv_obj = drv_datap->drv_object;
@@ -387,7 +387,7 @@ u32 drv_get_first_dev_extension(void)
 {
 	u32 dw_dev_extension = 0;
 	struct drv_object *pdrv_obj;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 	if (drv_datap && drv_datap->drv_object) {
 		pdrv_obj = drv_datap->drv_object;
@@ -413,7 +413,7 @@ u32 drv_get_next_dev_object(u32 hdev_obj)
 {
 	u32 dw_next_dev_object = 0;
 	struct drv_object *pdrv_obj;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 	struct list_head *curr;
 
 	if (drv_datap && drv_datap->drv_object) {
@@ -443,7 +443,7 @@ u32 drv_get_next_dev_extension(u32 dev_extension)
 {
 	u32 dw_dev_extension = 0;
 	struct drv_object *pdrv_obj;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 	struct list_head *curr;
 
 	if (drv_datap && drv_datap->drv_object) {
@@ -512,7 +512,7 @@ int drv_request_resources(u32 dw_context, u32 *dev_node_strg)
 	int status = 0;
 	struct drv_object *pdrv_object;
 	struct drv_ext *pszdev_node;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 	/*
 	 *  Allocate memory to hold the string. This will live until
@@ -591,7 +591,6 @@ static int request_bridge_resources(struct cfg_hostres *res)
 	/* First window is for DSP internal memory */
 	dev_dbg(bridge, "mem_base[0] 0x%x\n", host_res->mem_base[0]);
 	dev_dbg(bridge, "mem_base[3] 0x%x\n", host_res->mem_base[3]);
-	dev_dbg(bridge, "dmmu_base %p\n", host_res->dmmu_base);
 
 	/* for 24xx base port is not mapping the mamory for DSP
 	 * internal memory TODO Do a ioremap here */
@@ -621,7 +620,7 @@ int drv_request_bridge_res_dsp(void **phost_resources)
 	u32 dw_buff_size;
 	u32 dma_addr;
 	u32 shm_size;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *dsp = dev_get_drvdata(bridge);
 
 	dw_buff_size = sizeof(struct cfg_hostres);
 
@@ -645,17 +644,15 @@ int drv_request_bridge_res_dsp(void **phost_resources)
 						OMAP_PER_PRM_SIZE);
 		host_res->core_pm_base = ioremap(OMAP_CORE_PRM_BASE,
 							OMAP_CORE_PRM_SIZE);
-		host_res->dmmu_base = ioremap(OMAP_DMMU_BASE,
-						 OMAP_DMMU_SIZE);
 
-		shm_size = drv_datap->shm_size;
+		shm_size = dsp->shm_size;
 		if (shm_size >= 0x10000) {
 			/* Allocate Physically contiguous,
 			 * non-cacheable  memory */
-			drv_datap->shm_base =
+			dsp->shm_base =
 					mem_alloc_phys_mem(shm_size, 0x100000,
 							   &dma_addr);
-			host_res->mem_base[1] = (u32) drv_datap->shm_base;
+			host_res->mem_base[1] = (u32) dsp->shm_base;
 			if (host_res->mem_base[1] == 0) {
 				status = -ENOMEM;
 				pr_err("shm reservation Failed\n");
@@ -680,7 +677,6 @@ int drv_request_bridge_res_dsp(void **phost_resources)
 			host_res->mem_base[3]);
 		dev_dbg(bridge, "mem_base[4] 0x%x\n",
 			host_res->mem_base[4]);
-		dev_dbg(bridge, "dmmu_base %p\n", host_res->dmmu_base);
 
 		if (!status) {
 			/* These are hard-coded values */

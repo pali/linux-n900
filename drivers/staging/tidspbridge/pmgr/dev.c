@@ -132,7 +132,7 @@ int dev_create_device(struct dev_object **device_obj,
 	struct io_attrs io_mgr_attrs;
 	u32 num_windows;
 	struct drv_object *hdrv_obj = NULL;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 	int status = 0;
 
 	status = drv_request_bridge_res_dsp((void *)&host_res);
@@ -671,7 +671,7 @@ int dev_remove_device(struct cfg_devnode *dev_node_obj)
 {
 	struct dev_object *hdev_obj;	/* handle to device object */
 	int status = 0;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 	if (!drv_datap)
 		status = -ENODATA;
@@ -740,7 +740,7 @@ int dev_start_device(struct cfg_devnode *dev_node_obj)
 	char *bridge_file_name = "UMA";
 	int status;
 	struct mgr_object *hmgr_obj = NULL;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 	/* Given all resources, create a device object. */
 	status = dev_create_device(&hdev_obj, bridge_file_name,

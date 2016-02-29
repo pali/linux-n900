@@ -41,7 +41,7 @@ static void mmu_fault_dpc(unsigned long data)
 
 	bridge_deh_notify(deh, DSP_MMUFAULT, 0);
 }
-
+#if 0
 static irqreturn_t mmu_fault_isr(int irq, void *data)
 {
 	struct deh_mgr *deh = data;
@@ -80,7 +80,7 @@ static irqreturn_t mmu_fault_isr(int irq, void *data)
 	}
 	return IRQ_HANDLED;
 }
-
+#endif
 int bridge_deh_create(struct deh_mgr **ret_deh,
 		struct dev_object *hdev_obj)
 {
@@ -113,13 +113,13 @@ int bridge_deh_create(struct deh_mgr **ret_deh,
 
 	/* Fill in context structure */
 	deh->bridge_context = hbridge_context;
-
+#if 0
 	/* Install ISR function for DSP MMU fault */
 	status = request_irq(INT_DSP_MMU_IRQ, mmu_fault_isr, IRQF_SHARED,
 			"DspBridge\tiommu fault", deh);
 	if (status < 0)
 		goto err;
-
+#endif
 	*ret_deh = deh;
 	return 0;
 
@@ -140,7 +140,7 @@ int bridge_deh_destroy(struct deh_mgr *deh)
 		kfree(deh->ntfy_obj);
 	}
 	/* Disable DSP MMU fault */
-	free_irq(INT_DSP_MMU_IRQ, deh);
+	/*free_irq(INT_DSP_MMU_IRQ, deh);*/
 
 	/* Free DPC object */
 	tasklet_kill(&deh->dpc_tasklet);
@@ -165,6 +165,7 @@ int bridge_deh_register_notify(struct deh_mgr *deh, u32 event_mask,
 		return ntfy_unregister(deh->ntfy_obj, hnotification);
 }
 
+#if 0
 #ifdef CONFIG_TIDSPBRIDGE_BACKTRACE
 static void mmu_fault_print_stack(struct bridge_dev_context *dev_context)
 {
@@ -206,6 +207,7 @@ static void mmu_fault_print_stack(struct bridge_dev_context *dev_context)
 	free_page((unsigned long)dummy_va_addr);
 }
 #endif
+#endif
 
 static inline const char *event_to_string(int event)
 {
@@ -244,7 +246,7 @@ void bridge_deh_notify(struct deh_mgr *deh, int event, int info)
 #ifdef CONFIG_TIDSPBRIDGE_BACKTRACE
 		print_dsp_trace_buffer(dev_context);
 		dump_dl_modules(dev_context);
-		mmu_fault_print_stack(dev_context);
+		/* mmu_fault_print_stack(dev_context); */
 #endif
 		break;
 	default:
@@ -256,7 +258,7 @@ void bridge_deh_notify(struct deh_mgr *deh, int event, int info)
 	if (dev_context->brd_state != BRD_ERROR) {
 		ntfy_notify(deh->ntfy_obj, event);
 #ifdef CONFIG_TIDSPBRIDGE_RECOVERY
-		bridge_recover_schedule();
+		//bridge_recover_schedule();
 #endif
 	}
 

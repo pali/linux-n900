@@ -113,7 +113,7 @@ bool dsp_deinit(u32 device_context)
 	bool ret = true;
 	u32 device_node;
 	struct mgr_object *mgr_obj = NULL;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 	while ((device_node = drv_get_first_dev_extension()) != 0) {
 		(void)dev_remove_device((struct cfg_devnode *)device_node);
