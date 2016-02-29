@@ -55,9 +55,6 @@ struct drv_object;
 #define OMAP_CORE_PRM_BASE 0x48306A00
 #define OMAP_CORE_PRM_SIZE 0x1000
 
-#define OMAP_DMMU_BASE 0x5D000000
-#define OMAP_DMMU_SIZE 0x1000
-
 /* GPP PROCESS CLEANUP Data structures */
 
 /* New structure (member of process context) abstracts NODE resource info */
@@ -114,7 +111,7 @@ enum gpp_proc_res_state {
 };
 
 /* Bridge Data */
-struct drv_data {
+struct dsp_device {
 	char *base_img;
 	void *shm_base;
 	s32 shm_size;
@@ -122,6 +119,8 @@ struct drv_data {
 	void *drv_object;
 	void *dev_object;
 	void *mgr_object;
+
+	struct dma_iommu_mapping *mapping;
 };
 
 /* Process Context */
