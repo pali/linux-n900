@@ -328,7 +328,6 @@ struct bridge_dev_context {
 	 */
 	u32 dsp_ext_base_addr;	/* See the comment above */
 	u32 api_reg_base;	/* API mem map'd registers */
-	void __iomem *dsp_mmu_base;	/* DSP MMU Mapped registers */
 	u32 api_clk_base;	/* CLK Registers */
 	u32 dsp_clk_m2_base;	/* DSP Clock Module m2 */
 	u32 public_rhea;	/* Pub Rhea */

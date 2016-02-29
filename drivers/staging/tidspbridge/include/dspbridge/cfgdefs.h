@@ -55,7 +55,6 @@ struct cfg_hostres {
 	void __iomem *per_base;
 	void __iomem *per_pm_base;
 	void __iomem *core_pm_base;
-	void __iomem *dmmu_base;
 };
 
 #endif /* CFGDEFS_ */
