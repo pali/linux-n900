@@ -272,7 +272,7 @@ proc_attach(u32 processor_id,
 	struct proc_object *p_proc_object = NULL;
 	struct mgr_object *hmgr_obj = NULL;
 	struct drv_object *hdrv_obj = NULL;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 	u8 dev_type;
 
 	if (pr_ctxt->processor) {
@@ -381,7 +381,7 @@ static int get_exec_file(struct cfg_devnode *dev_node_obj,
 				u32 size, char *exec_file)
 {
 	u8 dev_type;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 	dev_get_dev_type(hdev_obj, (u8 *) &dev_type);
 
@@ -425,7 +425,7 @@ int proc_auto_start(struct cfg_devnode *dev_node_obj,
 	char sz_exec_file[MAXCMDLINELEN];
 	char *argv[2];
 	struct mgr_object *hmgr_obj = NULL;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 	u8 dev_type;
 
 	/* Create a Dummy PROC Object */
@@ -1017,7 +1017,7 @@ int proc_load(void *hprocessor, const s32 argc_index,
 	u32 dw_ext_end;
 	u32 proc_id;
 	int brd_state;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 #ifdef OPT_LOAD_TIME_INSTRUMENTATION
 	struct timeval tv1;

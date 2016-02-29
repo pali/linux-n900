@@ -11,10 +11,9 @@ librmgr = rmgr/dbdcd.o rmgr/disp.o rmgr/drv.o rmgr/mgr.o rmgr/node.o \
 		rmgr/nldr.o rmgr/drv_interface.o
 libdload = dynload/cload.o dynload/getsection.o dynload/reloc.o \
 		 dynload/tramp.o
-libhw = hw/hw_mmu.o
 
 tidspbridge-y := $(libgen) $(libservices) $(libcore) $(libpmgr) $(librmgr) \
-			$(libdload) $(libhw)
+			$(libdload)
 
 #New DSP API only
 ifeq ($(CONFIG_TIDSPBRIDGE_NEW_API),y)

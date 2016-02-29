@@ -423,9 +423,6 @@ int sm_interrupt_dsp(struct bridge_dev_context *dev_context, u16 mb_val)
 		/* Restore mailbox settings */
 		omap_mbox_restore_ctx(dev_context->mbox);
 
-		/* Access MMU SYS CONFIG register to generate a short wakeup */
-		temp = readl(resources->dmmu_base + 0x10);
-
 		dev_context->brd_state = BRD_RUNNING;
 	} else if (dev_context->brd_state == BRD_RETENTION) {
 		/* Restart the peripheral clocks */
