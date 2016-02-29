@@ -402,7 +402,7 @@ int api_init_complete2(void)
 	int status = 0;
 	struct cfg_devnode *dev_node;
 	struct dev_object *hdev_obj;
-	struct drv_data *drv_datap;
+	struct dsp_device *dsp;
 	u8 dev_type;
 
 	/*  Walk the list of DevObjects, get each devnode, and attempting to
@@ -417,9 +417,9 @@ int api_init_complete2(void)
 			continue;
 
 		if ((dev_type == DSP_UNIT) || (dev_type == IVA_UNIT)) {
-			drv_datap = dev_get_drvdata(bridge);
+			dsp = dev_get_drvdata(bridge);
 
-			if (drv_datap && drv_datap->base_img)
+			if (dsp && dsp->base_img)
 				proc_auto_start(dev_node, hdev_obj);
 		}
 	}
