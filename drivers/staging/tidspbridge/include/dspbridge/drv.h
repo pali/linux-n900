@@ -89,12 +89,6 @@ struct dmm_map_object {
 	struct bridge_dma_map_info dma_info;
 };
 
-/* Used for DMM reserved memory accounting */
-struct dmm_rsv_object {
-	struct list_head link;
-	u32 dsp_reserved_addr;
-};
-
 /* New structure (member of process context) abstracts stream resource info */
 struct strm_res_object {
 	s32 stream_allocated;	/* Stream status */
@@ -137,10 +131,6 @@ struct process_context {
 	/* DMM mapped memory resources */
 	struct list_head dmm_map_list;
 	spinlock_t dmm_map_lock;
-
-	/* DMM reserved memory resources */
-	struct list_head dmm_rsv_list;
-	spinlock_t dmm_rsv_lock;
 
 	/* Stream resources */
 	struct idr *stream_id;
