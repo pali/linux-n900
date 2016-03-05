@@ -22,6 +22,7 @@
 
 #include <linux/platform_data/pinctrl-single.h>
 #include <linux/platform_data/hsmmc-omap.h>
+#include <linux/platform_data/dsp-omap.h>
 #include <linux/platform_data/iommu-omap.h>
 #include <linux/platform_data/wkup_m3.h>
 #include <linux/platform_data/pwm_omap_dmtimer.h>
@@ -38,6 +39,8 @@
 #include "omap-secure.h"
 #include "soc.h"
 #include "hsmmc.h"
+#include "cm2xxx_3xxx.h"
+#include "prm2xxx_3xxx.h"
 
 static struct omap_hsmmc_platform_data __maybe_unused mmc_pdata[2];
 
@@ -523,7 +526,68 @@ static struct pdata_init auxdata_quirks[] __initdata = {
 	{ /* sentinel */ },
 };
 
-extern struct omap_dsp_platform_data omap_dsp_pdata;
+#if IS_ENABLED(CONFIG_TIDSPBRIDGE)
+static void omap_pm_dsp_set_min_opp(u8 opp_id)
+{
+	return;
+}
+static u8 omap_pm_dsp_get_opp(void)
+{
+	return 2;
+}
+
+static void omap_pm_cpu_set_freq(unsigned long f)
+{
+	return;
+}
+
+static unsigned long omap_pm_cpu_get_freq(void)
+{
+	return 250000000;
+}
+
+int omap_dsp_deassert_reset(struct platform_device *pdev)
+{
+	int ret;
+
+	ret = omap_device_deassert_hardreset(pdev, "seq1");
+	if (!ret)
+		ret = omap_device_deassert_hardreset(pdev, "logic");
+
+	return ret;
+}
+
+int omap_dsp_assert_reset(struct platform_device *pdev)
+{
+	int ret;
+
+	ret = omap_device_assert_hardreset(pdev, "logic");
+	if (!ret)
+		ret = omap_device_assert_hardreset(pdev, "seq1");
+
+	return ret;
+}
+
+struct omap_dsp_platform_data omap_dsp_pdata = {
+#ifdef CONFIG_TIDSPBRIDGE_DVFS
+	.dsp_set_min_opp = omap_pm_dsp_set_min_opp,
+	.dsp_get_opp = omap_pm_dsp_get_opp,
+	.cpu_set_freq = omap_pm_cpu_set_freq,
+	.cpu_get_freq = omap_pm_cpu_get_freq,
+#endif
+	.dsp_prm_read = omap2_prm_read_mod_reg,
+	.dsp_prm_write = omap2_prm_write_mod_reg,
+	.dsp_prm_rmw_bits = omap2_prm_rmw_mod_reg_bits,
+	.dsp_cm_read = omap2_cm_read_mod_reg,
+	.dsp_cm_write = omap2_cm_write_mod_reg,
+	.dsp_cm_rmw_bits = omap2_cm_rmw_mod_reg_bits,
+
+	.set_bootaddr = omap_ctrl_write_dsp_boot_addr,
+	.set_bootmode = omap_ctrl_write_dsp_boot_mode,
+	.assert_reset = omap_dsp_assert_reset,
+	.deassert_reset = omap_dsp_deassert_reset
+};
+#endif
 
 static struct of_dev_auxdata omap_auxdata_lookup[] __initdata = {
 #ifdef CONFIG_MACH_NOKIA_N8X0
