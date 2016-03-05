@@ -230,8 +230,7 @@ static int bridge_brd_monitor(struct bridge_dev_context *dev_ctxt)
 		(*pdata->dsp_cm_write)(OMAP34XX_CLKSTCTRL_DISABLE_AUTO,
 					OMAP3430_IVA2_MOD, OMAP2_CM_CLKSTCTRL);
 	}
-	(*pdata->dsp_prm_rmw_bits)(OMAP3430_RST2_IVA2_MASK, 0,
-					OMAP3430_IVA2_MOD, OMAP2_RM_RSTCTRL);
+
 	dsp_clk_enable(DSP_CLK_IVA2);
 
 	/* set the device state to IDLE */
@@ -360,10 +359,7 @@ static int bridge_brd_start(struct bridge_dev_context *dev_ctxt,
 
 		/* Assert RST1 i.e only the RST only for DSP megacell */
 		if (!status) {
-			(*pdata->dsp_prm_rmw_bits)(OMAP3430_RST1_IVA2_MASK,
-					OMAP3430_RST1_IVA2_MASK,
-					OMAP3430_IVA2_MOD,
-					OMAP2_RM_RSTCTRL);
+			pdata->assert_reset(omap_dspbridge_dev);
 
 			/* Mask address with 1K for compatibility */
 			pdata->set_bootaddr(dsp_addr &
@@ -468,8 +464,7 @@ static int bridge_brd_start(struct bridge_dev_context *dev_ctxt,
 		dev_dbg(bridge, "%s Unreset\n", __func__);
 
 		/* release the RST1, DSP starts executing now .. */
-		(*pdata->dsp_prm_rmw_bits)(OMAP3430_RST1_IVA2_MASK, 0,
-					OMAP3430_IVA2_MOD, OMAP2_RM_RSTCTRL);
+		pdata->deassert_reset(omap_dspbridge_dev);
 
 		dev_dbg(bridge, "Waiting for Sync @ 0x%p\n", sync_addr);
 		dev_dbg(bridge, "DSP c_int00 Address =  0x%x\n", dsp_addr);
@@ -535,8 +530,6 @@ static int bridge_brd_stop(struct bridge_dev_context *dev_ctxt)
 	dsp_pwr_state = (*pdata->dsp_prm_read)
 		(OMAP3430_IVA2_MOD, OMAP2_PM_PWSTST) & OMAP_POWERSTATEST_MASK;
 	if (dsp_pwr_state != PWRDM_POWER_OFF) {
-		(*pdata->dsp_prm_rmw_bits)(OMAP3430_RST2_IVA2_MASK, 0,
-					OMAP3430_IVA2_MOD, OMAP2_RM_RSTCTRL);
 		sm_interrupt_dsp(dev_context, MBX_PM_DSPIDLE);
 		mdelay(10);
 
@@ -565,9 +558,7 @@ static int bridge_brd_stop(struct bridge_dev_context *dev_ctxt)
 		dev_context->mbox = NULL;
 	}
 	/* Reset IVA2 clocks*/
-	/*(*pdata->dsp_prm_write)(OMAP3430_RST1_IVA2_MASK |
-			OMAP3430_RST2_IVA2_MASK | OMAP3430_RST3_IVA2_MASK,
-			OMAP3430_IVA2_MOD, OMAP2_RM_RSTCTRL);*/
+	pdata->assert_reset(omap_dspbridge_dev);
 
 	dsp_clock_disable_all(dev_context->dsp_per_clks);
 	dsp_clk_disable(DSP_CLK_IVA2);
@@ -996,6 +987,7 @@ err_pages:
 static int bridge_brd_mem_un_map(struct bridge_dev_context *dev_ctxt,
 				     u32 da, u32 size)
 {
+	/* FIXME - we need put_pages() here !!! */
 	return iommu_unmap(iommu_get_domain_for_dev(bridge), da, size);
 }
 
