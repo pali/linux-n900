@@ -122,42 +122,6 @@ bool wait_for_start(struct bridge_dev_context *dev_context,
 
 /*  ----------------------------------- Globals */
 
-/* Attributes of L2 page tables for DSP MMU */
-struct page_info {
-	u32 num_entries;	/* Number of valid PTEs in the L2 PT */
-};
-
-/* Attributes used to manage the DSP MMU page tables */
-struct pg_table_attrs {
-	spinlock_t pg_lock;	/* Critical section object handle */
-
-	u32 l1_base_pa;		/* Physical address of the L1 PT */
-	u32 l1_base_va;		/* Virtual  address of the L1 PT */
-	u32 l1_size;		/* Size of the L1 PT */
-	u32 l1_tbl_alloc_pa;
-	/* Physical address of Allocated mem for L1 table. May not be aligned */
-	u32 l1_tbl_alloc_va;
-	/* Virtual address of Allocated mem for L1 table. May not be aligned */
-	u32 l1_tbl_alloc_sz;
-	/* Size of consistent memory allocated for L1 table.
-	 * May not be aligned */
-
-	u32 l2_base_pa;		/* Physical address of the L2 PT */
-	u32 l2_base_va;		/* Virtual  address of the L2 PT */
-	u32 l2_size;		/* Size of the L2 PT */
-	u32 l2_tbl_alloc_pa;
-	/* Physical address of Allocated mem for L2 table. May not be aligned */
-	u32 l2_tbl_alloc_va;
-	/* Virtual address of Allocated mem for L2 table. May not be aligned */
-	u32 l2_tbl_alloc_sz;
-	/* Size of consistent memory allocated for L2 table.
-	 * May not be aligned */
-
-	u32 l2_num_pages;	/* Number of allocated L2 PT */
-	/* Array [l2_num_pages] of L2 PT info structs */
-	struct page_info *pg_info;
-};
-
 /*
  *  This Bridge driver's function interface table.
  */
@@ -558,7 +522,6 @@ static int bridge_brd_stop(struct bridge_dev_context *dev_ctxt)
 {
 	int status = 0;
 	struct bridge_dev_context *dev_context = dev_ctxt;
-	struct pg_table_attrs *pt_attrs;
 	u32 dsp_pwr_state;
 	struct omap_dsp_platform_data *pdata =
 		omap_dspbridge_dev->dev.platform_data;
@@ -595,14 +558,6 @@ static int bridge_brd_stop(struct bridge_dev_context *dev_ctxt)
 
 	dsp_wdt_enable(false);
 
-	/* This is a good place to clear the MMU page tables as well */
-	if (dev_context->pt_attrs) {
-		pt_attrs = dev_context->pt_attrs;
-		memset((u8 *) pt_attrs->l1_base_va, 0x00, pt_attrs->l1_size);
-		memset((u8 *) pt_attrs->l2_base_va, 0x00, pt_attrs->l2_size);
-		memset((u8 *) pt_attrs->pg_info, 0x00,
-		       (pt_attrs->l2_num_pages * sizeof(struct page_info)));
-	}
 	/* Disable the mailbox interrupts */
 	if (dev_context->mbox) {
 		omap_mbox_disable_irq(dev_context->mbox, IRQ_RX);
@@ -672,10 +627,6 @@ static int bridge_dev_create(struct bridge_dev_context
 	struct bridge_dev_context *dev_context = NULL;
 	s32 entry_ndx;
 	struct cfg_hostres *resources = config_param;
-	struct pg_table_attrs *pt_attrs;
-	u32 pg_tbl_pa;
-	u32 pg_tbl_va;
-	u32 align_size;
 	struct dsp_device *dsp = dev_get_drvdata(bridge);
 
 	/* Allocate and initialize a data structure to contain the bridge driver
@@ -706,85 +657,7 @@ static int bridge_dev_create(struct bridge_dev_context
 	if (!dev_context->dsp_base_addr)
 		status = -EPERM;
 
-	pt_attrs = kzalloc(sizeof(struct pg_table_attrs), GFP_KERNEL);
-	if (pt_attrs != NULL) {
-		pt_attrs->l1_size = SZ_16K; /* 4096 entries of 32 bits */
-		align_size = pt_attrs->l1_size;
-		/* Align sizes are expected to be power of 2 */
-		/* we like to get aligned on L1 table size */
-		pg_tbl_va = (u32) mem_alloc_phys_mem(pt_attrs->l1_size,
-						     align_size, &pg_tbl_pa);
-
-		/* Check if the PA is aligned for us */
-		if ((pg_tbl_pa) & (align_size - 1)) {
-			/* PA not aligned to page table size ,
-			 * try with more allocation and align */
-			mem_free_phys_mem((void *)pg_tbl_va, pg_tbl_pa,
-					  pt_attrs->l1_size);
-			/* we like to get aligned on L1 table size */
-			pg_tbl_va =
-			    (u32) mem_alloc_phys_mem((pt_attrs->l1_size) * 2,
-						     align_size, &pg_tbl_pa);
-			/* We should be able to get aligned table now */
-			pt_attrs->l1_tbl_alloc_pa = pg_tbl_pa;
-			pt_attrs->l1_tbl_alloc_va = pg_tbl_va;
-			pt_attrs->l1_tbl_alloc_sz = pt_attrs->l1_size * 2;
-			/* Align the PA to the next 'align'  boundary */
-			pt_attrs->l1_base_pa =
-			    ((pg_tbl_pa) +
-			     (align_size - 1)) & (~(align_size - 1));
-			pt_attrs->l1_base_va =
-			    pg_tbl_va + (pt_attrs->l1_base_pa - pg_tbl_pa);
-		} else {
-			/* We got aligned PA, cool */
-			pt_attrs->l1_tbl_alloc_pa = pg_tbl_pa;
-			pt_attrs->l1_tbl_alloc_va = pg_tbl_va;
-			pt_attrs->l1_tbl_alloc_sz = pt_attrs->l1_size;
-			pt_attrs->l1_base_pa = pg_tbl_pa;
-			pt_attrs->l1_base_va = pg_tbl_va;
-		}
-		if (pt_attrs->l1_base_va)
-			memset((u8 *) pt_attrs->l1_base_va, 0x00,
-			       pt_attrs->l1_size);
-
-		/* number of L2 page tables = DMM pool used + SHMMEM +EXTMEM +
-		 * L4 pages */
-		pt_attrs->l2_num_pages = ((DMMPOOLSIZE >> 20) + 6);
-		pt_attrs->l2_size = HW_MMU_COARSE_PAGE_SIZE *
-		    pt_attrs->l2_num_pages;
-		align_size = 4;	/* Make it u32 aligned */
-		/* we like to get aligned on L1 table size */
-		pg_tbl_va = (u32) mem_alloc_phys_mem(pt_attrs->l2_size,
-						     align_size, &pg_tbl_pa);
-		pt_attrs->l2_tbl_alloc_pa = pg_tbl_pa;
-		pt_attrs->l2_tbl_alloc_va = pg_tbl_va;
-		pt_attrs->l2_tbl_alloc_sz = pt_attrs->l2_size;
-		pt_attrs->l2_base_pa = pg_tbl_pa;
-		pt_attrs->l2_base_va = pg_tbl_va;
-
-		if (pt_attrs->l2_base_va)
-			memset((u8 *) pt_attrs->l2_base_va, 0x00,
-			       pt_attrs->l2_size);
-
-		pt_attrs->pg_info = kzalloc(pt_attrs->l2_num_pages *
-					sizeof(struct page_info), GFP_KERNEL);
-		dev_dbg(bridge,
-			"L1 pa %x, va %x, size %x\n L2 pa %x, va "
-			"%x, size %x\n", pt_attrs->l1_base_pa,
-			pt_attrs->l1_base_va, pt_attrs->l1_size,
-			pt_attrs->l2_base_pa, pt_attrs->l2_base_va,
-			pt_attrs->l2_size);
-		dev_dbg(bridge, "pt_attrs %p L2 NumPages %x pg_info %p\n",
-			pt_attrs, pt_attrs->l2_num_pages, pt_attrs->pg_info);
-	}
-	if ((pt_attrs != NULL) && (pt_attrs->l1_base_va != 0) &&
-	    (pt_attrs->l2_base_va != 0) && (pt_attrs->pg_info != NULL))
-		dev_context->pt_attrs = pt_attrs;
-	else
-		status = -ENOMEM;
-
 	if (!status) {
-		spin_lock_init(&pt_attrs->pg_lock);
 		dev_context->tc_word_swap_on = dsp->tc_wordswapon;
 
 		/* Set the Clock Divisor for the DSP module */
@@ -802,23 +675,6 @@ static int bridge_dev_create(struct bridge_dev_context
 		/* Return ptr to our device state to the DSP API for storage */
 		*dev_cntxt = dev_context;
 	} else {
-		if (pt_attrs != NULL) {
-			kfree(pt_attrs->pg_info);
-
-			if (pt_attrs->l2_tbl_alloc_va) {
-				mem_free_phys_mem((void *)
-						  pt_attrs->l2_tbl_alloc_va,
-						  pt_attrs->l2_tbl_alloc_pa,
-						  pt_attrs->l2_tbl_alloc_sz);
-			}
-			if (pt_attrs->l1_tbl_alloc_va) {
-				mem_free_phys_mem((void *)
-						  pt_attrs->l1_tbl_alloc_va,
-						  pt_attrs->l1_tbl_alloc_pa,
-						  pt_attrs->l1_tbl_alloc_sz);
-			}
-		}
-		kfree(pt_attrs);
 		kfree(dev_context);
 	}
 func_end:
@@ -886,7 +742,6 @@ static int bridge_dev_ctrl(struct bridge_dev_context *dev_context,
  */
 static int bridge_dev_destroy(struct bridge_dev_context *dev_ctxt)
 {
-	struct pg_table_attrs *pt_attrs;
 	int status = 0;
 	struct bridge_dev_context *dev_context = (struct bridge_dev_context *)
 	    dev_ctxt;
@@ -900,23 +755,6 @@ static int bridge_dev_destroy(struct bridge_dev_context *dev_ctxt)
 
 	/* first put the device to stop state */
 	bridge_brd_stop(dev_context);
-	if (dev_context->pt_attrs) {
-		pt_attrs = dev_context->pt_attrs;
-		kfree(pt_attrs->pg_info);
-
-		if (pt_attrs->l2_tbl_alloc_va) {
-			mem_free_phys_mem((void *)pt_attrs->l2_tbl_alloc_va,
-					  pt_attrs->l2_tbl_alloc_pa,
-					  pt_attrs->l2_tbl_alloc_sz);
-		}
-		if (pt_attrs->l1_tbl_alloc_va) {
-			mem_free_phys_mem((void *)pt_attrs->l1_tbl_alloc_va,
-					  pt_attrs->l1_tbl_alloc_pa,
-					  pt_attrs->l1_tbl_alloc_sz);
-		}
-		kfree(pt_attrs);
-
-	}
 
 	if (dev_context->resources) {
 		host_res = dev_context->resources;
