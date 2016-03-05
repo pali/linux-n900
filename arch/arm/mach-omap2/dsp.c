@@ -18,57 +18,10 @@
  * of the OMAP PM core code.
  */
 
-#include <linux/module.h>
-#include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
+#include <linux/of.h>
 #include <linux/of_reserved_mem.h>
 
-#include "control.h"
-#include "cm2xxx_3xxx.h"
-#include "prm2xxx_3xxx.h"
-#ifdef CONFIG_TIDSPBRIDGE_DVFS
-#include "omap-pm.h"
-#endif
-#include "soc.h"
-
-#include <linux/platform_data/dsp-omap.h>
-
-static void omap_pm_dsp_set_min_opp(u8 opp_id)
-{
-	return;
-}
-static u8 omap_pm_dsp_get_opp(void)
-{
-	return 2;
-}
-
-static void omap_pm_cpu_set_freq(unsigned long f)
-{
-	return;
-}
-
-static unsigned long omap_pm_cpu_get_freq(void)
-{
-	return 250000000;
-}
-
-struct omap_dsp_platform_data omap_dsp_pdata = {
-#ifdef CONFIG_TIDSPBRIDGE_DVFS
-	.dsp_set_min_opp = omap_pm_dsp_set_min_opp,
-	.dsp_get_opp = omap_pm_dsp_get_opp,
-	.cpu_set_freq = omap_pm_cpu_set_freq,
-	.cpu_get_freq = omap_pm_cpu_get_freq,
-#endif
-	.dsp_prm_read = omap2_prm_read_mod_reg,
-	.dsp_prm_write = omap2_prm_write_mod_reg,
-	.dsp_prm_rmw_bits = omap2_prm_rmw_mod_reg_bits,
-	.dsp_cm_read = omap2_cm_read_mod_reg,
-	.dsp_cm_write = omap2_cm_write_mod_reg,
-	.dsp_cm_rmw_bits = omap2_cm_rmw_mod_reg_bits,
-
-	.set_bootaddr = omap_ctrl_write_dsp_boot_addr,
-	.set_bootmode = omap_ctrl_write_dsp_boot_mode,
-};
 
 static int rmem_dsp_device_init(struct reserved_mem *rmem, struct device *dev)
 {
@@ -111,8 +64,4 @@ static int __init rmem_dsp_setup(struct reserved_mem *rmem)
 	return 0;
 }
 
-RESERVEDMEM_OF_DECLARE(dss, "ti,dsp-memsize", rmem_dsp_setup);
-
-MODULE_AUTHOR("Hiroshi DOYU");
-MODULE_DESCRIPTION("TI's OMAP DSP platform device registration");
-MODULE_LICENSE("GPL");
+RESERVEDMEM_OF_DECLARE(dsp, "ti,dsp-memsize", rmem_dsp_setup);
