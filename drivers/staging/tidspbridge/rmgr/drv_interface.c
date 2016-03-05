@@ -371,9 +371,9 @@ static struct notifier_block iva_clk_notifier = {
 
 static void bridge_detach_iommu(struct dsp_device *dc)
 {
-	arm_iommu_release_mapping(dc->mapping);
-	dc->mapping = NULL;
+	arm_iommu_detach_device(bridge);
 	iommu_group_remove_device(bridge);
+	dc->mapping = NULL;
 }
 
 static int bridge_attach_iommu(struct dsp_device *dsp)
@@ -537,7 +537,9 @@ static int omap3_bridge_startup(struct platform_device *dev)
 	if (tc_wordswapon)
 		dev_dbg(bridge, "%s: TC Word Swap is enabled\n", __func__);
 
-	bridge_attach_iommu(dsp);
+	err = bridge_attach_iommu(dsp);
+	if (err)
+		goto err3;
 
 	driver_context = dsp_init(&err);
 	if (err) {
@@ -646,7 +648,6 @@ static int omap34_xx_bridge_remove(struct platform_device *pdev)
 		goto func_cont;
 	}
 
-	bridge_detach_iommu(dsp);
 
 #ifdef CONFIG_TIDSPBRIDGE_DVFS
 	if (cpufreq_unregister_notifier(&iva_clk_notifier,
@@ -659,6 +660,7 @@ static int omap34_xx_bridge_remove(struct platform_device *pdev)
 		/* Put the DSP in reset state */
 		dsp_deinit(driver_context);
 		driver_context = 0;
+		bridge_detach_iommu(dsp);
 	}
 
 	kfree(dsp);
