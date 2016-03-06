@@ -57,7 +57,7 @@ int mgr_create(struct mgr_object **mgr_obj,
 {
 	int status = 0;
 	struct mgr_object *pmgr_obj = NULL;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 	pmgr_obj = kzalloc(sizeof(struct mgr_object), GFP_KERNEL);
 	if (pmgr_obj) {
@@ -97,7 +97,7 @@ int mgr_destroy(struct mgr_object *hmgr_obj)
 {
 	int status = 0;
 	struct mgr_object *pmgr_obj = (struct mgr_object *)hmgr_obj;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 	/* Free resources */
 	if (hmgr_obj->dcd_mgr)
@@ -128,7 +128,7 @@ int mgr_enum_node_info(u32 node_id, struct dsp_ndbprops *pndb_props,
 	u32 node_index = 0;
 	struct dcd_genericobj gen_obj;
 	struct mgr_object *pmgr_obj = NULL;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 	*pu_num_nodes = 0;
 	/* Get the Manager Object from the driver data */
@@ -186,7 +186,7 @@ int mgr_enum_processor_info(u32 processor_id,
 	struct drv_object *hdrv_obj;
 	u8 dev_type;
 	struct cfg_devnode *dev_node;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 	bool proc_detect = false;
 
 	*pu_num_procs = 0;

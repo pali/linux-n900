@@ -26,6 +26,23 @@
 	status = "disabled";
 };
 
+&mmu_iva {
+	status = "ok";
+};
+
+&iva {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	memory-region = <&dsp_reserved>;
+	iommus = <&mmu_iva>;
+	mboxes = <&mailbox &mbox_dsp>;
+
+	iva@0 {
+		reg = <0>;
+	};
+};
+
 / {
 	model = "Nokia N900";
 	compatible = "nokia,omap3-n900", "ti,omap3430", "ti,omap3";
@@ -57,6 +74,23 @@
 	memory {
 		device_type = "memory";
 		reg = <0x80000000 0x10000000>; /* 256 MB */
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		dsp_reserved: dsp {
+			size = <0x900000>;
+			alignment = <0x100000>;
+			compatible = "ti,dsp-memsize";
+		};
+		omapfb_reserved: omapfb {
+			size = <0x700000>;
+			alignment = <0x100000>;
+			compatible = "ti,omapfb-memsize";
+		};
 	};
 
 	gpio_keys {
@@ -1082,6 +1116,8 @@
 	pinctrl-0 = <&dss_sdi_pins>;
 
 	vdds_sdi-supply = <&vaux1>;
+
+	memory-region = <&omapfb_reserved>;
 
 	ports {
 		#address-cells = <1>;

@@ -28,9 +28,9 @@
 #include <linux/io.h>
 #include <linux/omapfb.h>
 #include <linux/dma-mapping.h>
+#include <linux/of_reserved_mem.h>
 
 #include <asm/mach/map.h>
-#include <asm/memblock.h>
 
 #include "soc.h"
 #include "display.h"
@@ -107,53 +107,52 @@ static struct platform_device omap_fb_device = {
 	.num_resources = 0,
 };
 
-static phys_addr_t omapfb_mem_base __initdata;
-static phys_addr_t omapfb_mem_size __initdata;
-
-void __init omap_fb_reserve_memblock(void)
-{
-	if (omapfb_mem_size) {
-		omapfb_mem_base = arm_memblock_steal(omapfb_mem_size, SZ_1M);
-		if (omapfb_mem_base)
-			pr_info("omapfb: reserved %u bytes at %x\n",
-				omapfb_mem_size, omapfb_mem_base);
-		else
-			pr_err("omapfb: arm_memblock_steal failed\n");
-	}
-}
-
 int __init omap_init_fb(void)
 {
-	int ret;
+	return platform_device_register(&omap_fb_device);
+}
 
-	ret = platform_device_register(&omap_fb_device);
+static int rmem_omapfb_device_init(struct reserved_mem *rmem, struct device *dev)
+{
+	int dma;
 
-	if (ret)
-		return ret;
-
-	if (!omapfb_mem_base)
+	if (rmem->priv)
 		return 0;
 
-	ret = dma_declare_coherent_memory(&omap_fb_device.dev,
-					  omapfb_mem_base, omapfb_mem_base,
-					  omapfb_mem_size, DMA_MEMORY_MAP |
+	dma = dma_declare_coherent_memory(&omap_fb_device.dev, rmem->base,
+					  rmem->base, rmem->size,
+					  DMA_MEMORY_MAP |
 					  DMA_MEMORY_EXCLUSIVE);
-	if (!(ret & DMA_MEMORY_MAP))
-		pr_err("omapfb: dma_declare_coherent_memory failed\n");
+	if (!(dma & DMA_MEMORY_MAP)) {
+			pr_err("omapfb: dma_declare_coherent_memory failed\n");
+			return -ENOMEM;
+	}
+	else
+		rmem->priv = omap_fb_device.dev.dma_mem;
 
 	return 0;
 }
 
-static int __init early_omapfb_memsize(char *p)
+static void rmem_omapfb_device_release(struct reserved_mem *rmem,
+				       struct device *dev)
 {
-	omapfb_mem_size = ALIGN(memparse(p, &p), SZ_1M);
+	dma_release_declared_memory(&omap_fb_device.dev);
+}
 
-	if(!omapfb_mem_size)
-		pr_err("omapfb: bad memsize parameter\n");
+static const struct reserved_mem_ops rmem_omapfb_ops = {
+	.device_init    = rmem_omapfb_device_init,
+	.device_release = rmem_omapfb_device_release,
+};
+
+static int __init rmem_omapfb_setup(struct reserved_mem *rmem)
+{
+	rmem->ops = &rmem_omapfb_ops;
+	pr_info("omapfb: reserved %d bytes at %pa\n", rmem->size, &rmem->base);
 
 	return 0;
 }
-early_param("omapfb_memsize", early_omapfb_memsize);
+
+RESERVEDMEM_OF_DECLARE(dss, "ti,omapfb-memsize", rmem_omapfb_setup);
 #else
 int __init omap_init_fb(void) { return 0; }
 #endif

@@ -25,6 +25,7 @@
  */
 #include <linux/types.h>
 #include <linux/list.h>
+#include <linux/iommu.h>
 
 /* Host OS */
 #include <dspbridge/host_os.h>
@@ -367,8 +368,6 @@ int bridge_io_on_loaded(struct io_mgr *hio_mgr)
 		HW_PAGE_SIZE16MB, HW_PAGE_SIZE1MB,
 		HW_PAGE_SIZE64KB, HW_PAGE_SIZE4KB
 	};
-	u32 map_attrs = DSP_MAPLITTLEENDIAN | DSP_MAPPHYSICALADDR |
-			DSP_MAPELEMSIZE32 | DSP_MAPDONOTLOCK;
 
 	status = dev_get_cod_mgr(hio_mgr->dev_obj, &cod_man);
 	if (status)
@@ -452,50 +451,14 @@ int bridge_io_on_loaded(struct io_mgr *hio_mgr)
 	va_curr = s->dyn_ext * hio_mgr->word_size;
 	da_curr = va;
 	bytes = seg1_sz;
+	status = iommu_map(iommu_get_domain_for_dev(bridge), va_curr, pa_curr,
+			   bytes, IOMMU_READ | IOMMU_WRITE);
+	if (status)
+		goto free_symbol;
 
-	/*
-	 * Try to fit into TLB entries. If not possible, push them to page
-	 * tables. It is quite possible that if sections are not on
-	 * bigger page boundary, we may end up making several small pages.
-	 * So, push them onto page tables, if that is the case.
-	 */
-	while (bytes) {
-		/*
-		 * To find the max. page size with which both PA & VA are
-		 * aligned.
-		 */
-		all_bits = pa_curr | va_curr;
-		dev_dbg(bridge,
-			"seg all_bits %x, pa_curr %x, va_curr %x, bytes %x\n",
-			all_bits, pa_curr, va_curr, bytes);
-
-		for (i = 0; i < 4; i++) {
-			if ((bytes >= page_size[i]) &&
-			    ((all_bits & (page_size[i] - 1)) == 0)) {
-				status = hio_mgr->intf_fxns->brd_mem_map(dc,
-							pa_curr, va_curr,
-							page_size[i], map_attrs,
-							NULL);
-				if (status)
-					goto free_symbol;
-
-				pa_curr += page_size[i];
-				va_curr += page_size[i];
-				da_curr += page_size[i];
-				bytes -= page_size[i];
-				/*
-				 * Don't try smaller sizes. Hopefully we have
-				 * reached an address aligned to a bigger page
-				 * size.
-				 */
-				break;
-			}
-		}
-	}
-
-	pa_curr += pad_sz;
-	va_curr += pad_sz;
-	da_curr += pad_sz;
+	pa_curr += pad_sz + bytes;
+	va_curr += pad_sz + bytes;
+	da_curr += pad_sz + bytes;
 	bytes = seg0_sz;
 	va_curr = da * hio_mgr->word_size;
 
@@ -522,20 +485,18 @@ int bridge_io_on_loaded(struct io_mgr *hio_mgr)
 			    !((all_bits & (page_size[i] - 1)) == 0))
 				continue;
 
-			if (ndx >= MAX_LOCK_TLB_ENTRIES) {
-				status = hio_mgr->intf_fxns->brd_mem_map(dc,
-							pa_curr, va_curr,
-							page_size[i], map_attrs,
-							NULL);
-				dev_dbg(bridge,
-					"PTE pa %x va %x dsp_va %x sz %x\n",
-					eproc[ndx].gpp_pa,
-					eproc[ndx].gpp_va,
-					eproc[ndx].dsp_va *
-					hio_mgr->word_size, page_size[i]);
-				if (status)
-					goto free_eproc;
-			}
+			dev_dbg(bridge,
+				"PTE pa %x va %x dsp_va %x sz %x\n",
+				eproc[ndx].gpp_pa,
+				eproc[ndx].gpp_va,
+				eproc[ndx].dsp_va *
+				hio_mgr->word_size, page_size[i]);
+
+			status = iommu_map(iommu_get_domain_for_dev(bridge),
+					   va_curr, pa_curr, page_size[i],
+					   IOMMU_READ | IOMMU_WRITE);
+			if (status)
+				goto free_eproc;
 
 			/* This is the physical address written to DSP MMU */
 			eproc[ndx].gpp_pa = pa_curr;
@@ -592,14 +553,12 @@ int bridge_io_on_loaded(struct io_mgr *hio_mgr)
 			goto free_eproc;
 		}
 
-		if (ndx >= MAX_LOCK_TLB_ENTRIES) {
-			status = hio_mgr->intf_fxns->brd_mem_map(dc,
-						ep->ty_tlb[i].gpp_phys,
-						ep->ty_tlb[i].dsp_virt,
-						0x100000, map_attrs, NULL);
-			if (status)
-				goto free_eproc;
-		}
+		status = iommu_map(iommu_get_domain_for_dev(bridge),
+				   ep->ty_tlb[i].dsp_virt,
+				   ep->ty_tlb[i].gpp_phys, 0x100000,
+				   IOMMU_READ | IOMMU_WRITE);
+		if (status)
+			goto free_eproc;
 
 		eproc[ndx].dsp_va = ep->ty_tlb[i].dsp_virt;
 		eproc[ndx].gpp_pa = ep->ty_tlb[i].gpp_phys;
@@ -615,13 +574,21 @@ int bridge_io_on_loaded(struct io_mgr *hio_mgr)
 	/* Map the L4 peripherals */
 	i = 0;
 	while (l4_peripheral_table[i].phys_addr) {
-		status = hio_mgr->intf_fxns->brd_mem_map(dc,
-					l4_peripheral_table[i].phys_addr,
-					l4_peripheral_table[i].dsp_virt_addr,
-					HW_PAGE_SIZE4KB, map_attrs, NULL);
+		status = iommu_map(iommu_get_domain_for_dev(bridge),
+				   l4_peripheral_table[i].dsp_virt_addr,
+				   l4_peripheral_table[i].phys_addr,
+				   PAGE_SIZE, IOMMU_READ | IOMMU_WRITE);
 		if (status)
-			goto free_eproc;
+			break;
 		i++;
+	}
+
+	if (IS_ERR_VALUE(status)) {
+		while (i--)
+			iommu_unmap(iommu_get_domain_for_dev(bridge),
+				    l4_peripheral_table[i].dsp_virt_addr,
+				    PAGE_SIZE);
+		goto free_eproc;
 	}
 
 	for (i = ndx; i < BRDIOCTL_NUMOFMMUTLB; i++) {
@@ -910,7 +877,7 @@ func_end:
  *      Calls the Bridge's CHNL_ISR to determine if this interrupt is ours, then
  *      schedules a DPC to dispatch I/O.
  */
-int io_mbox_msg(struct notifier_block *self, unsigned long len, void *msg)
+void io_mbox_msg(struct mbox_client *client, void *data)
 {
 	struct io_mgr *pio_mgr;
 	struct dev_object *dev_obj;
@@ -920,9 +887,9 @@ int io_mbox_msg(struct notifier_block *self, unsigned long len, void *msg)
 	dev_get_io_mgr(dev_obj, &pio_mgr);
 
 	if (!pio_mgr)
-		return NOTIFY_BAD;
+		return ;
 
-	pio_mgr->intr_val = (u16)((u32)msg);
+	pio_mgr->intr_val = (u16)((u32)data);
 	if (pio_mgr->intr_val & MBX_PM_CLASS)
 		io_dispatch_pm(pio_mgr);
 
@@ -934,7 +901,7 @@ int io_mbox_msg(struct notifier_block *self, unsigned long len, void *msg)
 		spin_unlock_irqrestore(&pio_mgr->dpc_lock, flags);
 		tasklet_schedule(&pio_mgr->dpc_tasklet);
 	}
-	return NOTIFY_OK;
+	return ;
 }
 
 /*

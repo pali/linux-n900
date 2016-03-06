@@ -39,6 +39,7 @@
 #include <dspbridge/dspioctl.h>	/* for bridge_ioctl_extproc defn */
 #include <dspbridge/sync.h>
 #include <dspbridge/clk.h>
+#include <linux/mailbox_client.h>
 
 struct map_l4_peripheral {
 	u32 phys_addr;
@@ -327,7 +328,6 @@ struct bridge_dev_context {
 	 */
 	u32 dsp_ext_base_addr;	/* See the comment above */
 	u32 api_reg_base;	/* API mem map'd registers */
-	void __iomem *dsp_mmu_base;	/* DSP MMU Mapped registers */
 	u32 api_clk_base;	/* CLK Registers */
 	u32 dsp_clk_m2_base;	/* DSP Clock Module m2 */
 	u32 public_rhea;	/* Pub Rhea */
@@ -338,7 +338,8 @@ struct bridge_dev_context {
 	u32 dsp_start_add;	/* API Boot vector */
 	u32 internal_size;	/* Internal memory size */
 
-	struct omap_mbox *mbox;		/* Mail box handle */
+	struct mbox_chan *mbox;         /* Mail box handle */
+	struct mbox_client mbox_client;
 
 	struct cfg_hostres *resources;	/* Host Resources */
 
@@ -352,7 +353,6 @@ struct bridge_dev_context {
 
 	/* TC Settings */
 	bool tc_word_swap_on;	/* Traffic Controller Word Swap */
-	struct pg_table_attrs *pt_attrs;
 	u32 dsp_per_clks;
 };
 

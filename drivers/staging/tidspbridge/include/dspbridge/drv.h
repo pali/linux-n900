@@ -55,9 +55,6 @@ struct drv_object;
 #define OMAP_CORE_PRM_BASE 0x48306A00
 #define OMAP_CORE_PRM_SIZE 0x1000
 
-#define OMAP_DMMU_BASE 0x5D000000
-#define OMAP_DMMU_SIZE 0x1000
-
 /* GPP PROCESS CLEANUP Data structures */
 
 /* New structure (member of process context) abstracts NODE resource info */
@@ -92,12 +89,6 @@ struct dmm_map_object {
 	struct bridge_dma_map_info dma_info;
 };
 
-/* Used for DMM reserved memory accounting */
-struct dmm_rsv_object {
-	struct list_head link;
-	u32 dsp_reserved_addr;
-};
-
 /* New structure (member of process context) abstracts stream resource info */
 struct strm_res_object {
 	s32 stream_allocated;	/* Stream status */
@@ -114,13 +105,16 @@ enum gpp_proc_res_state {
 };
 
 /* Bridge Data */
-struct drv_data {
+struct dsp_device {
 	char *base_img;
+	void *shm_base;
 	s32 shm_size;
 	int tc_wordswapon;
 	void *drv_object;
 	void *dev_object;
 	void *mgr_object;
+
+	struct dma_iommu_mapping *mapping;
 };
 
 /* Process Context */
@@ -137,10 +131,6 @@ struct process_context {
 	/* DMM mapped memory resources */
 	struct list_head dmm_map_list;
 	spinlock_t dmm_map_lock;
-
-	/* DMM reserved memory resources */
-	struct list_head dmm_rsv_list;
-	spinlock_t dmm_rsv_lock;
 
 	/* Stream resources */
 	struct idr *stream_id;
@@ -368,28 +358,6 @@ int drv_request_bridge_res_dsp(void **phost_resources);
 #ifdef CONFIG_TIDSPBRIDGE_RECOVERY
 void bridge_recover_schedule(void);
 #endif
-
-/*
- *  ======== mem_ext_phys_pool_init ========
- *  Purpose:
- *      Uses the physical memory chunk passed for internal consistent memory
- *      allocations.
- *      physical address based on the page frame address.
- *  Parameters:
- *      pool_phys_base  starting address of the physical memory pool.
- *      pool_size      size of the physical memory pool.
- *  Returns:
- *      none.
- *  Requires:
- *      - MEM initialized.
- *      - valid physical address for the base and size > 0
- */
-extern void mem_ext_phys_pool_init(u32 pool_phys_base, u32 pool_size);
-
-/*
- *  ======== mem_ext_phys_pool_release ========
- */
-extern void mem_ext_phys_pool_release(void);
 
 /*  ======== mem_alloc_phys_mem ========
  *  Purpose:

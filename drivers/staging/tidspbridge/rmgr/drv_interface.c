@@ -25,6 +25,10 @@
 #include <linux/device.h>
 #include <linux/moduleparam.h>
 #include <linux/cdev.h>
+#include <linux/of_reserved_mem.h>
+#include <linux/iommu.h>
+#include <asm/dma-iommu.h>
+#include <linux/omap-iommu.h>
 
 /*  ----------------------------------- DSP/BIOS Bridge */
 #include <dspbridge/dbdefs.h>
@@ -145,8 +149,6 @@ static int bridge_open(struct inode *ip, struct file *filp)
 	pr_ctxt->res_state = PROC_RES_ALLOCATED;
 	spin_lock_init(&pr_ctxt->dmm_map_lock);
 	INIT_LIST_HEAD(&pr_ctxt->dmm_map_list);
-	spin_lock_init(&pr_ctxt->dmm_rsv_lock);
-	INIT_LIST_HEAD(&pr_ctxt->dmm_rsv_list);
 
 	pr_ctxt->node_id = kzalloc(sizeof(struct idr), GFP_KERNEL);
 	if (!pr_ctxt->node_id) {
@@ -259,44 +261,16 @@ err:
 /* This function maps kernel space memory to user space memory. */
 static int bridge_mmap(struct file *filp, struct vm_area_struct *vma)
 {
-	unsigned long base_pgoff;
-	int status;
-	struct omap_dsp_platform_data *pdata =
-					omap_dspbridge_dev->dev.platform_data;
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
+	int ret;
 
-	/* VM_IO | VM_DONTEXPAND | VM_DONTDUMP are set by remap_pfn_range() */
-	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+	if (dma_mmap_from_coherent(bridge, vma, drv_datap->shm_base,
+				   drv_datap->shm_size, &ret))
+	{
+		return 0;
+	}
 
-	dev_dbg(bridge, "%s: vm filp %p start %lx end %lx page_prot %ulx "
-		"flags %lx\n", __func__, filp,
-		vma->vm_start, vma->vm_end, vma->vm_page_prot,
-		vma->vm_flags);
-
-	/*
-	 * vm_iomap_memory() expects vma->vm_pgoff to be expressed as an offset
-	 * from the start of the physical memory pool, but we're called with
-	 * a pfn (physical page number) stored there instead.
-	 *
-	 * To avoid duplicating lots of tricky overflow checking logic,
-	 * temporarily convert vma->vm_pgoff to the offset vm_iomap_memory()
-	 * expects, but restore the original value once the mapping has been
-	 * created.
-	 */
-	base_pgoff = pdata->phys_mempool_base >> PAGE_SHIFT;
-
-	if (vma->vm_pgoff < base_pgoff)
-		return -EINVAL;
-
-	vma->vm_pgoff -= base_pgoff;
-
-	status = vm_iomap_memory(vma,
-				 pdata->phys_mempool_base,
-				 pdata->phys_mempool_size);
-
-	/* Restore the original value of vma->vm_pgoff */
-	vma->vm_pgoff += base_pgoff;
-
-	return status;
+	return ret;
 }
 
 static const struct file_operations bridge_fops = {
@@ -395,6 +369,105 @@ static struct notifier_block iva_clk_notifier = {
 };
 #endif
 
+static void bridge_detach_iommu(struct dsp_device *dc)
+{
+	arm_iommu_detach_device(bridge);
+	iommu_group_remove_device(bridge);
+	dc->mapping = NULL;
+}
+
+static int bridge_attach_iommu(struct dsp_device *dsp)
+{
+	struct dma_iommu_mapping *mapping;
+	struct iommu_group *group;
+	int ret;
+
+	/* Create a device group and add the device to it. */
+	group = iommu_group_alloc();
+	if (IS_ERR(group)) {
+			dev_err(bridge, "failed to allocate IOMMU group\n");
+			return PTR_ERR(group);
+		}
+
+	ret = iommu_group_add_device(group, bridge);
+	iommu_group_put(group);
+
+	if (ret < 0) {
+			dev_err(bridge, "failed to add device to IOMMU group\n");
+			return ret;
+		}
+
+	/*
+	 * Create the ARM mapping, used by the ARM DMA mapping core to allocate
+	 * VAs. This will allocate a corresponding IOMMU domain.
+	 */
+	mapping = arm_iommu_create_mapping(&platform_bus_type, SZ_1G, SZ_2G);
+	if (IS_ERR(mapping)) {
+			dev_err(bridge, "failed to create ARM IOMMU mapping\n");
+			ret = PTR_ERR(mapping);
+			goto error;
+		}
+
+	dsp->mapping = mapping;
+
+	/* Attach the ARM VA mapping to the device. */
+	ret = arm_iommu_attach_device(bridge, mapping);
+	if (ret < 0) {
+		dev_err(bridge, "failed to attach device to VA mapping\n");
+		goto error;
+	}
+
+
+	return 0;
+
+error:
+	bridge_detach_iommu(dsp);
+
+	return ret;
+}
+
+#if 0
+static int bridge_attach_iommu(struct dsp_device *dsp)
+{
+	struct iommu_domain *domain;
+	int ret;
+
+	domain = iommu_domain_alloc(bridge->bus);
+	if (!domain) {
+		dev_err(bridge, "can't alloc iommu domain\n");
+		return -ENOMEM;
+	}
+
+	//iommu_set_fault_handler(domain, rproc_iommu_fault, rproc);
+
+	ret = iommu_attach_device(domain, bridge);
+	if (ret) {
+		dev_err(bridge, "can't attach iommu device: %d\n", ret);
+		goto free_domain;
+	}
+
+	dsp->domain = domain;
+
+	return 0;
+
+free_domain:
+	iommu_domain_free(domain);
+
+	return ret;
+}
+
+static void bridge_detach_iommu(struct dsp_device *dsp)
+{
+	struct iommu_domain *domain = dsp->domain;
+
+	if (!domain)
+		return;
+
+	iommu_detach_device(domain, bridge);
+	iommu_domain_free(domain);
+}
+#endif
+
 /**
  * omap3_bridge_startup() - perform low lever initializations
  * @pdev:      pointer to platform device
@@ -402,11 +475,10 @@ static struct notifier_block iva_clk_notifier = {
  * Initializes recovery, PM and DVFS required data, before calling
  * clk and memory init routines.
  */
-static int omap3_bridge_startup(struct platform_device *pdev)
+static int omap3_bridge_startup(struct platform_device *dev)
 {
-	struct omap_dsp_platform_data *pdata = pdev->dev.platform_data;
-	struct drv_data *drv_datap = NULL;
-	u32 phys_membase, phys_memsize;
+	struct omap_dsp_platform_data *pdata = dev->dev.platform_data;
+	struct dsp_device *dsp = NULL;
 	int err;
 #ifdef CONFIG_TIDSPBRIDGE_DVFS
 	int i = 0;
@@ -437,54 +509,50 @@ static int omap3_bridge_startup(struct platform_device *pdev)
 
 	dsp_clk_init();
 
-	drv_datap = kzalloc(sizeof(struct drv_data), GFP_KERNEL);
-	if (!drv_datap) {
+	dsp = kzalloc(sizeof(struct dsp_device), GFP_KERNEL);
+	if (!dsp) {
 		err = -ENOMEM;
 		goto err1;
 	}
 
-	drv_datap->shm_size = shm_size;
-	drv_datap->tc_wordswapon = tc_wordswapon;
+	dsp->shm_size = shm_size;
+	dsp->tc_wordswapon = tc_wordswapon;
 
 	if (base_img) {
-		drv_datap->base_img = kstrdup(base_img, GFP_KERNEL);
-		if (!drv_datap->base_img) {
+		dsp->base_img = kstrdup(base_img, GFP_KERNEL);
+		if (!dsp->base_img) {
 			err = -ENOMEM;
 			goto err2;
 		}
 	}
 
-	dev_set_drvdata(bridge, drv_datap);
+	platform_set_drvdata(dev, dsp);
 
 	if (shm_size < 0x10000) {	/* 64 KB */
 		err = -EINVAL;
 		pr_err("%s: shm size must be at least 64 KB\n", __func__);
 		goto err3;
 	}
-	dev_dbg(bridge, "%s: requested shm_size = 0x%x\n", __func__, shm_size);
-
-	phys_membase = pdata->phys_mempool_base;
-	phys_memsize = pdata->phys_mempool_size;
-	if (phys_membase > 0 && phys_memsize > 0)
-		mem_ext_phys_pool_init(phys_membase, phys_memsize);
 
 	if (tc_wordswapon)
 		dev_dbg(bridge, "%s: TC Word Swap is enabled\n", __func__);
 
+	err = bridge_attach_iommu(dsp);
+	if (err)
+		goto err3;
+
 	driver_context = dsp_init(&err);
 	if (err) {
 		pr_err("DSP Bridge driver initialization failed\n");
-		goto err4;
+		goto err3;
 	}
 
 	return 0;
 
-err4:
-	mem_ext_phys_pool_release();
 err3:
-	kfree(drv_datap->base_img);
+	kfree(dsp->base_img);
 err2:
-	kfree(drv_datap);
+	kfree(dsp);
 err1:
 #ifdef CONFIG_TIDSPBRIDGE_DVFS
 	cpufreq_unregister_notifier(&iva_clk_notifier,
@@ -500,10 +568,28 @@ static int omap34_xx_bridge_probe(struct platform_device *pdev)
 	int err;
 	dev_t dev = 0;
 
+	struct device_node *np = pdev->dev.of_node;
+	if (!np || !pdev->dev.platform_data) {
+		dev_err(&pdev->dev, "missing device tree or platform data\n");
+		return -EINVAL;
+	}
+
 	omap_dspbridge_dev = pdev;
 
 	/* Global bridge device */
 	bridge = &omap_dspbridge_dev->dev;
+
+	err = dma_set_coherent_mask(bridge, DMA_BIT_MASK(32));
+	if (err) {
+		dev_err(bridge, "dma_set_coherent_mask: %d\n", err);
+		return err;
+	}
+
+	err = of_reserved_mem_device_init(&pdev->dev);
+	if (err) {
+		dev_err(bridge, "of_reserved_mem_device_init: %d\n", err);
+		return err;
+	}
 
 	/* Bridge low level initializations */
 	err = omap3_bridge_startup(pdev);
@@ -553,14 +639,15 @@ static int omap34_xx_bridge_remove(struct platform_device *pdev)
 {
 	dev_t devno;
 	int status = 0;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *dsp = dev_get_drvdata(bridge);
 
 	/* Retrieve the Object handle from the driver data */
-	if (!drv_datap || !drv_datap->drv_object) {
+	if (!dsp || !dsp->drv_object) {
 		status = -ENODATA;
 		pr_err("%s: Failed to retrieve the object handle\n", __func__);
 		goto func_cont;
 	}
+
 
 #ifdef CONFIG_TIDSPBRIDGE_DVFS
 	if (cpufreq_unregister_notifier(&iva_clk_notifier,
@@ -573,13 +660,16 @@ static int omap34_xx_bridge_remove(struct platform_device *pdev)
 		/* Put the DSP in reset state */
 		dsp_deinit(driver_context);
 		driver_context = 0;
+		bridge_detach_iommu(dsp);
 	}
 
-	kfree(drv_datap);
+	kfree(dsp);
 	dev_set_drvdata(bridge, NULL);
 
 func_cont:
-	mem_ext_phys_pool_release();
+
+	of_reserved_mem_device_release(bridge);
+
 
 	dsp_clk_exit();
 
@@ -590,8 +680,8 @@ func_cont:
 		/* remove the device from sysfs */
 		device_destroy(bridge_class, MKDEV(driver_major, 0));
 		class_destroy(bridge_class);
-
 	}
+
 	return status;
 }
 
@@ -623,9 +713,15 @@ static int bridge_resume(struct platform_device *pdev)
 }
 #endif
 
+static const struct of_device_id omap_iva2_of_match[] = {
+	{ .compatible = "ti,iva2.2", },
+	{},
+};
+
 static struct platform_driver bridge_driver = {
 	.driver = {
 		   .name = "omap-dsp",
+		   .of_match_table = omap_iva2_of_match,
 		   },
 	.probe = omap34_xx_bridge_probe,
 	.remove = omap34_xx_bridge_remove,

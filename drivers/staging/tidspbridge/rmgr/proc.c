@@ -272,7 +272,7 @@ proc_attach(u32 processor_id,
 	struct proc_object *p_proc_object = NULL;
 	struct mgr_object *hmgr_obj = NULL;
 	struct drv_object *hdrv_obj = NULL;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 	u8 dev_type;
 
 	if (pr_ctxt->processor) {
@@ -381,7 +381,7 @@ static int get_exec_file(struct cfg_devnode *dev_node_obj,
 				u32 size, char *exec_file)
 {
 	u8 dev_type;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 	dev_get_dev_type(hdev_obj, (u8 *) &dev_type);
 
@@ -425,7 +425,7 @@ int proc_auto_start(struct cfg_devnode *dev_node_obj,
 	char sz_exec_file[MAXCMDLINELEN];
 	char *argv[2];
 	struct mgr_object *hmgr_obj = NULL;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 	u8 dev_type;
 
 	/* Create a Dummy PROC Object */
@@ -1017,7 +1017,7 @@ int proc_load(void *hprocessor, const s32 argc_index,
 	u32 dw_ext_end;
 	u32 proc_id;
 	int brd_state;
-	struct drv_data *drv_datap = dev_get_drvdata(bridge);
+	struct dsp_device *drv_datap = dev_get_drvdata(bridge);
 
 #ifdef OPT_LOAD_TIME_INSTRUMENTATION
 	struct timeval tv1;
@@ -1417,7 +1417,6 @@ int proc_reserve_memory(void *hprocessor, u32 ul_size,
 	struct dmm_object *dmm_mgr;
 	int status = 0;
 	struct proc_object *p_proc_object = (struct proc_object *)hprocessor;
-	struct dmm_rsv_object *rsv_obj;
 
 	if (!p_proc_object) {
 		status = -EFAULT;
@@ -1433,19 +1432,6 @@ int proc_reserve_memory(void *hprocessor, u32 ul_size,
 	status = dmm_reserve_memory(dmm_mgr, ul_size, (u32 *) pp_rsv_addr);
 	if (status != 0)
 		goto func_end;
-
-	/*
-	 * A successful reserve should be followed by insertion of rsv_obj
-	 * into dmm_rsv_list, so that reserved memory resource tracking
-	 * remains uptodate
-	 */
-	rsv_obj = kmalloc(sizeof(struct dmm_rsv_object), GFP_KERNEL);
-	if (rsv_obj) {
-		rsv_obj->dsp_reserved_addr = (u32) *pp_rsv_addr;
-		spin_lock(&pr_ctxt->dmm_rsv_lock);
-		list_add(&rsv_obj->link, &pr_ctxt->dmm_rsv_list);
-		spin_unlock(&pr_ctxt->dmm_rsv_lock);
-	}
 
 func_end:
 	dev_dbg(bridge, "%s: hprocessor: 0x%p ul_size: 0x%x pp_rsv_addr: 0x%p "
@@ -1650,7 +1636,6 @@ int proc_un_reserve_memory(void *hprocessor, void *prsv_addr,
 	struct dmm_object *dmm_mgr;
 	int status = 0;
 	struct proc_object *p_proc_object = (struct proc_object *)hprocessor;
-	struct dmm_rsv_object *rsv_obj;
 
 	if (!p_proc_object) {
 		status = -EFAULT;
@@ -1666,21 +1651,6 @@ int proc_un_reserve_memory(void *hprocessor, void *prsv_addr,
 	status = dmm_un_reserve_memory(dmm_mgr, (u32) prsv_addr);
 	if (status != 0)
 		goto func_end;
-
-	/*
-	 * A successful unreserve should be followed by removal of rsv_obj
-	 * from dmm_rsv_list, so that reserved memory resource tracking
-	 * remains uptodate
-	 */
-	spin_lock(&pr_ctxt->dmm_rsv_lock);
-	list_for_each_entry(rsv_obj, &pr_ctxt->dmm_rsv_list, link) {
-		if (rsv_obj->dsp_reserved_addr == (u32) prsv_addr) {
-			list_del(&rsv_obj->link);
-			kfree(rsv_obj);
-			break;
-		}
-	}
-	spin_unlock(&pr_ctxt->dmm_rsv_lock);
 
 func_end:
 	dev_dbg(bridge, "%s: hprocessor: 0x%p prsv_addr: 0x%p status: 0x%x\n",
