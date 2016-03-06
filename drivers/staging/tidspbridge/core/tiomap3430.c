@@ -988,7 +988,10 @@ static int bridge_brd_mem_un_map(struct bridge_dev_context *dev_ctxt,
 				     u32 da, u32 size)
 {
 	/* FIXME - we need put_pages() here !!! */
-	return iommu_unmap(iommu_get_domain_for_dev(bridge), da, size);
+	size_t unmapped =
+			iommu_unmap(iommu_get_domain_for_dev(bridge), da, size);
+
+	return IS_ERR_VALUE(unmapped) ? (int)unmapped : 0;
 }
 
 static int get_io_pages(struct mm_struct *mm, u32 uva, unsigned pages,
