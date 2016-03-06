@@ -258,7 +258,7 @@ void bridge_deh_notify(struct deh_mgr *deh, int event, int info)
 	if (dev_context->brd_state != BRD_ERROR) {
 		ntfy_notify(deh->ntfy_obj, event);
 #ifdef CONFIG_TIDSPBRIDGE_RECOVERY
-		//bridge_recover_schedule();
+		bridge_recover_schedule();
 #endif
 	}
 
