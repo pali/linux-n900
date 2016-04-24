@@ -1359,7 +1359,7 @@ enum PVRSRV_ERROR OSReleasePhysPageAddr(void *hOSWrapMem, IMG_BOOL bUseLock)
 				{
 					SetPageDirty(psPage);
 				}
-				page_cache_release(psPage);
+				put_page(psPage);
 			}
 			break;
 		}
@@ -1447,7 +1447,7 @@ enum PVRSRV_ERROR OSAcquirePhysPageAddr(void *pvCPUVAddr,
 		down_read(&current->mm->mmap_sem);
 
 	iNumPagesMapped =
-	    get_user_pages(current, current->mm, ulStartAddr, psInfo->iNumPages,
+	    get_user_pages(ulStartAddr, psInfo->iNumPages,
 			   1, 0, psInfo->ppsPages, NULL);
 
 	if (bUseLock)
@@ -1463,7 +1463,7 @@ enum PVRSRV_ERROR OSAcquirePhysPageAddr(void *pvCPUVAddr,
 			       psInfo->iNumPages, iNumPagesMapped);
 
 			for (ui = 0; ui < iNumPagesMapped; ui++)
-				page_cache_release(psInfo->ppsPages[ui]);
+				put_page(psInfo->ppsPages[ui]);
 
 			goto error_free;
 		}
