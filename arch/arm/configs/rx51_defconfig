@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm 4.6.0-rc1 Kernel Configuration
+# Linux/arm 4.6.0-rc4 Kernel Configuration
 #
 CONFIG_ARM=y
 CONFIG_ARM_HAS_SG_CHAIN=y
@@ -2305,7 +2305,6 @@ CONFIG_V4L_PLATFORM_DRIVERS=y
 # CONFIG_VIDEO_OMAP2_VOUT is not set
 CONFIG_VIDEO_OMAP3=m
 CONFIG_VIDEO_OMAP3_DEBUG=y
-CONFIG_VIDEO_BUS_SWITCH=m
 # CONFIG_SOC_CAMERA is not set
 # CONFIG_VIDEO_XILINX is not set
 # CONFIG_V4L_MEM2MEM_DRIVERS is not set
@@ -2384,7 +2383,6 @@ CONFIG_MEDIA_ATTACH=y
 # CONFIG_VIDEO_BT866 is not set
 # CONFIG_VIDEO_KS0127 is not set
 # CONFIG_VIDEO_ML86V7667 is not set
-CONFIG_VIDEO_AD5820=m
 # CONFIG_VIDEO_SAA7110 is not set
 # CONFIG_VIDEO_SAA711X is not set
 # CONFIG_VIDEO_TC358743 is not set
@@ -2437,8 +2435,6 @@ CONFIG_VIDEO_SMIAPP_PLL=m
 # CONFIG_VIDEO_S5K6A3 is not set
 # CONFIG_VIDEO_S5K4ECGX is not set
 # CONFIG_VIDEO_S5K5BAF is not set
-CONFIG_VIDEO_SMIAREGS=m
-CONFIG_VIDEO_ET8EK8=m
 CONFIG_VIDEO_SMIAPP=m
 # CONFIG_VIDEO_S5C73M3 is not set
 
@@ -2529,7 +2525,7 @@ CONFIG_MEDIA_TUNER=m
 # CONFIG_DRM is not set
 
 #
-# ACP Configuration
+# ACP (Audio CoProcessor) Configuration
 #
 # CONFIG_DRM_AMD_ACP is not set
 
@@ -3629,7 +3625,6 @@ CONFIG_TWL4030_MADC=y
 # CONFIG_ADIS16400 is not set
 # CONFIG_ADIS16480 is not set
 # CONFIG_KMX61 is not set
-# CONFIG_INV_MPU6050_I2C is not set
 # CONFIG_INV_MPU6050_SPI is not set
 
 #
