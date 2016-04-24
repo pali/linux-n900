@@ -929,7 +929,7 @@ static int bridge_brd_mem_map(struct bridge_dev_context *dev_ctxt, u32 uva,
 	if (vma->vm_flags & VM_IO)
 		i = get_io_pages(mm, uva, pages, usr_pgs);
 	else
-		i = get_user_pages(current, mm, uva, pages, w, 1, usr_pgs,
+		i = get_user_pages(uva, pages, w, 1, usr_pgs,
 				   NULL);
 
 	up_read(&mm->mmap_sem);
