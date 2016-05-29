@@ -503,20 +503,35 @@ void __iomem *_IORemapWrapper(struct IMG_CPU_PHYADDR BasePAddr,
 	switch (ui32MappingFlags & PVRSRV_HAP_CACHETYPE_MASK) {
 	case PVRSRV_HAP_CACHED:
 #if defined(__arm__)
-		pvIORemapCookie = ioremap_cache(BasePAddr.uiAddr, ui32Bytes);
+		if (pfn_valid(__phys_to_pfn(BasePAddr.uiAddr)))
+			pvIORemapCookie = memremap(BasePAddr.uiAddr, ui32Bytes,
+						   MEMREMAP_WB);
+		else
+			pvIORemapCookie = ioremap_cache(BasePAddr.uiAddr,
+							ui32Bytes);
 #else
 		pvIORemapCookie = ioremap(BasePAddr.uiAddr, ui32Bytes);
 #endif
 		break;
 	case PVRSRV_HAP_WRITECOMBINE:
 #if defined(__arm__)
-		pvIORemapCookie = ioremap_nocache(BasePAddr.uiAddr, ui32Bytes);
+		if (pfn_valid(__phys_to_pfn(BasePAddr.uiAddr)))
+			pvIORemapCookie = memremap(BasePAddr.uiAddr, ui32Bytes,
+						   MEMREMAP_WB);
+		else
+			pvIORemapCookie = ioremap_nocache(BasePAddr.uiAddr,
+							  ui32Bytes);
 #else
 		pvIORemapCookie = ioremap_nocache(BasePAddr.uiAddr, ui32Bytes);
 #endif
 		break;
 	case PVRSRV_HAP_UNCACHED:
-		pvIORemapCookie = ioremap_nocache(BasePAddr.uiAddr, ui32Bytes);
+		if (pfn_valid(__phys_to_pfn(BasePAddr.uiAddr)))
+			pvIORemapCookie = memremap(BasePAddr.uiAddr, ui32Bytes,
+						   MEMREMAP_WB);
+		else
+			pvIORemapCookie = ioremap_nocache(BasePAddr.uiAddr,
+							  ui32Bytes);
 		break;
 	default:
 		PVR_DPF(PVR_DBG_ERROR,
@@ -544,7 +559,7 @@ void _IOUnmapWrapper(void __iomem *pvIORemapCookie, char *pszFileName,
 				  (void __force *)pvIORemapCookie,
 				  pszFileName, ui32Line);
 #endif
-	iounmap(pvIORemapCookie);
+	memunmap(pvIORemapCookie);
 }
 
 struct LinuxMemArea *NewIORemapLinuxMemArea(struct IMG_CPU_PHYADDR BasePAddr,
