@@ -28,6 +28,7 @@
 #include <linux/slab.h>
 #include <linux/mfd/syscon.h>
 #include <linux/regmap.h>
+#include <linux/of_reserved_mem.h>
 
 #include <linux/platform_data/omapdss.h>
 #include "omap_hwmod.h"
@@ -665,6 +666,9 @@ int __init omapdss_init_of(void)
 		pr_err("Unable to register omapfb device\n");
 		return r;
 	}
+
+	/* Init fb reserved memory, there may be none so ignore the result */
+	of_reserved_mem_device_init(&pdev->dev);
 
 	/* create V4L2 display device */
 	r = omap_init_vout();
