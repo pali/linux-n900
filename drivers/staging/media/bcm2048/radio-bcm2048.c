@@ -2777,9 +2777,18 @@ static const struct i2c_device_id bcm2048_id[] = {
 };
 MODULE_DEVICE_TABLE(i2c, bcm2048_id);
 
+#ifdef CONFIG_OF
+static const struct of_device_id bcm2048_of_match_table[] = {
+	{ .compatible = "brcm,bcm2048-radio" },
+	{},
+};
+MODULE_DEVICE_TABLE(of, bcm2048_of_match_table);
+#endif
+
 static struct i2c_driver bcm2048_i2c_driver = {
 	.driver		= {
 		.name	= BCM2048_DRIVER_NAME,
+		.of_match_table = of_match_ptr(bcm2048_of_match_table),
 	},
 	.probe		= bcm2048_i2c_driver_probe,
 	.remove		= __exit_p(bcm2048_i2c_driver_remove),
