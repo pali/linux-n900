@@ -46,6 +46,7 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 #include <media/v4l2-common.h>
+#include <media/v4l2-device.h>
 #include <media/v4l2-ioctl.h>
 #include "radio-bcm2048.h"
 
@@ -278,6 +279,7 @@ struct region_info {
 
 struct bcm2048_device {
 	struct i2c_client *client;
+	struct v4l2_device v4l2_dev;
 	struct video_device videodev;
 	struct work_struct work;
 	struct completion compl;
@@ -2695,12 +2697,19 @@ static int bcm2048_i2c_driver_probe(struct i2c_client *client,
 		dev_warn(&client->dev, "IRQ not configured. Using timeouts.\n");
 	}
 
+	if (v4l2_device_register(&client->dev, &bdev->v4l2_dev)) {
+		dev_err(&client->dev, "Failed to register v4l2 device.\n");
+		err = -EIO;
+		goto free_irq;
+	}
+
 	bdev->videodev = bcm2048_viddev_template;
+	bdev->videodev.v4l2_dev = &bdev->v4l2_dev;
 	video_set_drvdata(&bdev->videodev, bdev);
 	if (video_register_device(&bdev->videodev, VFL_TYPE_RADIO, radio_nr)) {
 		dev_err(&client->dev, "Could not register video device.\n");
 		err = -EIO;
-		goto free_irq;
+		goto free_v4l2;
 	}
 
 	err = bcm2048_sysfs_register_properties(bdev);
@@ -2721,6 +2730,8 @@ free_sysfs:
 	bcm2048_sysfs_unregister_properties(bdev, ARRAY_SIZE(attrs));
 free_registration:
 	video_unregister_device(&bdev->videodev);
+free_v4l2:
+	v4l2_device_unregister(&bdev->v4l2_dev);
 free_irq:
 	if (client->irq)
 		free_irq(client->irq, bdev);
@@ -2741,6 +2752,7 @@ static int __exit bcm2048_i2c_driver_remove(struct i2c_client *client)
 	if (bdev) {
 		bcm2048_sysfs_unregister_properties(bdev, ARRAY_SIZE(attrs));
 		video_unregister_device(&bdev->videodev);
+		v4l2_device_unregister(&bdev->v4l2_dev);
 
 		if (bdev->power_state)
 			bcm2048_set_power_state(bdev, BCM2048_POWER_OFF);
