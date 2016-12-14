@@ -260,6 +260,11 @@ const struct machine_desc * __init setup_machine_fdt(unsigned int dt_phys)
 
 	early_init_dt_scan_nodes();
 
+#ifdef CONFIG_CMDLINE
+	if (!boot_command_line[0])
+		strlcpy(boot_command_line, CONFIG_CMDLINE, COMMAND_LINE_SIZE);
+#endif
+
 	/* Change machine number to match the mdesc we're using */
 	__machine_arch_type = mdesc->nr;
 
