@@ -32,6 +32,8 @@
 #include <media/v4l2-device.h>
 #include <media/v4l2-subdev.h>
 
+#include <uapi/linux/ad5820.h>
+
 #define AD5820_NAME		"ad5820"
 
 /* Register definitions */
@@ -157,11 +159,22 @@ static int ad5820_set_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct ad5820_device *coil =
 		container_of(ctrl->handler, struct ad5820_device, ctrls);
+	u32 code;
 
 	switch (ctrl->id) {
 	case V4L2_CID_FOCUS_ABSOLUTE:
 		coil->focus_absolute = ctrl->val;
 		return ad5820_update_hw(coil);
+
+	case V4L2_CID_AD5820_RAMP_TIME:
+		code = RAMP_US_TO_CODE(ctrl->val);
+		ctrl->val = CODE_TO_RAMP_US(code);
+		coil->focus_ramp_time = ctrl->val;
+		break;
+
+	case V4L2_CID_AD5820_RAMP_MODE:
+		coil->focus_ramp_mode = ctrl->val;
+		break;
 	}
 
 	return 0;
@@ -171,10 +184,42 @@ static const struct v4l2_ctrl_ops ad5820_ctrl_ops = {
 	.s_ctrl = ad5820_set_ctrl,
 };
 
+static const char *ad5820_focus_menu[] = {
+	"Linear ramp",
+	"64/16 ramp",
+};
+
+static const struct v4l2_ctrl_config ad5820_ctrls[] = {
+	{
+		.ops		= &ad5820_ctrl_ops,
+		.id		= V4L2_CID_AD5820_RAMP_TIME,
+		.type		= V4L2_CTRL_TYPE_INTEGER,
+		.name		= "Focus ramping time [us]",
+		.min		= 0,
+		.max		= 3200,
+		.step		= 50,
+		.def		= 0,
+		.flags		= 0,
+	},
+	{
+		.ops		= &ad5820_ctrl_ops,
+		.id		= V4L2_CID_AD5820_RAMP_MODE,
+		.type		= V4L2_CTRL_TYPE_MENU,
+		.name		= "Focus ramping mode",
+		.min		= 0,
+		.max		= ARRAY_SIZE(ad5820_focus_menu),
+		.step		= 0,
+		.def		= 0,
+		.flags		= 0,
+		.qmenu		= ad5820_focus_menu,
+	},
+};
 
 static int ad5820_init_controls(struct ad5820_device *coil)
 {
-	v4l2_ctrl_handler_init(&coil->ctrls, 1);
+	size_t i;
+
+	v4l2_ctrl_handler_init(&coil->ctrls, ARRAY_SIZE(ad5820_ctrls) + 1);
 
 	/*
 	 * V4L2_CID_FOCUS_ABSOLUTE
@@ -190,6 +235,10 @@ static int ad5820_init_controls(struct ad5820_device *coil)
 	 */
 	v4l2_ctrl_new_std(&coil->ctrls, &ad5820_ctrl_ops,
 			  V4L2_CID_FOCUS_ABSOLUTE, 0, 1023, 1, 0);
+
+	/* V4L2_CID_AD5820_* */
+	for (i = 0; i < ARRAY_SIZE(ad5820_ctrls); ++i)
+		v4l2_ctrl_new_custom(&coil->ctrls, &ad5820_ctrls[i], NULL);
 
 	if (coil->ctrls.error)
 		return coil->ctrls.error;
