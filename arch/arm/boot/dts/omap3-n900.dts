@@ -752,6 +752,12 @@
 		st,max-limit-y = <32>;
 		st,max-limit-z = <32>;
 	};
+
+	bcm2048: bcm2048@22 {
+		compatible = "brcm,bcm2048-radio";
+		reg = <0x22>;
+		interrupts-extended = <&gpio2 11 IRQ_TYPE_EDGE_FALLING>; /* 43 */
+	};
 };
 
 &mmc1 {
