@@ -2692,26 +2692,26 @@ static int bcm2048_i2c_driver_probe(struct i2c_client *client,
 		}
 		dev_dbg(&client->dev, "IRQ requested.\n");
 	} else {
-		dev_dbg(&client->dev, "IRQ not configured. Using timeouts.\n");
+		dev_warn(&client->dev, "IRQ not configured. Using timeouts.\n");
 	}
 
 	bdev->videodev = bcm2048_viddev_template;
 	video_set_drvdata(&bdev->videodev, bdev);
 	if (video_register_device(&bdev->videodev, VFL_TYPE_RADIO, radio_nr)) {
-		dev_dbg(&client->dev, "Could not register video device.\n");
+		dev_err(&client->dev, "Could not register video device.\n");
 		err = -EIO;
 		goto free_irq;
 	}
 
 	err = bcm2048_sysfs_register_properties(bdev);
 	if (err < 0) {
-		dev_dbg(&client->dev, "Could not register sysfs interface.\n");
+		dev_err(&client->dev, "Could not register sysfs interface.\n");
 		goto free_registration;
 	}
 
 	err = bcm2048_probe(bdev);
 	if (err < 0) {
-		dev_dbg(&client->dev, "Failed to probe device information.\n");
+		dev_err(&client->dev, "Failed to probe device information.\n");
 		goto free_sysfs;
 	}
 
