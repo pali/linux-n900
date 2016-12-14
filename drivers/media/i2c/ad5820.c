@@ -47,7 +47,6 @@
 
 struct ad5820_device {
 	struct v4l2_subdev subdev;
-	struct ad5820_platform_data *platform_data;
 	struct regulator *vana;
 
 	struct v4l2_ctrl_handler ctrls;
