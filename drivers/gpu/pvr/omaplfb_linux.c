@@ -48,7 +48,7 @@
 #include "omaplfb.h"
 #include "pvrmodule.h"
 
-#include <video/omapdss.h>
+#include <video/omapfb_dss.h>
 
 MODULE_SUPPORTED_DEVICE(DEVNAME);
 
